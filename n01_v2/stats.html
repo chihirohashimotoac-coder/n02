@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 1996-2015 by Ohno Tomoaki. All rights reserved. -->
+<html lang="ja">
+<head>
+	<title>n02 - Stats</title>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black">
+	<meta name="mobile-web-app-capable" content="yes" />
+
+	<link rel="apple-touch-icon" href="image/icon.png">
+	<link rel="shortcut icon" sizes="114x114" href="image/icon.png">
+	<link rel="stylesheet" type="text/css" href="css/reset.css">
+	<link rel="stylesheet" type="text/css" href="css/n01_header.css">
+	<link rel="stylesheet" type="text/css" href="css/n01_stats.css">
+	<script type="text/javascript" src="js/jquery-2.1.4.min.js"></script>
+	<script type="text/javascript" src="js/n01_util.js"></script>
+	<script type="text/javascript" src="js/n01_data.js"></script>
+	<script type="text/javascript" src="js/n01_stats.js"></script>
+</head>
+<body>
+	<noscript>JavaScript is required to access this page. Please enable JavaScript.</noscript>
+	<header id="header" style="display:none;">
+		<div id="header_back">
+			<table id="header_table">
+				<tbody>
+					<tr>
+						<td class="td_button"><div id="button_cancel" class="button">Return</div></td>
+						<td><div id="header_title">Stats</div></td>
+						<td class="td_button"><div id="button_history" class="button">Scores</div></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	</header>
+
+	<article id="article" style="display:none;">
+		<table class="name_table">
+			<tbody>
+				<tr>
+					<td id="p1_name" class="p_name"></td>
+					<td class="name_center"></td>
+					<td id="p2_name" class="p_name"></td>
+				</tr>
+			</tbody>
+		</table>
+
+		<table class="title_table">
+			<tbody>
+				<tr>
+					<td class="subtitle">Totals</td>
+				</tr>
+			</tbody>
+		</table>
+		<table class="stats_table">
+			<tbody>
+				<tr>
+					<td id="p1_legs" class="left"></td>
+					<td class="center">Legs</td>
+					<td id="p2_legs" class="right"></td>
+				</tr>
+				<tr>
+					<td id="p1_ton00" class="left"></td>
+					<td class="center">100+</td>
+					<td id="p2_ton00" class="right"></td>
+				</tr>
+				<tr>
+					<td id="p1_ton40" class="left"></td>
+					<td class="center">140+</td>
+					<td id="p2_ton40" class="right"></td>
+				</tr>
+				<tr>
+					<td id="p1_ton80" class="left"></td>
+					<td class="center">180's</td>
+					<td id="p2_ton80" class="right"></td>
+				</tr>
+				<tr>
+					<td id="p1_highout" class="left"></td>
+					<td class="center">High Finish</td>
+					<td id="p2_highout" class="right"></td>
+				</tr>
+				<tr>
+					<td id="p1_best" class="left"></td>
+					<td class="center">Best Leg</td>
+					<td id="p2_best" class="right"></td>
+				</tr>
+				<tr>
+					<td id="p1_worst" class="left"></td>
+					<td class="center">Worst Leg</td>
+					<td id="p2_worst" class="right"></td>
+				</tr>
+			</tbody>
+		</table>
+
+		<table class="title_table">
+			<tbody>
+				<tr>
+					<td class="subtitle">Averages</td>
+				</tr>
+			</tbody>
+		</table>
+		<table class="stats_table">
+			<tbody>
+				<tr>
+					<td id="p1_darts" class="left">0.00</td>
+					<td class="center">Darts</td>
+					<td id="p2_darts" class="right">0.00</td>
+				</tr>
+				<tr>
+					<td id="p1_score" class="left">0.00</td>
+					<td class="center">Score</td>
+					<td id="p2_score" class="right">0.00</td>
+				</tr>
+				<tr>
+					<td id="p1_first9" class="left">0.00</td>
+					<td class="center">First 9</td>
+					<td id="p2_first9" class="right">0.00</td>
+				</tr>
+			</tbody>
+		</table>
+	</article>
+</body>
+</html>

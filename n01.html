@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 1996-2017 by Ohno Tomoaki. All rights reserved. -->
+<html lang="ja">
+<head>
+	<title>n02</title>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black">
+	<meta name="mobile-web-app-capable" content="yes" />
+
+	<link rel="apple-touch-icon" href="n01_v2/image/icon.png">
+	<link rel="shortcut icon" sizes="114x114" href="n01_v2/image/icon.png">
+	<link rel="stylesheet" type="text/css" href="n01_v2/css/reset.css">
+	<link rel="stylesheet" type="text/css" href="n01_v2/css/n01.css">
+	<script type="text/javascript" src="n01_v2/js/jquery-2.1.4.min.js"></script>
+	<script type="text/javascript" src="n01_v2/js/n01_util.js"></script>
+	<script type="text/javascript" src="n01_v2/js/n01_data.js"></script>
+	<script type="text/javascript" src="n01_v2/js/n01_com.js"></script>
+	<script type="text/javascript" src="n01_v2/js/n01.js"></script>
+</head>
+<body onload="loaded()" onContextmenu="return false" ontouchstart="">
+	<noscript>JavaScript is required to access this page. Please enable JavaScript.</noscript>
+	<header id="header" style="display:none;">
+		<table id="header_table">
+			<tbody>
+				<tr>
+					<td id="p1_name" class="player_name"></td>
+					<td id="legs"></td>
+					<td id="p2_name" class="player_name"></td>
+				</tr>
+			</tbody>
+		</table>
+	</header>
+
+	<article id="article" style="display:none;">
+		<table id="score_table" class="score_table">
+			<thead>
+				<tr>
+					<th class="score_input" round="-1">Scored</th>
+					<th class="score_left" round="-1">To Go</th>
+					<th class="score_round"></th>
+					<th class="score_input" round="-1">Scored</th>
+					<th class="score_left" round="-1">To Go</th>
+				</tr>
+			</thead>
+			<tbody id="score_body">
+			</tbody>
+		</table>
+		<table id="hidden_table" class="hidden_table" style="display:none;">
+			<tbody>
+				<tr id="score_list_start">
+					<td class="score_none"></td>
+					<td class="p1left"></td>
+					<td class="score_round"></td>
+					<td class="score_none"></td>
+					<td class="p2left"></td>
+				</tr>
+				<tr id="score_list_score">
+					<td class="score_input p1score" player="0"></td>
+					<td class="score_left p1left" player="0"></td>
+					<td class="score_round"></td>
+					<td class="score_input p2score" player="1"></td>
+					<td class="score_left p2left" player="1"></td>
+				</tr>
+			</tbody>
+		</table>
+	</article>
+	<footer id="footer" style="display:none;">
+		<table id="left_table" style="display:none;">
+			<tr>
+				<td id="p1left_big_td" class="score_left_big"><div id="p1left_big"></div></td>
+				<td id="p2left_big_td" class="score_left_big"><div id="p2left_big"></div></td>
+			</tr>
+		</table>
+		<table id="menu_table">
+			<tr>
+				<td id="menu_new">New</td>
+				<td id="menu_finish">Finish</td>
+				<td id="menu_stats">Stats</td>
+				<td id="menu_menu"><img src="n01_v2/image/menuButton.svg" id="img_menuButton" alt="menu"></td>
+			</tr>
+		</table>
+		<table id="key_table">
+			<tr>
+				<td id="key_1">1</td>
+				<td id="key_2">2</td>
+				<td id="key_3">3</td>
+			</tr>
+			<tr>
+				<td id="key_4">4</td>
+				<td id="key_5">5</td>
+				<td id="key_6">6</td>
+			</tr>
+			<tr>
+				<td id="key_7">7</td>
+				<td id="key_8">8</td>
+				<td id="key_9">9</td>
+			</tr>
+			<tr>
+				<td id="key_delete"><img src="n01_v2/image/delete.svg" id="img_delete" alt="delete"></td>
+				<td id="key_0">0</td>
+				<td id="key_enter">Enter</td>
+			</tr>
+		</table>
+	</footer>
+
+	<div id="general_menu" class="modal_window" style="display:none;">
+		<ul class="menu_ul">
+			<li id="menu_remaining_score">Enter as Remaining Score</li>
+			<li id="menu_exchange_scores">Exchange Scores</li>
+			<li id="menu_previous_leg">Previous Leg</li>
+			<li id="menu_end_leg">End Leg</li>
+			<li id="menu_option">Options</li>
+			<li id="menu_cancel">Cancel</li>
+		</ul>
+	</div>
+	<div id="finish_menu" class="modal_window" style="display:none;">
+		<ul class="menu_ul">
+			<li id="finish_first">First dart</li>
+			<li id="finish_second">Second dart</li>
+			<li id="finish_third">Third dart</li>
+			<li id="finish_cancel">Cancel</li>
+		</ul>
+	</div>
+	<div id="middle_menu" class="modal_window" style="display:none;">
+		<ul class="menu_ul">
+			<li id="middle_p1win">Player 1 Win</li>
+			<li id="middle_p2win">Player 2 Win</li>
+			<li id="middle_draw">Draw</li>
+			<li id="middle_cancel">Cancel</li>
+		</ul>
+	</div>
+	<div id="popup_message" class="modal_window" style="display:none;">
+		<table class="message_table">
+			<tr><td id="msg_title" class="message_title" colspan="2"></td></tr>
+			<tr><td id="msg_text" class="message_msg" colspan="2"></td></tr>
+			<tr>
+				<td class="message_btn_left"><div id="msg_cancel" class="msg_button">Cancel</div></td>
+				<td class="message_btn_right"><div id="msg_ok" class="msg_button">OK</div></td>
+			</tr>
+		</table>
+	</div>
+	<div id="popup_message_com" class="modal_window" style="display:none;">
+		<table class="message_table">
+			<tr><td id="msg_com_title" class="message_title"></td></tr>
+			<tr><td id="msg_com_text" class="message_msg"></td></tr>
+			<tr>
+				<td class="message_btn_ok"><div id="msg_com_ok" class="msg_button">OK</div></td>
+			</tr>
+		</table>
+	</div>
+	<div id="com_throw" class="throw_window" style="display:none;">
+		<div class="throw_div"><table class="throw_table">
+			<tr>
+				<td id="com_throw_1" class="throw"></td>
+				<td id="com_throw_2" class="throw"></td>
+				<td id="com_throw_3" class="throw"></td>
+			</tr>
+		</table></div>
+	</div>
+	<canvas id="canvas_ton" style="display:none;"></canvas>
+</body>
+</html>

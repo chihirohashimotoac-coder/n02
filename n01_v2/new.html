@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 1996-2015 by Ohno Tomoaki. All rights reserved. -->
+<html lang="ja">
+<head>
+	<title>n02 - New Game</title>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black">
+	<meta name="mobile-web-app-capable" content="yes" />
+
+	<link rel="apple-touch-icon" href="image/icon.png">
+	<link rel="shortcut icon" sizes="114x114" href="image/icon.png">
+	<link rel="stylesheet" type="text/css" href="css/reset.css">
+	<link rel="stylesheet" type="text/css" href="css/n01_header.css">
+	<link rel="stylesheet" type="text/css" href="css/n01_new.css">
+	<script type="text/javascript" src="js/jquery-2.1.4.min.js"></script>
+	<script type="text/javascript" src="js/n01_util.js"></script>
+	<script type="text/javascript" src="js/n01_data.js"></script>
+	<script type="text/javascript" src="js/n01_new.js"></script>
+</head>
+<body>
+	<noscript>JavaScript is required to access this page. Please enable JavaScript.</noscript>
+	<header id="header" style="display:none;">
+		<div id="header_back">
+			<table id="header_table">
+				<tbody>
+					<tr>
+						<td id ="td_button_cancel" class="td_button"><div id="button_cancel" class="button">Cancel</div></td>
+						<td><div id="header_title">New Game</div></td>
+						<td id ="td_button_game_on" class="td_button"><div id="button_game_on" class="button">Game on</div></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	</header>
+	<article id="article">
+		<div id="contents" style="display:none;">
+			<form>
+				<p id="title_player_name" class="title">Player Name</p>
+				<p><input type="text" id="p1_name" placeholder="Player 1"></p>
+				<p><input type="text" id="p2_name" placeholder="Player 2"></p>
+				<hr>
+
+				<p id="title_start_score" class="title">Start Score (Random)</p>
+				<p>
+					<label id="label_random_min" for="random_min">Min </label><input type="number" id="random_min" value="41" min="2" max="170" pattern="[0-9]*">
+					&nbsp;&nbsp;
+					<label id="label_random_max" for="random_max">Max </label><input type="number" id="random_max" value="170" min="2" max="170" pattern="[0-9]*">
+				</p>
+				<p><input type="checkbox" id="limit_rounds" onclick="connectText('rounds', this.checked);">
+					<label id="label_limit_rounds" for="limit_rounds" class="checkbox">Limit Rounds</label>
+				</p>
+				<p class="indent"><input type="number" id="rounds" placeholder="15" disabled="disabled" pattern="[0-9]*"></p>
+				<hr>
+
+				<p id="title_com" class="title">COM</p>
+				<p><input type="checkbox" id="option_p1_com" onclick="connectText('option_p1_com_level', this.checked);">
+					<label id="label_option_p1_com" for="option_p1_com">Player 1 to COM</label>
+				</p>
+				<p class="indent"><select id="option_p1_com_level" size="1">
+					<option value="1">Level 1</option>
+					<option value="2">Level 2</option>
+					<option value="3">Level 3</option>
+					<option value="4">Level 4</option>
+					<option value="5">Level 5</option>
+					<option value="6">Level 6</option>
+					<option value="7">Level 7</option>
+					<option value="8">Level 8</option>
+					<option value="9">Level 9</option>
+					<option value="10">Level 10</option>
+					<option value="11">Level 11</option>
+					<option value="12">Level 12</option>
+				</select></p>
+				<p><input type="checkbox" id="option_p2_com" onclick="connectText('option_p2_com_level', this.checked);">
+					<label id="label_option_p2_com" for="option_p2_com">Player 2 to COM</label>
+				</p>
+				<p class="indent"><select id="option_p2_com_level" size="1">
+					<option value="1">Level 1</option>
+					<option value="2">Level 2</option>
+					<option value="3">Level 3</option>
+					<option value="4">Level 4</option>
+					<option value="5">Level 5</option>
+					<option value="6">Level 6</option>
+					<option value="7">Level 7</option>
+					<option value="8">Level 8</option>
+					<option value="9">Level 9</option>
+					<option value="10">Level 10</option>
+					<option value="11">Level 11</option>
+					<option value="12">Level 12</option>
+				</select></p>
+				<hr>
+
+				<p id="title_practice" class="title">Practice Mode</p>
+				<p><input type="checkbox" id="option_input_left" onclick="connectText('option_input_left_com', this.checked);">
+					<label id="label_option_input_left" for="option_input_left">Input of remaining score</label>
+				</p>
+				<p class="indent"><input type="checkbox" id="option_input_left_com">
+					<label id="label_option_input_left_com" for="option_input_left_com">Input of COM score</label>
+				</p>
+				<hr>
+
+				<p id="title_hadicap" class="title">Handicap</p>
+				<p><input type="checkbox" id="p1_handicap_check" onclick="connectText('p1_handicap', this.checked);">
+					<label for="p1_handicap_check">Player 1</label>
+				</p>
+				<p class="indent"><input type="number" id="p1_handicap"  placeholder="501" list="score_data" disabled="disabled" pattern="[0-9]*"></p>
+				<p><input type="checkbox" id="p2_handicap_check" onclick="connectText('p2_handicap', this.checked);">
+					<label for="p2_handicap_check">Player 2</label>
+				</p>
+				<p class="indent"><input type="number" id="p2_handicap"  placeholder="501" list="score_data" disabled="disabled" pattern="[0-9]*"></p>
+				<hr>
+				<p id="menu"><input type="button" id="schedule_button" value="Schedule Mode"></p>
+			</form>
+		</div>
+	</article>
+	<datalist id="score_data" style="display:none;">
+		<option value="301">301</option>
+		<option value="501">501</option>
+		<option value="1001">1001</option>
+	</datalist>
+</body>
+</html>

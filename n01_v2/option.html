@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 1996-2015 by Ohno Tomoaki. All rights reserved. -->
+<html lang="ja">
+<head>
+	<title>n02 - Options</title>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black">
+	<meta name="mobile-web-app-capable" content="yes" />
+
+	<link rel="apple-touch-icon" href="image/icon.png">
+	<link rel="shortcut icon" sizes="114x114" href="image/icon.png">
+	<link rel="stylesheet" type="text/css" href="css/reset.css">
+	<link rel="stylesheet" type="text/css" href="css/n01_header.css">
+	<link rel="stylesheet" type="text/css" href="css/n01_option.css">
+	<script type="text/javascript" src="js/jquery-2.1.4.min.js"></script>
+	<script type="text/javascript" src="js/n01_util.js"></script>
+	<script type="text/javascript" src="js/n01_data.js"></script>
+	<script type="text/javascript" src="js/n01_option.js"></script>
+</head>
+<body>
+	<noscript>JavaScript is required to access this page. Please enable JavaScript.</noscript>
+	<header id="header" style="display:none;">
+		<div id="header_back">
+			<table id="header_table">
+				<tbody>
+					<tr>
+						<td id ="td_button_cancel" class="td_button"><div id="button_cancel" class="button">Cancel</div></td>
+						<td><div id="header_title">Options</div></td>
+						<td id ="td_button_done" class="td_button"><div id="button_done" class="button">Done</div></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	</header>
+	<article id="article" style="display:none;">
+		<form>
+			<p><input type="checkbox" id="option_key_show">
+				<label id="label_option_key_show" for="option_key_show">Show Keypad</label>
+			</p>
+			<p><input type="checkbox" id="option_left_score">
+				<label id="label_option_left_score" for="option_left_score">Show Left Score</label>
+			</p>
+			<p><input type="checkbox" id="option_round_darts">
+				<label id="label_option_round_darts" for="option_round_darts">Round of Darts</label>
+			</p>
+			<p><input type="checkbox" id="option_circle_ton">
+				<label id="label_option_circle_ton" for="option_circle_ton">Circle Ton</label>
+			</p>
+			<p><input type="checkbox" id="option_option_ppr">
+				<label id="label_option_ppr" for="option_option_ppr">3 Darts Average</label>
+			</p>
+			<hr />
+			<p><input type="checkbox" id="option_input_left" onclick="connectText('option_input_left_com', this.checked);">
+				<label id="label_option_input_left" for="option_input_left">Input of remaining score</label>
+			</p>
+			<p class="indent"><input type="checkbox" id="option_input_left_com">
+				<label id="label_option_input_left_com" for="option_input_left_com">Input of COM score</label>
+			</p>
+			<hr />
+			<p><input type="checkbox" id="option_small_keypad">
+				<label id="label_option_small_keypad" for="option_small_keypad">Use small keypad (Tablet)</label>
+			</p>
+			<p><input type="checkbox" id="option_input_tag">
+				<label id="label_option_input_tag" for="option_input_tag">Use INPUT tag (iOS+Bluetooth Keyboard)</label>
+			</p>
+		</form>
+	</article>
+</body>
+</html>

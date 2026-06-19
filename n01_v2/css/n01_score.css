@@ -1,0 +1,91 @@
+/*
+ * n01_history.css
+ *
+ * Copyright (C) 1996-2015 by Ohno Tomoaki. All rights reserved.
+ */
+
+body {
+	-webkit-text-size-adjust: 100%;
+	-ms-content-zooming: none;
+	
+	font-size: 18px;
+	font-family: Arial;
+	background-color: #ffffff;
+	color: #000;
+}
+
+#article {
+	margin: 10px;
+	padding: 50px 0 0 0;
+}
+
+.header_table {
+	margin: 0 0 1px 0;
+	width: 100%;
+	table-layout: fixed;
+}
+
+.header_table td {
+	vertical-align: middle;
+}
+
+.p1_name {
+	text-align: left;
+	width: 43%;
+	word-wrap: break-word;
+	padding: 1px;
+}
+
+.p2_name {
+	text-align: right;
+	width: 43%;
+	word-wrap: break-word;
+	padding: 1px;
+}
+
+.leg {
+	text-align: center;
+	width: 14%;
+	white-space: nowrap;
+}
+
+.score_table {
+	width: 100%;
+	text-align: center;
+	background-color: #ffffff;
+}
+.score_table th {
+	vertical-align: middle;
+	height: 20px;
+	font-size: 14px;
+	font-weight: normal;
+	border: 1px solid #555555;
+	background-color: #c9c9c9;
+}
+.score_table td {
+	vertical-align: middle;
+	height: 40px;
+	font-size: 24px;
+	font-weight: normal;
+	border: 1px solid #555555;
+}
+
+.score_none {
+	background-color: #c9c9c9;
+}
+.score_input {
+	width: 18%;
+	background-size: 100% 100%;
+	background-repeat: no-repeat;
+}
+.score_left {
+	width: 23%;
+}
+.score_round {
+	width: 18%;
+	background-color: #c9c9c9;
+}
+
+hr, .sep {
+	page-break-after: always;
+}

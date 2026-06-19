@@ -1,0 +1,86 @@
+/*
+ * n01_stats.css
+ *
+ * Copyright (C) 1996-2015 by Ohno Tomoaki. All rights reserved.
+ */
+
+body {
+	-webkit-text-size-adjust: 100%;
+	-ms-content-zooming: none;
+	
+	font-size: 18px;
+	font-family: Arial;
+	background-color: #ffffff;
+	color: #000;
+}
+
+.name_table {
+	width: 100%;
+	margin-left: auto;
+	margin-right: auto;
+	table-layout: fixed;
+}
+
+.p_name {
+	cursor: pointer;
+}
+
+.p_name:hover {
+	text-decoration: underline;
+}
+
+#p1_name {
+	font-weight: bold;
+	text-align: center;
+	word-wrap: break-word;
+}
+#p2_name {
+	font-weight: bold;
+	text-align: center;
+	word-wrap: break-word;
+}
+
+.title_table {
+	width: 100%;
+	margin-left: auto;
+	margin-right: auto;
+	text-align: center;
+}
+.subtitle {
+	font-size: 20px;
+	font-weight: bold;
+	color: #ffffff;
+	background-color: #0a246a;
+	padding: 2px 0;
+}
+
+.stats_table {
+	width: 100%;
+	margin-left: auto;
+	margin-right: auto;
+}
+
+.stats_table td {
+	text-align: center;
+	padding: 4px 0;
+}
+
+td.name_center {
+	width: 50%;
+}
+
+td.left {
+}
+
+td.center {
+	color: #404040;
+	width: 50%;
+}
+
+td.right {
+}
+
+#article {
+	margin: 10px;
+	padding: 50px 0 0 0;
+}

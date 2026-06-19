@@ -1,0 +1,8 @@
+<svg width="200px" height="140px" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 200 140" style="background: none;">
+	<defs><mask id="mask" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="140"><g fill="black" fill-rule="evenodd">
+		<rect x="0" y="0" width="200" height="140" fill="white"/>
+		<line x1="95" x2="145" y1="40" y2="90" stroke="black" stroke-width="20" stroke-linecap="square"/>
+		<line x1="95" x2="145" y1="90" y2="40" stroke="black" stroke-width="20" stroke-linecap="square"/>
+	</g></mask></defs>
+	<path mask="url(#mask)" d="M14,65 l56,-57 h90 Q184,8 184,32 v66 Q184,122 160,122 h-90 z" fill="white" />
+</svg>

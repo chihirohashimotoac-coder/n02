@@ -1,0 +1,107 @@
+/*
+ * n01_new.css
+ *
+ * Copyright (C) 1996-2015 by Ohno Tomoaki. All rights reserved.
+ */
+
+body {
+	-webkit-text-size-adjust: 100%;
+	-ms-content-zooming: none;
+	
+	user-select: none;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	-o-user-select: none;
+	-webkit-touch-callout: none;
+
+	font-size: 20px;
+	font-family: Arial;
+	background-color: #ffffff;
+	color: #000;
+}
+
+#article {
+	margin: 10px;
+	padding: 50px 0 0 0;
+}
+
+#menu {
+	text-align: center;
+}
+
+#menu_detail {
+	text-align: center;
+}
+
+input {
+	font-size: 20px;
+}
+
+input[type="button"] {
+	-webkit-appearance: none;
+	width: 60%;
+	margin: 10px 0 10px 0;
+
+	border: 1px solid #808080;
+	background-color: #eeeeee;
+	color: #000;
+	outline:none;
+
+	border-radius: 10px;
+	-webkit-border-radius: 10px;
+	-moz-border-radius: 10px;
+	
+	background: -webkit-gradient(linear, left top, left bottom, from(#fff), to(#eee));
+	background: -moz-linear-gradient(top, #fff, #eee);
+	background: -ms-linear-gradient(top, #fff, #eee);
+}
+input[type="button"]:active {
+	background: -webkit-gradient(linear, left top, left bottom, from(#eee), to(#fff));
+	background: -moz-linear-gradient(top, #eee, #fff);
+	background: -ms-linear-gradient(top, #eee, #fff);
+}
+
+input[type="text"] {
+	width: 90%;
+	margin: 0 0 10px 0;
+}
+
+input[type="number"] {
+	width: 30%;
+	margin: 0 0 10px 0;
+}
+
+input[type="checkbox"] {
+	margin: 3px 3px 3px 0;
+	width: 20px;
+	height: 20px;
+}
+
+label {
+	vertical-align: middle;
+}
+
+select {
+	width: 50%;
+	margin: 0 0 10px 0;
+}
+
+.indent {
+	padding-left: 50px;
+}
+
+.random_info {
+	font-size: 0.75em;
+	color: #555;
+	margin: 2px 0 8px 0;
+}
+
+#share {
+	text-align: center;
+	font-size: 0px;
+}
+
+.fb-like {
+	margin: 0 10px;
+}

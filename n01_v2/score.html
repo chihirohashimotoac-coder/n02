@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<!-- Copyright (C) 1996-2015 by Ohno Tomoaki. All rights reserved. -->
+<html lang="ja">
+<head>
+	<title>n02 - Scores</title>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black">
+	<meta name="mobile-web-app-capable" content="yes" />
+
+	<link rel="apple-touch-icon" href="image/icon.png">
+	<link rel="shortcut icon" sizes="114x114" href="image/icon.png">
+	<link rel="stylesheet" type="text/css" href="css/reset.css">
+	<link rel="stylesheet" type="text/css" href="css/n01_header.css">
+	<link rel="stylesheet" type="text/css" href="css/n01_score.css">
+	<script type="text/javascript" src="js/jquery-2.1.4.min.js"></script>
+	<script type="text/javascript" src="js/n01_util.js"></script>
+	<script type="text/javascript" src="js/n01_data.js"></script>
+	<script type="text/javascript" src="js/n01_score.js"></script>
+</head>
+<body>
+	<noscript>JavaScript is required to access this page. Please enable JavaScript.</noscript>
+	<header id="header" style="display:none;">
+		<div id="header_back">
+			<table id="header_table">
+				<tbody>
+					<tr>
+						<td class="td_button"><div id="button_cancel" class="button">Return</div></td>
+						<td><div id="header_title">Scores</div></td>
+						<td class="td_button"><div id="button_stats" class="button">Stats</div></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	</header>
+
+	<article id="article">
+	</article>
+	<div id="score_template" style="display:none;">
+		<table class="header_table">
+			<tbody>
+				<tr>
+					<td class="p1_name"></td>
+					<td class="leg"></td>
+					<td class="p2_name"></td>
+				</tr>
+			</tbody>
+		</table>
+		<table id="score_table" class="score_table">
+			<thead>
+				<tr>
+					<th>Scored</th>
+					<th>To Go</th>
+					<th></th>
+					<th>Scored</th>
+					<th>To Go</th>
+				</tr>
+			</thead>
+			<tbody id="score_body">
+				<tr>
+					<td class="score_none"></td>
+					<td class="p1left"></td>
+					<td class="score_round"></td>
+					<td class="score_none"></td>
+					<td class="p2left"></td>
+				</tr>
+			</tbody>
+		</table>
+	</div>
+	<table id="hidden_table" style="display:none;">
+		<tbody>
+			<tr id="score_list_score">
+				<td class="score_input p1score"></td>
+				<td class="score_left p1left"></td>
+				<td class="score_round"></td>
+				<td class="score_input p2score"></td>
+				<td class="score_left p2left"></td>
+			</tr>
+		</tbody>
+	</table>
+	<canvas id="canvas_ton" style="display:none;"></canvas>
+</body>
+</html>

@@ -1,0 +1,40 @@
+/*
+ * n01_rename.css
+ *
+ * Copyright (C) 1996-2015 by Ohno Tomoaki. All rights reserved.
+ */
+
+body {
+	-webkit-text-size-adjust: 100%;
+	-ms-content-zooming: none;
+	
+	user-select: none;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	-o-user-select: none;
+	-webkit-touch-callout: none;
+
+	font-size: 20px;
+	font-family: Arial;
+	background-color: #ffffff;
+	color: #000;
+}
+
+#article {
+	margin: 10px;
+	padding: 50px 0 0 0;
+}
+
+.title_magrin {
+	margin: 0 0 10px 0;
+}
+
+p {
+	margin-bottom: 10px;
+}
+
+input[type="text"] {
+	width: 90%;
+	margin: 0 0 10px 0;
+}

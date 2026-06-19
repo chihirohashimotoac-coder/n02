@@ -1,0 +1,60 @@
+/*
+ * n01_header.css
+ *
+ * Copyright (C) 1996-2015 by Ohno Tomoaki. All rights reserved.
+ */
+
+#header {
+	position: fixed;
+	z-index: 2;
+	top: 0px;
+	left: 0px;
+	width: 100%;
+
+	background-color: #0a246a;
+	color: #fff;
+}
+
+#header_back {
+	height: 50px;
+	width: 100%;
+}
+
+#header_table {
+	width: 100%;
+	text-align: center;
+}
+
+#header_table td {
+	padding: 8px;
+	vertical-align: middle;
+}
+
+.td_button {
+	width: 80px;
+}
+
+.button {
+	-webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+	cursor: pointer;
+	font-size: 16px;
+	border: 1px solid #fff;
+	padding: 8px 0px 8px 0px;
+	
+	border-radius: 17px;
+	-webkit-border-radius: 17px;
+	-moz-border-radius: 17px;
+
+	-ms-touch-action: none;
+	touch-action: none;
+}
+
+#header_title {
+	font-size: 20px;
+}
+
+@media print{
+	#header {
+		display:none;
+	}
+}
