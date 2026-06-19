@@ -44,7 +44,6 @@ var n01_data = (function () {
 			}
 			if (ua.isWindowsPhone || ua.isiOS || ua.isAndroid) {
 				me.options.keyShow = 1;
-				me.options.leftShow = 0;
 			}
 		}
 	};
