@@ -62,3 +62,5 @@
 .theme-panel{grid-column:2;padding:18px 24px}
 .theme-panel .theme-field{margin-top:0}
 @media (width<=1080px){.theme-panel{grid-column:auto}}
+
+@media (width<=720px){.n01-score-table td.scored button .ton-score{font-size:clamp(15px,6.4vw,26px);min-width:min(2.5em,96%)}}
