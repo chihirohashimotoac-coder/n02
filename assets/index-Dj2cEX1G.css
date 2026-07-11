@@ -67,3 +67,5 @@
 
 .stats-col{grid-column:2;align-self:stretch;min-width:0}
 @media (width<=1080px){.stats-col{grid-column:auto}}
+
+@media (width<=720px){.n01-key-table{height:calc(218px + max(12px,env(safe-area-inset-bottom,0px)));padding-bottom:max(12px,env(safe-area-inset-bottom,0px))}.n01-game-footer{height:calc(360px + max(12px,env(safe-area-inset-bottom,0px)))}.n01-score-area{inset:64px 0 calc(360px + max(12px,env(safe-area-inset-bottom,0px)))}}
