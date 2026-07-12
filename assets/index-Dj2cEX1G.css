@@ -72,3 +72,6 @@
 
 .reset-stats{width:100%;margin-top:14px;color:var(--muted)}
 .reset-stats:hover{color:var(--danger);border-color:var(--danger)}
+
+.settings-head{grid-column:1/-1}
+.setup-panel .primary-button{margin-top:22px}
