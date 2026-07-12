@@ -69,3 +69,6 @@
 @media (width<=1080px){.stats-col{grid-column:auto}}
 
 @media (width<=720px){.n01-key-table{height:calc(218px + max(12px,env(safe-area-inset-bottom,0px)));padding-bottom:max(12px,env(safe-area-inset-bottom,0px))}.n01-game-footer{height:calc(360px + max(12px,env(safe-area-inset-bottom,0px)))}.n01-score-area{inset:64px 0 calc(360px + max(12px,env(safe-area-inset-bottom,0px)))}}
+
+.reset-stats{width:100%;margin-top:14px;color:var(--muted)}
+.reset-stats:hover{color:var(--danger);border-color:var(--danger)}
