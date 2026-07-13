@@ -89,3 +89,17 @@
 .leg-stats-table tr:first-child td{border-top:0}
 .leg-stats-table td.leg-winner{color:var(--green-dark);font-weight:700}
 .leg-stats-table td.win{color:var(--green);font-weight:800}
+
+@media (width>=721px){
+.result-card.match-summary{width:min(640px,100%)}
+.result-card.match-summary .match-legs-score{font-size:28px}
+.result-card.match-summary .n01-stats-head{min-height:50px;font-size:16px}
+.result-card.match-summary .match-stats-block .n01-stats-row{min-height:40px}
+.result-card.match-summary .match-stats-block .n01-stats-row strong{font-size:18px}
+.result-card.match-summary .match-stats-block .n01-stats-row span{font-size:13px}
+.result-card.match-summary .leg-stats-title{font-size:12px}
+.result-card.match-summary .leg-stats-table{font-size:16px}
+.result-card.match-summary .leg-stats-table th{font-size:12px;padding:8px 5px;max-width:110px}
+.result-card.match-summary .leg-stats-table td{padding:9px 5px;max-width:120px}
+.result-card.match-summary .leg-stats-scroll{max-height:280px}
+}
