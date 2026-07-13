@@ -103,3 +103,5 @@
 .result-card.match-summary .leg-stats-table td{padding:9px 5px;max-width:120px}
 .result-card.match-summary .leg-stats-scroll{max-height:280px}
 }
+
+.result-card .share-card{width:100%;margin-top:10px}
