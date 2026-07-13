@@ -75,3 +75,17 @@
 
 .settings-head{grid-column:1/-1}
 .setup-panel .primary-button{margin-top:22px}
+
+.result-card{max-height:92vh;overflow-y:auto}
+.match-legs-score{color:var(--green);margin:2px 0 16px;font-size:22px;font-weight:750}
+.result-card .match-stats-block{border:1px solid var(--line);text-align:center;background:var(--surface);border-radius:12px;margin:0 0 14px;overflow:hidden}
+.result-card .match-stats-block .n01-stats-row{min-height:32px;font-size:13px}
+.result-card .match-stats-block .n01-stats-head,.result-card .match-stats-block .n01-stats-row{grid-template-columns:minmax(0,1fr) 110px minmax(0,1fr)}
+.leg-stats-title{background:var(--surface-soft);color:var(--green);letter-spacing:.12em;padding:8px 0;font-size:10px;font-weight:800}
+.leg-stats-scroll{max-height:220px;overflow-y:auto}
+.leg-stats-table{border-collapse:collapse;width:100%;font-size:12px;text-align:center}
+.leg-stats-table th{color:var(--muted);white-space:nowrap;text-overflow:ellipsis;max-width:76px;border-bottom:1px solid var(--line);padding:7px 3px;font-size:10px;font-weight:700;overflow:hidden}
+.leg-stats-table td{white-space:nowrap;text-overflow:ellipsis;max-width:84px;border-top:1px solid var(--line);padding:7px 3px;overflow:hidden}
+.leg-stats-table tr:first-child td{border-top:0}
+.leg-stats-table td.leg-winner{color:var(--green-dark);font-weight:700}
+.leg-stats-table td.win{color:var(--green);font-weight:800}
