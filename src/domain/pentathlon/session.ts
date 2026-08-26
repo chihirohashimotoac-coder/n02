@@ -130,6 +130,17 @@ export function applyTurn(session: PentathlonSession, input: unknown): Pentathlo
     result: finished ? engine.getResult(nextState as never) : null,
   };
 
+  if (engine.mirrorForOpponent) {
+    const other: PlayerIndex = active === 0 ? 1 : 0;
+    const mirrored = engine.mirrorForOpponent(nextState as never);
+    const mirroredFinished = engine.isFinished(mirrored as never);
+    progress[other] = {
+      state: mirrored,
+      finished: mirroredFinished,
+      result: mirroredFinished ? engine.getResult(mirrored as never) : null,
+    };
+  }
+
   const partial: PentathlonSession = {
     ...session,
     undo,

@@ -237,13 +237,15 @@ export default function PentathlonPlay({
 
 /** The headline number shown on each player card, in that discipline's own units. */
 function primaryValue(id: string, state: unknown): string {
-  const anyState = state as Record<string, number>;
+  const anyState = state as Record<string, number> & { self?: { points: number } };
   switch (id) {
     case 'x01-501':
     case 'x01-301':
       return String(anyState.remaining);
-    case 'half-it':
     case 'cricket':
+      // Cricket's state is a shared self/opponent view (head-to-head territory denial).
+      return String(anyState.self?.points ?? 0);
+    case 'half-it':
       return String(anyState.points ?? anyState.score);
     case 'golf':
       return String(anyState.strokes);

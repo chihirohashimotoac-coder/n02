@@ -241,7 +241,7 @@ describe('Baseball', () => {
   });
 });
 
-describe('Cricket', () => {
+describe('Cricket (head-to-head, same rules as soft-tip machines)', () => {
   it('marks by ring, and bull inner counts double', () => {
     expect(cricketMarks(S(20))).toEqual({ target: 20, marks: 1 });
     expect(cricketMarks(D(20))).toEqual({ target: 20, marks: 2 });
@@ -253,35 +253,30 @@ describe('Cricket', () => {
 
   it('opens a number with 3 marks without scoring points', () => {
     const state = cricketEngine.applyInput(cricketEngine.createState(), [T(20)]);
-    expect(state.marks['20']).toBe(3);
-    expect(state.points).toBe(0);
+    expect(state.self.marks['20']).toBe(3);
+    expect(state.self.points).toBe(0);
   });
 
-  it('scores surplus marks after opening (hand-check: T20 opens, second T20 scores 3x20 = 60)', () => {
-    let state = cricketEngine.applyInput(cricketEngine.createState(), [T(20)]);
-    state = cricketEngine.applyInput(state, [T(20)]);
-    expect(state.points).toBe(60);
+  it('scores surplus marks after opening while the opponent has not closed it (hand-check: T20 T20 T20 = open + 60 + 60 = 120)', () => {
+    const state = cricketEngine.applyInput(cricketEngine.createState(), [T(20), T(20), T(20)]);
+    expect(state.self.marks['20']).toBe(3);
+    expect(state.self.points).toBe(120);
   });
 
-  it('splits a single visit across closing and scoring (T20 T20 = open + 60)', () => {
-    const state = cricketEngine.applyInput(cricketEngine.createState(), [T(20), T(20)]);
-    expect(state.marks['20']).toBe(3);
-    expect(state.points).toBe(60);
-  });
-
-  it('finishes once all 7 targets are closed', () => {
+  it('finishes once all 7 targets are closed and points are ahead of a (still empty) opponent', () => {
     let state = cricketEngine.createState();
     for (const n of [20, 19, 18, 17, 16, 15]) state = cricketEngine.applyInput(state, [T(n)]);
-    expect(allCricketClosed(state)).toBe(false); // bull still open
+    expect(allCricketClosed(state.self)).toBe(false); // bull still open
     state = cricketEngine.applyInput(state, [BULL, OUTER]); // 2 + 1 marks = closed
-    expect(allCricketClosed(state)).toBe(true);
+    expect(allCricketClosed(state.self)).toBe(true);
     expect(cricketEngine.isFinished(state)).toBe(true);
+    expect(state.winner).toBe('self');
     expect(cricketEngine.getResult(state).completed).toBe(true);
   });
 
-  it('stops at the round limit as not-closed', () => {
+  it('stops at the round limit, undecided, if neither side closes out', () => {
     let state = cricketEngine.createState();
-    for (let i = 0; i <= CRICKET_ROUND_LIMIT; i++) state = cricketEngine.applyInput(state, [MISS]);
+    for (let i = 0; i <= CRICKET_ROUND_LIMIT; i++) state = cricketEngine.applyInput(state, [MISS, MISS, MISS]);
     expect(cricketEngine.isFinished(state)).toBe(true);
     expect(cricketEngine.getResult(state).completed).toBe(false);
   });
@@ -291,6 +286,63 @@ describe('Cricket', () => {
     const openHighPoints = { value: 200, unit: 'points' as const, completed: false, darts: 60, label: '200 PTS (未クローズ)' };
     expect(cricketEngine.compareResults(closedLowPoints, openHighPoints)).toBe('p0');
     expect(cricketEngine.compareResults(openHighPoints, closedLowPoints)).toBe('p1');
+  });
+
+  describe('territory denial (mirrorForOpponent)', () => {
+    function mirror(state: ReturnType<typeof cricketEngine.createState>) {
+      return cricketEngine.mirrorForOpponent!(state);
+    }
+
+    it('a number closed by the opponent blocks further scoring on it, even though it can still be opened', () => {
+      // P0 opens and scores twice on 20 (120 points), unopposed so far.
+      let p0 = cricketEngine.applyInput(cricketEngine.createState(), [T(20), T(20), T(20)]);
+      expect(p0.self.points).toBe(120);
+
+      // P1's own view after P0's turn: P1 is still empty, but now sees P0 (as "opponent") holding 20.
+      let p1 = mirror(p0);
+      expect(p1.opponent.marks['20']).toBe(3);
+
+      // P1 also closes 20 (denying P0 any further points there) but is too late to score there themself.
+      p1 = cricketEngine.applyInput(p1, [T(20)]);
+      expect(p1.self.marks['20']).toBe(3);
+      expect(p1.self.points).toBe(0); // opponent (P0) already had it closed, so no payout for P1 either
+
+      // Mirror back to P0: 20 is now closed by both, so a further triple there scores nothing more.
+      p0 = mirror(p1);
+      expect(p0.opponent.marks['20']).toBe(3);
+      p0 = cricketEngine.applyInput(p0, [T(20)]);
+      expect(p0.self.points).toBe(120); // unchanged - shut out once the opponent also closed it
+    });
+
+    it('closing all 7 while behind on points does NOT finish the discipline yet', () => {
+      // The opponent (P1) genuinely scores 120 real points first, and P0 sees that via the mirror.
+      const p1After = cricketEngine.applyInput(cricketEngine.createState(), [T(20), T(20), T(20)]);
+      let p0 = mirror(p1After);
+      expect(p0.opponent.points).toBe(120);
+
+      for (const n of [20, 19, 18, 17, 16, 15]) p0 = cricketEngine.applyInput(p0, [T(n)]); // 20 already denied by the opponent, so 0 surplus there; the rest are fresh opens too
+      p0 = cricketEngine.applyInput(p0, [BULL, OUTER]);
+      expect(allCricketClosed(p0.self)).toBe(true);
+      expect(p0.self.points).toBe(0);
+      expect(cricketEngine.isFinished(p0)).toBe(false); // closed everything, but 0 < the opponent's 120
+
+      // The opponent hasn't touched 19, so P0 can still score there to catch up and take the lead.
+      p0 = cricketEngine.applyInput(p0, [T(19), T(19), T(19)]); // 3 x 3x19 = 171
+      expect(p0.self.points).toBe(171);
+      expect(cricketEngine.isFinished(p0)).toBe(true);
+      expect(p0.winner).toBe('self');
+    });
+
+    it('mirrorForOpponent flips the winner label correctly', () => {
+      let state = cricketEngine.createState();
+      for (const n of [20, 19, 18, 17, 16, 15]) state = cricketEngine.applyInput(state, [T(n)]);
+      state = cricketEngine.applyInput(state, [BULL, OUTER]);
+      expect(state.winner).toBe('self');
+
+      const mirrored = mirror(state);
+      expect(mirrored.winner).toBe('opponent');
+      expect(mirrored.finished).toBe(true);
+    });
   });
 });
 

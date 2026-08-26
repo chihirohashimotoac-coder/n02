@@ -402,3 +402,49 @@ describe('Baseball extra innings on a tie (regression)', () => {
     expect(session.records[2].outcome).toBe('p0');
   });
 });
+
+const T = (value: number): DartHit => ({ kind: 'number', value, ring: 'triple' });
+
+describe('Cricket territory denial through the session controller (regression)', () => {
+  it('mirrors a closed number into the other player so their scoring on it is blocked, end to end', () => {
+    // Fast-forward through Cork, 301, Baseball and 501 to reach Cricket (discipline 5 of n01).
+    let session = newSession({ preset: 'n01' });
+    session = applyTurn(session, [S(20)]); // Cork: P0 hits the board
+    session = applyTurn(session, [MISS]); // Cork: P1 misses -> P0 wins outright
+    session = advanceDiscipline(session);
+    expect(currentDisciplineId(session)).toBe('x01-301');
+    session = playUntilDisciplineComplete(session, { score: 0, openedWithDouble: false }); // both DNF -> draw
+    session = advanceDiscipline(session);
+    expect(currentDisciplineId(session)).toBe('baseball');
+    for (let inning = 1; inning <= 9; inning++) {
+      session = applyTurn(session, inning === 1 ? [S(1), MISS, MISS] : [MISS, MISS, MISS]); // P0: 1 run total
+      session = applyTurn(session, [MISS, MISS, MISS]); // P1: 0 runs
+    }
+    session = advanceDiscipline(session);
+    expect(currentDisciplineId(session)).toBe('x01-501');
+    session = applyTurn(session, { score: 180 }); // P0 -> 321
+    session = applyTurn(session, { score: 180 }); // P1 -> 321
+    session = applyTurn(session, { score: 180 }); // P0 -> 141
+    session = applyTurn(session, { score: 180 }); // P1 -> 141
+    session = applyTurn(session, { score: 141, finishDarts: 3 }); // P0 checks out
+    session = applyTurn(session, { score: 141, finishDarts: 3 }); // P1 checks out
+    session = advanceDiscipline(session);
+    expect(currentDisciplineId(session)).toBe('cricket');
+
+    // P0 opens and scores twice on 20 (unopposed): 120 points.
+    session = applyTurn(session, [T(20), T(20), T(20)]);
+    expect((session.current?.progress[0].state as { self: { points: number } }).self.points).toBe(120);
+    // P1's own view must already show 20 as held by the opponent (the mirror ran through applyTurn).
+    expect(
+      (session.current?.progress[1].state as { opponent: { marks: Record<string, number> } }).opponent.marks['20'],
+    ).toBe(3);
+
+    // P1 closes 20 too (denying further P0 scoring there) but is too late to score there themself.
+    session = applyTurn(session, [T(20)]);
+    expect((session.current?.progress[1].state as { self: { points: number } }).self.points).toBe(0);
+
+    // Mirrored back to P0: a further triple on 20 now scores nothing, since P1 has also closed it.
+    session = applyTurn(session, [T(20)]);
+    expect((session.current?.progress[0].state as { self: { points: number } }).self.points).toBe(120);
+  });
+});

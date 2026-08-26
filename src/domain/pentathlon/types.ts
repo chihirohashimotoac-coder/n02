@@ -88,6 +88,15 @@ export interface DisciplineEngine<TState = unknown, TInput = unknown> {
    * sudden-death re-throw, Baseball's extra innings. Return null/undefined to accept the draw.
    */
   continueOnTie?(a: TState, b: TState): [TState, TState] | null;
+  /**
+   * Shared-state disciplines only (currently Cricket): after applyInput() updates the active
+   * player's own view of the shared board, this derives what the OTHER player's own view should now
+   * look like (their own progress mirrored to reflect the active player's turn - e.g. marks the
+   * active player just closed, which may block or unblock the other player's scoring). The session
+   * controller writes this into the other player's progress slot alongside the active player's.
+   * Engines that don't define this are treated as fully independent per-player state, as before.
+   */
+  mirrorForOpponent?(state: TState): TState;
 }
 
 export interface PentathlonDisciplineRecord {

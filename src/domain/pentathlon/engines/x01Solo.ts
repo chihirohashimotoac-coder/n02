@@ -46,7 +46,7 @@ export function createX01SoloEngine(
       name,
       description: doubleIn
         ? `ダブルイン / ダブルアウト・${roundLimit}ラウンド制限`
-        : 'ストレートイン / ダブルアウト',
+        : 'オープンイン / ダブルアウト',
       inputMode: 'visit-score',
       unit: 'darts',
     },
