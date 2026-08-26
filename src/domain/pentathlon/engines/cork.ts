@@ -73,6 +73,13 @@ export const corkEngine: DisciplineEngine<CorkState, DartHit[]> = {
   describeTarget: (state) => (state.finished ? 'FINISHED' : 'BULL'),
 
   dartsRemainingThisTurn: (state) => Math.max(0, CORK_DARTS - state.darts),
+
+  // An exact tie (both same proximity - e.g. both miss, or both land on the board) is sudden-death:
+  // both players re-throw rather than the discipline ending in a draw (see docs/pentathlon-rules.md).
+  continueOnTie: (): [CorkState, CorkState] => [
+    { best: 0, darts: 0, finished: false, hits: [] },
+    { best: 0, darts: 0, finished: false, hits: [] },
+  ],
 };
 
 /** Exposed for the share card / result display. */

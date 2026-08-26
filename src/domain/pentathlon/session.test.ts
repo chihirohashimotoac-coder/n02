@@ -335,3 +335,70 @@ describe('computeTotals', () => {
     expect(computeTotals(session).overall).toBeNull();
   });
 });
+
+const S = (value: number): DartHit => ({ kind: 'number', value, ring: 'single' });
+
+/** Repeats `input` for whichever player is active until the current discipline is done. */
+function playUntilDisciplineComplete(session: PentathlonSession, input: unknown): PentathlonSession {
+  let s = session;
+  for (let guard = 0; guard < 100 && !isDisciplineComplete(s); guard++) {
+    s = applyTurn(s, input);
+  }
+  return s;
+}
+
+describe('Cork sudden-death re-throw on a tie (regression)', () => {
+  it('does not record a draw on an exact tie; re-throws until broken', () => {
+    let session = newSession({ preset: 'n01' });
+    expect(currentDisciplineId(session)).toBe('cork');
+
+    session = applyTurn(session, [MISS]); // P0 (starter)
+    session = applyTurn(session, [MISS]); // P1 - exact tie (both proximity 0)
+
+    // Must NOT finalize as a draw: Cork keeps playing with both players reset for a re-throw.
+    expect(session.status).toBe('playing');
+    expect(session.records).toHaveLength(0);
+    expect(session.current?.progress[0].finished).toBe(false);
+    expect(session.current?.progress[1].finished).toBe(false);
+    expect(session.current?.progress[0].state).toMatchObject({ darts: 0, best: 0 });
+
+    // Re-throw breaks the tie: P0 hits the board, P1 misses.
+    session = applyTurn(session, [S(20)]);
+    session = applyTurn(session, [MISS]);
+    expect(session.status).toBe('between-disciplines');
+    expect(session.records).toHaveLength(1);
+    expect(session.records[0].outcome).toBe('p0');
+  });
+});
+
+describe('Baseball extra innings on a tie (regression)', () => {
+  it('continues past inning 9 instead of recording a 0-0 draw, then finalizes once broken', () => {
+    // Fast-forward through Cork (P0 wins outright, no tie) and 301 (both DNF -> draw) to reach Baseball.
+    let session = newSession({ preset: 'n01' });
+    session = applyTurn(session, [S(20)]); // Cork: P0 hits the board
+    session = applyTurn(session, [MISS]); // Cork: P1 misses -> P0 wins
+    session = advanceDiscipline(session);
+    expect(currentDisciplineId(session)).toBe('x01-301');
+    session = playUntilDisciplineComplete(session, { score: 0, openedWithDouble: false });
+    session = advanceDiscipline(session);
+    expect(currentDisciplineId(session)).toBe('baseball');
+
+    for (let inning = 0; inning < 9; inning++) {
+      session = applyTurn(session, [MISS, MISS, MISS]);
+      session = applyTurn(session, [MISS, MISS, MISS]);
+    }
+
+    // 0-0 after inning 9 must extend into extra innings, not finalize as a draw.
+    expect(session.status).toBe('playing');
+    expect(session.records).toHaveLength(2); // just Cork + 301 so far, not Baseball
+    expect(session.current?.progress[0].state).toMatchObject({ inning: 10, finished: false });
+    expect(session.current?.progress[1].state).toMatchObject({ inning: 10, finished: false });
+
+    // Break the tie in inning 10.
+    session = applyTurn(session, [S(10), MISS, MISS]); // 1 run
+    session = applyTurn(session, [MISS, MISS, MISS]); // 0 runs
+    expect(session.status).toBe('between-disciplines');
+    expect(session.records).toHaveLength(3);
+    expect(session.records[2].outcome).toBe('p0');
+  });
+});

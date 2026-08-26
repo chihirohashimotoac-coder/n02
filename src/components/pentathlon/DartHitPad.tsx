@@ -12,6 +12,8 @@ interface Props {
   onCommit: () => void;
   /** Numbers worth highlighting for the current target (dimmed elsewhere is avoided - all stay usable). */
   suggestion?: string;
+  /** Golf-style disciplines only: committing before maxDarts hits are staged is itself a valid move. */
+  allowEarlyCommit?: boolean;
 }
 
 const NUMBERS = Array.from({ length: 20 }, (_, i) => i + 1);
@@ -28,9 +30,11 @@ export default function DartHitPad({
   onUndoHit,
   onCommit,
   suggestion,
+  allowEarlyCommit = false,
 }: Props) {
   const [ring, setRing] = useState<Ring>('single');
   const full = pendingHits.length >= maxDarts;
+  const canCommit = pendingHits.length > 0 && (allowEarlyCommit || full);
 
   const stage = (hit: DartHit) => {
     if (disabled || full) return;
@@ -121,7 +125,7 @@ export default function DartHitPad({
         <button
           type="button"
           className="primary-button compact"
-          disabled={disabled || pendingHits.length === 0}
+          disabled={disabled || !canCommit}
           onClick={onCommit}
           style={{ width: '100%' }}
         >

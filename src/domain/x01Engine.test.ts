@@ -186,6 +186,38 @@ describe('editVisit', () => {
     expect(state.visits[0].after).toBe(361); // 501-140
     expect(state.players[0].remaining).toBe(261); // 361 - 100 (second P0 visit unchanged)
   });
+
+  it('regression: preserves prior-leg cumulative stats when editing a visit in leg 2+', () => {
+    let state = createX01Match(baseSettings({ targetLegs: 5 }));
+    // Leg 1: P0 racks up real stats (a ton80, a ton00, a 9-dart checkout) before winning.
+    state = applyVisit(state, 180); // P0 ton80 -> 321
+    state = applyVisit(state, 26); // P1 -> 475
+    state = applyVisit(state, 180); // P0 ton80 -> 141
+    state = applyVisit(state, 26); // P1 -> 449
+    state = applyVisit(state, 141, 3); // P0 checks out, 9 darts, highestFinish 141
+    state = advanceLeg(state);
+    expect(state.leg).toBe(2);
+    const p0AfterLeg1 = state.players[0];
+    expect(p0AfterLeg1.totalDarts).toBe(9);
+    expect(p0AfterLeg1.ton80Count).toBe(2);
+    expect(p0AfterLeg1.checkouts).toBe(1);
+    expect(p0AfterLeg1.highestFinish).toBe(141);
+
+    // Leg 2: P0 throws once, then that visit gets corrected.
+    expect(state.legStarter).toBe(1); // loser-of-leg1 (P0 won, so P1 starts leg 2 - see advanceLeg test)
+    state = applyVisit(state, 60); // P1's leg-2 visit -> 441
+    state = applyVisit(state, 100); // P0's leg-2 visit -> 401
+    state = editVisit(state, state.visits.length - 1, 140, 3); // correct P0's leg-2 visit to 140
+
+    // Leg 1's contribution must survive untouched.
+    expect(state.players[0].totalDarts).toBe(9 + 3);
+    expect(state.players[0].ton80Count).toBe(2);
+    expect(state.players[0].checkouts).toBe(1);
+    expect(state.players[0].highestFinish).toBe(141);
+    expect(state.players[0].legs).toBe(1);
+    // And the leg-2 edit itself took effect.
+    expect(state.players[0].remaining).toBe(361); // 501 - 140
+  });
 });
 
 describe('resolveRoundLimit / declareDraw', () => {

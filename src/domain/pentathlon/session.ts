@@ -158,6 +158,25 @@ function finishDiscipline(session: PentathlonSession): PentathlonSession {
   const outcome: CompareOutcome | null =
     p1Result !== null ? engine.compareResults(p0Result, p1Result) : null;
 
+  if (outcome === 'draw' && session.playerCount === 2 && engine.continueOnTie) {
+    const continued = engine.continueOnTie(current.progress[0].state as never, current.progress[1].state as never);
+    if (continued) {
+      const [s0, s1] = continued;
+      return {
+        ...session,
+        current: {
+          progress: [
+            { state: s0, finished: false, result: null },
+            { state: s1, finished: false, result: null },
+          ],
+          active: session.currentStarter,
+          pendingHits: [],
+        },
+        status: 'playing',
+      };
+    }
+  }
+
   const record: PentathlonDisciplineRecord = {
     id: currentDisciplineId(session),
     results: [p0Result, p1Result],

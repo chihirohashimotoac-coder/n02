@@ -69,6 +69,13 @@ export const baseballEngine: DisciplineEngine<BaseballState, DartHit[]> = {
   describeTarget: (state) => (state.finished ? 'FINISHED' : `INNING ${state.inning} (${state.inning})`),
 
   dartsRemainingThisTurn: () => 3,
+
+  // Tied after inning 9: extend into extra innings (10, 11, ...) up to BASEBALL_MAX_INNINGS, per the
+  // standard tie rule (see docs/pentathlon-rules.md). Beyond the cap, accept the draw.
+  continueOnTie: (a, b): [BaseballState, BaseballState] | null => {
+    if (a.inning > BASEBALL_MAX_INNINGS || b.inning > BASEBALL_MAX_INNINGS) return null;
+    return [extendForExtraInnings(a), extendForExtraInnings(b)];
+  },
 };
 
 /** Extends a tied Baseball result into extra innings (10th, 11th, ...), per the standard tie rule. */

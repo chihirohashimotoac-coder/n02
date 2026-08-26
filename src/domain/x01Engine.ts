@@ -57,6 +57,12 @@ interface X01CoreState {
   playerStartScores: [number, number];
   visits: X01Visit[];
   legDarts: [number, number];
+  /**
+   * Each player's cumulative stats as of the start of this leg (i.e. carrying forward every prior
+   * leg's contribution). editVisit() rebuilds from this baseline rather than from zero, so correcting
+   * a visit in leg 2+ doesn't erase darts/scoring/checkouts earned in earlier legs.
+   */
+  legStartStats: [X01PlayerStats, X01PlayerStats];
 }
 
 export interface X01MatchState extends X01CoreState {
@@ -131,6 +137,7 @@ function coreForNewLeg(settings: X01Settings, leg: number, legStarter: 0 | 1, pl
     playerStartScores: [p0Start, p1Start],
     visits: [],
     legDarts: [0, 0],
+    legStartStats: clone(nextPlayers),
   };
 }
 
@@ -160,6 +167,7 @@ function coreSnapshot(state: X01MatchState): X01CoreState {
     playerStartScores: clone(state.playerStartScores),
     visits: clone(state.visits),
     legDarts: clone(state.legDarts),
+    legStartStats: clone(state.legStartStats),
   };
 }
 
@@ -328,9 +336,11 @@ export function editVisit(state: X01MatchState, visitIndex: number, newScore: nu
     throw new InvalidVisitError('修正する得点は0～180、使用ダーツは1～3本で指定してください。');
   }
 
+  // Rebuild from each player's stats as they stood at the START of this leg (not from zero), so
+  // darts/scoring/checkouts/highest-finish earned in earlier legs survive an in-leg correction.
   const players: [X01PlayerStats, X01PlayerStats] = [
-    { ...state.players[0], remaining: state.playerStartScores[0], totalDarts: 0, totalScored: 0, ton00Count: 0, ton40Count: 0, ton80Count: 0, first9Score: 0, first9Darts: 0, checkouts: 0, finishDarts: [], highestFinish: 0, legs: state.players[0].legs },
-    { ...state.players[1], remaining: state.playerStartScores[1], totalDarts: 0, totalScored: 0, ton00Count: 0, ton40Count: 0, ton80Count: 0, first9Score: 0, first9Darts: 0, checkouts: 0, finishDarts: [], highestFinish: 0, legs: state.players[1].legs },
+    { ...clone(state.legStartStats[0]), remaining: state.playerStartScores[0] },
+    { ...clone(state.legStartStats[1]), remaining: state.playerStartScores[1] },
   ];
   const legDarts: [number, number] = [0, 0];
   const visits = clone(state.visits);
@@ -359,6 +369,8 @@ export function editVisit(state: X01MatchState, visitIndex: number, newScore: nu
     stats.remaining = after;
     legDarts[v.player] += v.darts;
     if (after === 0 && !bust) {
+      stats.legs += 1;
+      stats.checkouts += 1;
       stats.finishDarts = [...stats.finishDarts, legDarts[v.player]];
       stats.highestFinish = Math.max(stats.highestFinish, v.score);
     }
@@ -382,11 +394,16 @@ export function swapCurrentLegScores(state: X01MatchState): X01MatchState {
   players[1].name = state.players[1].name;
   const visits = state.visits.map((v) => ({ ...v, player: (v.player === 0 ? 1 : 0) as 0 | 1 }));
   const legDarts: [number, number] = [state.legDarts[1], state.legDarts[0]];
+  const legStartStats: [X01PlayerStats, X01PlayerStats] = [
+    { ...state.legStartStats[1], name: state.players[0].name },
+    { ...state.legStartStats[0], name: state.players[1].name },
+  ];
   return {
     ...state,
     players,
     visits,
     legDarts,
+    legStartStats,
     active: state.active === 0 ? 1 : 0,
     legStarter: state.legStarter === 0 ? 1 : 0,
     undo: [],

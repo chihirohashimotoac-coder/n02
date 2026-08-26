@@ -166,8 +166,9 @@ test.describe('Pentathlon full session', () => {
     await enterPentHits(page, ['BULL']);
     await next();
 
-    // 2. 301 (double-in / double-out)
-    await enterPentScore(page, 180);
+    // 2. 301 (double-in / double-out) - the opening visit must declare it started with a double,
+    // or (per the real rule) nothing would score.
+    await enterPentScore(page, 180, { openedWithDouble: true });
     await enterPentScore(page, 61);
     await enterPentScore(page, 60);
     await confirmFinish(page);
@@ -188,10 +189,10 @@ test.describe('Pentathlon full session', () => {
     await expect(page.locator('.pent-result-table')).toContainText('9 DARTS');
     await next();
 
-    // 5. Cricket: close all seven targets
+    // 5. Cricket: close all seven targets (each round is a fixed 3 darts)
     await enterPentHits(page, ['T20', 'T19', 'T18']);
     await enterPentHits(page, ['T17', 'T16', 'T15']);
-    await enterPentHits(page, ['BULL', '25']);
+    await enterPentHits(page, ['BULL', '25', 'MISS']);
     await next();
 
     await expect(page.locator('.pent-share-card')).toContainText('PENTATHLON');

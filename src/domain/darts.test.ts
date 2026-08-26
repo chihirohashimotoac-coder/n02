@@ -40,6 +40,10 @@ describe('isReachableScore (raw 3-dart totals, no double-out constraint)', () =>
   it('accepts 0 (three misses)', () => {
     expect(isReachableScore(0)).toBe(true);
   });
+  it('accepts scores only reachable via misses (regression: S1 + MISS + MISS = 1)', () => {
+    expect(isReachableScore(1)).toBe(true);
+    expect(isReachableScore(2)).toBe(true); // S2+MISS+MISS or S1+S1+MISS
+  });
   it('respects the darts-available cap', () => {
     expect(isReachableScore(60, 1)).toBe(true); // T20
     expect(isReachableScore(61, 1)).toBe(false);
@@ -78,6 +82,9 @@ describe('checkout feasibility (double-out)', () => {
   });
   it('respects maxDarts (141 needs 3 darts minimum, so is not offered with only 1 available)', () => {
     expect(validFinishDartCounts(141, 1)).toEqual([]);
+  });
+  it('accepts a checkout reached via leading misses (regression: remaining=2 via MISS, MISS, D1)', () => {
+    expect(validFinishDartCounts(2)).toEqual(expect.arrayContaining([1, 2, 3]));
   });
 });
 

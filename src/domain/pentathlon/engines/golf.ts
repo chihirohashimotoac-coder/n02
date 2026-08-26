@@ -31,6 +31,8 @@ export const golfEngine: DisciplineEngine<GolfState, DartHit[]> = {
     description: `${GOLF_HOLES}ホール・最終投のみ加算 / 少ないほど良い`,
     inputMode: 'dart-hits',
     unit: 'strokes',
+    // Stopping before all 3 darts is the rule itself here (only the last dart thrown counts).
+    allowEarlyCommit: true,
   },
 
   createState: (): GolfState => ({

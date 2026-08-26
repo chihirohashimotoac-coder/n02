@@ -31,6 +31,7 @@ export default function PentathlonPlay({
 }: Props) {
   const [entry, setEntry] = useState('');
   const [pendingFinish, setPendingFinish] = useState<number | null>(null);
+  const [openedWithDoubleAnswer, setOpenedWithDoubleAnswer] = useState(false);
 
   const current = session.current!;
   const engine = getEngine(currentDisciplineId(session));
@@ -64,9 +65,10 @@ export default function PentathlonPlay({
     }
 
     try {
-      onTurn({ score, finishDarts, openedWithDouble: needsOpening ? score > 0 : undefined });
+      onTurn({ score, finishDarts, openedWithDouble: needsOpening ? openedWithDoubleAnswer : undefined });
       setEntry('');
       setPendingFinish(null);
+      setOpenedWithDoubleAnswer(false);
       onError(null);
     } catch (caught) {
       if (caught instanceof InvalidVisitError) onError(caught.message);
@@ -143,16 +145,27 @@ export default function PentathlonPlay({
           onStage={onStageHit}
           onUndoHit={onUndo}
           onCommit={() => onTurn(current.pendingHits)}
+          allowEarlyCommit={engine.meta.allowEarlyCommit}
         />
       ) : (
         <div className="pent-keypad">
           <div className="pent-pending">
             <span className="pent-pending-chip">{entry === '' ? '0' : entry}</span>
-            <span className="pent-player-note">
-              {(activeState as { opened: boolean }).opened
-                ? 'この投球の得点を入力'
-                : 'ダブルイン：最初のダブルから加算されます'}
-            </span>
+            {(activeState as { opened: boolean }).opened ? (
+              <span className="pent-player-note">この投球の得点を入力</span>
+            ) : (
+              <label className="toggle-field compact-toggle">
+                <span>
+                  <strong>ダブルインで開始</strong>
+                  <small>最初の1投がダブルに入るまで加点されません</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={openedWithDoubleAnswer}
+                  onChange={(event) => setOpenedWithDoubleAnswer(event.target.checked)}
+                />
+              </label>
+            )}
           </div>
           <div className="pent-number-grid" role="group" aria-label="得点入力テンキー">
             {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((key) => (

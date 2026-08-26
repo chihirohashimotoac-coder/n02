@@ -53,6 +53,12 @@ export interface DisciplineMeta {
   /** What kind of input UI this discipline needs. */
   inputMode: 'visit-score' | 'dart-hits';
   unit: ResultUnit;
+  /**
+   * Whether a dart-hit turn may be committed before all dartsRemainingThisTurn() hits are staged.
+   * Only true for disciplines where stopping early is itself part of the rules (Golf); everywhere
+   * else a partial turn would desync the engine's fixed per-round/per-inning bookkeeping.
+   */
+  allowEarlyCommit?: boolean;
 }
 
 /**
@@ -76,6 +82,12 @@ export interface DisciplineEngine<TState = unknown, TInput = unknown> {
   describeTarget(state: TState): string;
   /** How many darts the player may still throw this turn (for dart-hit input UIs). */
   dartsRemainingThisTurn?(state: TState): number;
+  /**
+   * Called once both players have reached isFinished() with a tied compareResults(). Return a
+   * replacement (unfinished) state pair to keep playing instead of recording the draw - e.g. Cork's
+   * sudden-death re-throw, Baseball's extra innings. Return null/undefined to accept the draw.
+   */
+  continueOnTie?(a: TState, b: TState): [TState, TState] | null;
 }
 
 export interface PentathlonDisciplineRecord {

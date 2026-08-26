@@ -65,13 +65,16 @@ function sumSet(a: readonly number[], b: readonly number[]): Set<number> {
   return out;
 }
 
-const REACHABLE_1 = ONE_DART_SCORES;
-const REACHABLE_2 = [...sumSet(ONE_DART_SCORES, ONE_DART_SCORES)].sort((a, b) => a - b);
-const REACHABLE_3 = [...sumSet(REACHABLE_2, ONE_DART_SCORES)].sort((a, b) => a - b);
+// A visit's darts can each be a miss (0) - a score like 1 is only achievable as S1 + MISS + MISS, so
+// reachability must be computed over "scoring dart or miss", not just real scoring darts.
+const ONE_DART_OR_MISS: readonly number[] = [0, ...ONE_DART_SCORES];
+
+const REACHABLE_1 = ONE_DART_OR_MISS;
+const REACHABLE_2 = [...sumSet(ONE_DART_OR_MISS, ONE_DART_OR_MISS)].sort((a, b) => a - b);
+const REACHABLE_3 = [...sumSet(REACHABLE_2, ONE_DART_OR_MISS)].sort((a, b) => a - b);
 
 /** Is `total` an achievable 3-dart (or fewer) visit score at all (regardless of checkout)? */
 export function isReachableScore(total: number, maxDarts: 1 | 2 | 3 = 3): boolean {
-  if (total === 0) return true;
   const set = maxDarts === 1 ? REACHABLE_1 : maxDarts === 2 ? REACHABLE_2 : REACHABLE_3;
   return set.includes(total);
 }
@@ -89,7 +92,7 @@ export function validFinishDartCounts(remaining: number, maxDarts: 1 | 2 | 3 = 3
   const counts: number[] = [];
   if (maxDarts >= 1 && FINISH_DART_SCORES.has(remaining)) counts.push(1);
   if (maxDarts >= 2) {
-    for (const d1 of ONE_DART_SCORES) {
+    for (const d1 of ONE_DART_OR_MISS) {
       if (FINISH_DART_SCORES.has(remaining - d1)) {
         counts.push(2);
         break;
@@ -97,8 +100,8 @@ export function validFinishDartCounts(remaining: number, maxDarts: 1 | 2 | 3 = 3
     }
   }
   if (maxDarts >= 3) {
-    for (const d1 of ONE_DART_SCORES) {
-      for (const d2 of ONE_DART_SCORES) {
+    for (const d1 of ONE_DART_OR_MISS) {
+      for (const d2 of ONE_DART_OR_MISS) {
         if (FINISH_DART_SCORES.has(remaining - d1 - d2)) {
           counts.push(3);
           break;
