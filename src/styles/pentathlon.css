@@ -1,0 +1,591 @@
+/* Pentathlon styles. Every colour here comes from the shared theme tokens defined in app.css, so
+   the clean / neon / navy themes all apply without any Pentathlon-specific overrides. */
+
+.pent-setup {
+  display: grid;
+  gap: 16px;
+}
+
+.pent-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (width <= 720px) {
+  .pent-preset-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pent-preset-card {
+  border: 1px solid var(--line);
+  cursor: pointer;
+  background: #ffffffb8;
+  border-radius: 16px;
+  padding: 20px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition:
+    transform 0.18s,
+    border-color 0.18s,
+    background 0.18s,
+    box-shadow 0.18s;
+  position: relative;
+}
+
+[data-theme='neon'] .pent-preset-card {
+  background: #17231bb8;
+  color: var(--ink);
+}
+
+.pent-preset-card:hover {
+  border-color: #a9b5ad;
+  transform: translateY(-2px);
+}
+
+.pent-preset-card.selected {
+  border: 2px solid var(--green);
+  background: linear-gradient(145deg, #e6eee8bf, #ffffffe6);
+  box-shadow: 0 12px 30px #0d503a17;
+}
+
+[data-theme='neon'] .pent-preset-card.selected {
+  background: var(--green-soft);
+  box-shadow: none;
+}
+
+.pent-preset-card strong {
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+.pent-preset-card em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.pent-preset-card ol {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  counter-reset: pent-discipline;
+}
+
+.pent-preset-card li {
+  color: var(--muted);
+  font-size: 12px;
+  counter-increment: pent-discipline;
+}
+
+.pent-preset-card li::before {
+  content: counter(pent-discipline) '. ';
+  color: var(--green);
+  font-weight: 800;
+}
+
+/* --- progress rail --- */
+
+.pent-progress {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.pent-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pent-progress-head strong {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.pent-progress-head span {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pent-progress-list {
+  display: grid;
+  gap: 3px;
+}
+
+.pent-progress-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 3px 0;
+}
+
+.pent-progress-item .pent-state {
+  font-style: normal;
+  font-weight: 900;
+  text-align: center;
+}
+
+.pent-progress-item.done {
+  color: var(--ink);
+}
+
+.pent-progress-item.done .pent-state {
+  color: var(--green);
+}
+
+.pent-progress-item.playing {
+  color: var(--green-dark);
+  font-weight: 800;
+}
+
+[data-theme='neon'] .pent-progress-item.playing {
+  color: #2ee58a;
+}
+
+.pent-progress-item .pent-score {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* --- play screen --- */
+
+.pent-play {
+  display: grid;
+  gap: 14px;
+}
+
+.pent-players {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pent-players.solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pent-player {
+  border: 1px solid var(--line);
+  background: #ffffffb8;
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+[data-theme='neon'] .pent-player {
+  background: #17231bb8;
+}
+
+.pent-player::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: transparent;
+}
+
+.pent-player.active {
+  border-color: var(--green);
+  background: var(--surface);
+  box-shadow: 0 14px 34px #0d503a1a;
+}
+
+.pent-player.active::before {
+  background: var(--green);
+}
+
+.pent-player.finished {
+  opacity: 0.82;
+}
+
+.pent-player-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pent-player-head h3 {
+  font-size: 14px;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.pent-badge {
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: 800;
+  background: var(--surface-soft);
+  color: var(--muted);
+  flex: none;
+}
+
+.pent-badge.throw {
+  background: var(--green);
+  color: #fff;
+}
+
+.pent-badge.finished {
+  background: var(--green-soft);
+  color: var(--green-dark);
+}
+
+.pent-player-value {
+  font-size: clamp(34px, 11vw, 52px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.pent-player-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pent-target {
+  border: 1px solid #cedbd2;
+  background: var(--green-soft);
+  border-radius: 11px;
+  padding: 12px;
+  text-align: center;
+  display: grid;
+  gap: 3px;
+}
+
+[data-theme='neon'] .pent-target,
+[data-theme='navy'] .pent-target {
+  border-color: var(--line);
+}
+
+.pent-target span {
+  color: var(--green);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.pent-target strong {
+  color: var(--green-dark);
+  font-size: clamp(20px, 6vw, 28px);
+}
+
+[data-theme='neon'] .pent-target strong,
+[data-theme='neon'] .pent-target span {
+  color: #2ee58a;
+}
+
+/* --- dart hit keypad --- */
+
+.pent-pending {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  flex-wrap: wrap;
+}
+
+.pent-pending-chip {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.pent-pending-chip.empty {
+  color: var(--muted);
+  font-weight: 500;
+  border-style: dashed;
+}
+
+.pent-keypad {
+  display: grid;
+  gap: 8px;
+}
+
+.pent-ring-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.pent-ring-row button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 9px;
+  min-height: 46px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.pent-ring-row button.selected {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+
+.pent-ring-row button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pent-number-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.pent-number-grid button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 9px;
+  min-height: 48px;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.pent-number-grid button:hover:not(:disabled) {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.pent-number-grid button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pent-number-grid button.wide {
+  grid-column: span 2;
+  font-size: 13px;
+}
+
+.pent-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.pent-actions .secondary-button {
+  white-space: nowrap;
+}
+
+/* --- discipline / final result --- */
+
+.pent-result-table {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.pent-result-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  border-top: 1px solid var(--line);
+  min-height: 46px;
+  text-align: center;
+}
+
+.pent-result-row:first-child {
+  border-top: 0;
+}
+
+.pent-result-row.head {
+  background: var(--green-dark);
+  color: #fff;
+  min-height: 42px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.pent-result-row.total {
+  background: var(--surface-soft);
+  font-weight: 800;
+}
+
+.pent-result-row > span {
+  padding: 6px 8px;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pent-result-row > span.name {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.pent-result-row.head > span.name {
+  color: #fff;
+}
+
+.pent-result-row > span.value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.pent-result-row > span.value.win {
+  color: var(--green);
+  font-weight: 900;
+}
+
+[data-theme='neon'] .pent-result-row > span.value.win {
+  color: #2ee58a;
+}
+
+/* The winner is marked with a glyph as well as colour, so the outcome is never colour-only. */
+.pent-win-mark {
+  font-style: normal;
+  margin-right: 3px;
+}
+
+.pent-next-starter {
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+  display: grid;
+  gap: 3px;
+}
+
+.pent-next-starter span {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  font-weight: 800;
+}
+
+.pent-next-starter strong {
+  font-size: 15px;
+  color: var(--green-dark);
+}
+
+[data-theme='neon'] .pent-next-starter strong {
+  color: #2ee58a;
+}
+
+.pent-note {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.pent-hint {
+  border-radius: 9px;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+[data-theme='neon'] .pent-hint {
+  color: #8fd8b0;
+}
+
+/* --- share card --- */
+
+.pent-share-card {
+  width: 420px;
+  padding: 28px;
+  background: var(--canvas);
+  color: var(--ink);
+  display: grid;
+  gap: 14px;
+  font-family: 'Noto Sans JP', 'Yu Gothic UI', system-ui, sans-serif;
+}
+
+.pent-share-card .pent-share-head {
+  display: grid;
+  gap: 2px;
+  border-bottom: 2px solid var(--green);
+  padding-bottom: 12px;
+}
+
+.pent-share-card .pent-share-head b {
+  font-size: 30px;
+  letter-spacing: -0.05em;
+}
+
+.pent-share-card .pent-share-head span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+/* The mode grid gains a third equal card (Pentathlon) without changing the existing two. */
+.mode-grid.pent-mode-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (width <= 1080px) {
+  .mode-grid.pent-mode-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (width <= 720px) {
+  .mode-grid.pent-mode-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.checkmark.pent-resume-mark {
+  background: var(--amber);
+  font-size: 12px;
+}
+
+/* Visually hidden but available to screen readers - used to state game status in words rather than
+   relying on the ✓ / ▶ glyphs or colour alone. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

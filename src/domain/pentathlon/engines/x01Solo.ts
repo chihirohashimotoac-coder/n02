@@ -1,0 +1,148 @@
+import { resolveVisit } from '../../x01Core';
+import { isDouble, type DartHit } from '../../darts';
+import type { CompareOutcome, DisciplineEngine, DisciplineId, DisciplineResult } from '../types';
+
+export interface X01SoloState {
+  startScore: number;
+  remaining: number;
+  darts: number;
+  round: number;
+  finished: boolean;
+  checkedOut: boolean;
+  /** Double-in only: has this player opened their scoring yet? */
+  opened: boolean;
+  visits: Array<{ score: number; darts: number; bust: boolean; checkout: boolean }>;
+}
+
+export interface X01SoloInput {
+  score: number;
+  finishDarts?: number;
+  /** Double-in games: whether the visit's opening dart was a double. */
+  openedWithDouble?: boolean;
+}
+
+export interface X01SoloOptions {
+  id: DisciplineId;
+  name: string;
+  startScore: number;
+  doubleIn: boolean;
+  /** Max rounds before the attempt is abandoned unfinished; 0 = unlimited. */
+  roundLimit: number;
+}
+
+/**
+ * A single player's independent X01 attempt. Unlike the head-to-head match engine, finishing here
+ * never ends the other player's attempt - each player plays on until their own result is final,
+ * which is what Pentathlon requires.
+ */
+export function createX01SoloEngine(
+  options: X01SoloOptions,
+): DisciplineEngine<X01SoloState, X01SoloInput> {
+  const { id, name, startScore, doubleIn, roundLimit } = options;
+
+  return {
+    meta: {
+      id,
+      name,
+      description: doubleIn
+        ? `ダブルイン / ダブルアウト・${roundLimit}ラウンド制限`
+        : 'オープンイン / ダブルアウト',
+      inputMode: 'visit-score',
+      unit: 'darts',
+    },
+
+    createState: (): X01SoloState => ({
+      startScore,
+      remaining: startScore,
+      darts: 0,
+      round: 1,
+      finished: false,
+      checkedOut: false,
+      opened: !doubleIn,
+      visits: [],
+    }),
+
+    applyInput(state, input) {
+      if (state.finished) return state;
+
+      // Double-in: until the player opens with a double, nothing scores.
+      if (!state.opened && !input.openedWithDouble) {
+        const next: X01SoloState = {
+          ...state,
+          darts: state.darts + 3,
+          round: state.round + 1,
+          visits: [...state.visits, { score: 0, darts: 3, bust: false, checkout: false }],
+        };
+        return finalizeIfRoundLimitReached(next, roundLimit);
+      }
+
+      const resolution = resolveVisit(state.remaining, input.score, input.finishDarts);
+      const next: X01SoloState = {
+        ...state,
+        opened: true,
+        remaining: resolution.after,
+        darts: state.darts + resolution.darts,
+        round: state.round + 1,
+        finished: resolution.checkout,
+        checkedOut: resolution.checkout,
+        visits: [
+          ...state.visits,
+          {
+            score: resolution.bust ? 0 : input.score,
+            darts: resolution.darts,
+            bust: resolution.bust,
+            checkout: resolution.checkout,
+          },
+        ],
+      };
+      return next.finished ? next : finalizeIfRoundLimitReached(next, roundLimit);
+    },
+
+    isFinished: (state) => state.finished,
+
+    getResult(state): DisciplineResult {
+      return {
+        value: state.checkedOut ? state.darts : Number.POSITIVE_INFINITY,
+        unit: 'darts',
+        completed: state.checkedOut,
+        darts: state.darts,
+        label: state.checkedOut ? `${state.darts} DARTS` : 'DNF',
+      };
+    },
+
+    // Fewer darts wins. A player who never checked out always loses to one who did.
+    compareResults: (a, b): CompareOutcome => {
+      if (a.completed && !b.completed) return 'p0';
+      if (!a.completed && b.completed) return 'p1';
+      if (!a.completed && !b.completed) return 'draw';
+      if (a.value < b.value) return 'p0';
+      if (b.value < a.value) return 'p1';
+      return 'draw';
+    },
+
+    describeTarget(state) {
+      if (state.finished) return 'FINISHED';
+      if (!state.opened) return 'ダブルインで開始';
+      return `残り ${state.remaining}`;
+    },
+  };
+}
+
+function finalizeIfRoundLimitReached(state: X01SoloState, roundLimit: number): X01SoloState {
+  if (roundLimit > 0 && state.round > roundLimit) {
+    return { ...state, finished: true };
+  }
+  return state;
+}
+
+/** Convenience for UIs that collect dart hits rather than a typed visit total. */
+export function visitFromHits(hits: DartHit[]): { total: number; firstIsDouble: boolean } {
+  const total = hits.reduce((sum, hit) => sum + dartValue(hit), 0);
+  return { total, firstIsDouble: hits.length > 0 && isDouble(hits[0]) };
+}
+
+function dartValue(hit: DartHit): number {
+  if (hit.kind === 'miss') return 0;
+  if (hit.kind === 'bull') return hit.ring === 'inner' ? 50 : 25;
+  return hit.value * (hit.ring === 'triple' ? 3 : hit.ring === 'double' ? 2 : 1);
+}
