@@ -1,207 +1,208 @@
-# Pentathlon rules research
+# Pentathlonルール調査
 
-This document records the rules used to implement n02's Pentathlon mode, and where they came from.
+このドキュメントは、n02のPentathlonモードを実装するにあたって採用したルールと、その出典を記録したものです。
 
-## Access constraints (read before anything else)
+## 調査時の制約（最初に必ずお読みください）
 
-This session's network egress is policy-restricted. Direct fetches to the primary sources named in
-the task were **blocked at the network gateway** (`EGRESS_BLOCKED`, confirmed for every domain below),
-so nothing in this document could be pulled from a live primary page. Everything here comes from
-search-engine result snippets/summaries (via the WebSearch tool) that quote or paraphrase secondary
-community sources, cross-checked across multiple independent sources where possible.
+このセッションのネットワーク発信はポリシーにより制限されています。依頼で指定された一次情報源への直接アクセスは
+**すべてネットワークゲートウェイでブロックされ**（`EGRESS_BLOCKED`、下記の全ドメインで確認済み）、
+このドキュメントの内容を実際のページから直接取得することはできませんでした。ここに記載した内容はすべて、
+WebSearchツールによる検索結果のスニペット／要約（二次情報源を引用・要約したもの）であり、
+可能な範囲で複数の独立した情報源を突き合わせて確認しています。
 
-Blocked during research: `nakka.com` (n01 / i-Pentathlon home), `darts.or.jp` (公益社団法人 日本ダーツ協会,
-the real "JDA"), `jsfd.or.jp` (Japan Sports Federation of Darts), `9darts.jugem.jp`, `en.wikipedia.org`,
-`dartbase.com`, `web.archive.org`.
+調査中にブロックされたドメイン：`nakka.com`（n01 / i-Pentathlonの本家サイト）、`darts.or.jp`（公益社団法人
+日本ダーツ協会、本来の「JDA」）、`jsfd.or.jp`（Japan Sports Federation of Darts）、`9darts.jugem.jp`、
+`en.wikipedia.org`、`dartbase.com`、`web.archive.org`。
 
-Because of this, **no numeric official point-conversion table for either Pentathlon preset could be
-retrieved or confirmed.** This is flagged explicitly below rather than invented. Per the task's own
-priority order (repo → existing code → git history → docs → JDA official info → nakka.com public
-rules → reliable secondary sources), secondary sources were used only after primary sources proved
-unreachable, and every rule below is marked as **Confirmed** (multiple independent sources agree),
-**Reasonably corroborated** (consistent single/generic-source), or **Undetermined / interpreted**
-(no reliable source found; a documented, conservative implementation choice was made instead of
-guessing at the competitive rule).
+このため、**どちらのPentathlonプリセットについても、公式の得点換算ポイント表を取得・確認することはできませんでした。**
+この事実は推測で埋めるのではなく、以下に明示しています。依頼自体が示す調査の優先順位（リポジトリ→既存コード→
+gitの履歴→ドキュメント→JDA公式情報→nakka.comの公開ルール→信頼できる補助資料）に従い、一次情報にアクセス
+できないことを確認したうえで二次情報源を使用しました。以下の各ルールには、
+**確認済み**（複数の独立した情報源が一致）、**概ね裏付けあり**（単一だが一貫した情報源／一般的な慣行との整合）、
+**未確定・解釈による実装**（信頼できる情報源が見つからず、競技ルールを推測するのではなく、保守的な実装判断を
+下しそれを明記したもの）のいずれかを付記しています。
 
-No n01 source code, images, CSS, or JavaScript were viewed or copied at any point in this research or
-in the implementation. Only the fact of public game rules/format was used.
+この調査および実装のいずれの段階でも、n01のソースコード・画像・CSS・JavaScriptは一切閲覧・コピーしていません。
+使用したのは公開されている「ゲームルール・フォーマット」という事実のみです。
 
 ---
 
-## JDA preset — 501 → Half-It → Round the Clock on Doubles → Golf → 301
+## JDAプリセット — 501 → ハーフイット → ラウンドザクロック（オンダブルス）→ ゴルフ → 301
 
-"JDA" here names the preset after 公益社団法人日本ダーツ協会 (Japan Darts Association), whose site
-confirms (via search index metadata, since the page itself was unreachable) that Pentathlon is part of
-their instructor-qualification curriculum. Its own numeric rulebook could not be reached, so each
-discipline below is implemented from the closest confirmable/generic ruleset for that named game,
-explicitly **not** the "British Pentathlon" event (a different, separately documented format — see
-the note at the end of this section).
+ここでの「JDA」は、公益社団法人日本ダーツ協会にちなんだ名称です。同協会のサイトは（ページ自体には
+アクセスできなかったものの、検索エンジンのインデックス情報から）Pentathlonが指導員資格制度の一部である
+ことを確認できました。同協会自身の数値ルールブックには到達できなかったため、以下の各種目は、その名称に
+対応する最も確認可能・一般的なルールセットから実装しており、（依頼で明確に区別するよう指示された）
+「British Pentathlon」とは明示的に**異なるもの**として扱っています（この節末尾の注記を参照）。
 
 ### 1. 501
-**Confirmed** (standard X01 convention already implemented by n02's existing 通常01 engine, reused
-as-is): straight-in, double-out, start 501, 3 darts/visit, bust on remaining <0, remaining ==1, or
-reaching 0 on a non-double dart. compareResults = fewer darts used to check out wins; a player who
-does not finish records no checkout for this discipline.
+**確認済み**（既存n02の「通常01」エンジンが既に実装している標準的なX01方式をそのまま再利用）：
+ストレートイン・ダブルアウト、開始点数501、1投3ダーツ、残り点数がマイナスになる・残り1になる・
+ダブル以外で0にする、のいずれかでバスト。compareResults（勝敗比較）＝使用ダーツ数が少ない方が勝ち。
+上がれなかったプレイヤーは、この種目でチェックアウトなしとして記録されます。
 
-### 2. Half-It
-**Reasonably corroborated** across several independent Japanese darts-rule sites (darts-rule.com,
-dartsmeeee.com, ruleof.info, kit-work.com all describe the same sequence). Adopted structure:
+### 2. ハーフイット
+複数の独立した日本語ダーツルールサイト（darts-rule.com、dartsmeeee.com、ruleof.info、kit-work.com、
+いずれも同一のシーケンスを記載）で**概ね裏付けあり**。採用した構成は以下の通りです。
 
-- Start score: **40 points** (not zero).
-- 9 rounds, 3 darts/round, fixed target sequence:
-  `15, 16, Double(any), 17, 18, Triple(any), 19, 20, Bull`.
-- Any of the 3 darts hitting the round's target scores `target × multiplier` (e.g. hitting D16 in
-  round 2 scores 32; in the wildcard "Double"/"Triple" rounds, *any* double/triple scores
-  `hitNumber × multiplier`, and Bull is a single 25/double 50 target like any other round).
-- If **none** of the 3 darts hit the round's target at all, the player's running score is **halved**
-  (rounded down, standard integer-half convention; this specific rounding direction was not
-  independently re-confirmed and is marked **interpreted**).
-- After 9 rounds, highest score wins. compareResults = higher score wins; tie = draw.
+- 開始点数：**40点**（0点からではありません）。
+- 全9ラウンド、1ラウンド3投、固定のターゲット順：
+  `15、16、ダブル（どこでも可）、17、18、トリプル（どこでも可）、19、20、ブル`。
+- 3投のいずれかがそのラウンドのターゲットに入れば `ターゲット × 倍率` を加点（例：2ラウンド目にD16へ
+  入れば32点。「ダブル」「トリプル」のワイルドカードラウンドでは、*どの数字の*ダブル／トリプルでも
+  `命中した数字 × 倍率` で加点。ブルラウンドはアウターブル25点／インナーブル50点として通常のラウンドと
+  同様に扱います）。
+- 3投とも全くターゲットに入らなかった場合、その時点の持ち点は**半分**になります
+  （小数点以下切り捨て。標準的な整数の半分計算の慣行ですが、この端数処理の方向自体は独立した
+  再確認ができておらず、**解釈による実装**です）。
+- 9ラウンド終了後、得点が高い方が勝ち。compareResults ＝ 得点が高い方が勝ち、同点は引き分け。
 
-### 3. Round the Clock on Doubles
-**Reasonably corroborated** core mechanic, **undetermined** exact finish/point formula for JDA
-specifically. Multiple sources describe standard "Round the Clock" as sequential 1→20 (any hit
-advances) with an "上級者向け" advanced variant requiring the **double** of each number to advance
-("ダブルまわり"); the JDA discipline name explicitly is the doubles variant. A separate, well-documented
-"Round the Clock Doubles" event inside the (distinct) **British Pentathlon** format adds a 42-dart cap
-and a bull finish, with points = doubles hit + darts saved. Since JDA's own numeric formula could not
-be retrieved, and the task explicitly warns not to conflate JDA with British Pentathlon, the game
-*mechanic* (not the point formula) is adopted from the corroborated common ground:
+### 3. ラウンドザクロック（オンダブルス）
+基本メカニズムは**概ね裏付けあり**ですが、JDA固有の正確なフィニッシュ／得点計算式は**未確定**です。
+複数の情報源が、標準的な「ラウンドザクロック」を1→20の順（どの当たり方でも進行可）とし、
+「上級者向け」の発展版として各数字の**ダブル**でのみ進行できる「ダブルまわり」を挙げています。
+JDAの種目名は明示的にこのダブルス版です。（JDAとは別の）**British Pentathlon**フォーマットには、
+よく文書化された「Round the Clock Doubles」という種目があり、42投の上限とブルでのフィニッシュを設け、
+得点＝命中したダブルの数＋残りダーツ数、という計算式を採用しています。JDA自身の数値計算式は取得できず、
+依頼自体がJDAとBritish Pentathlonを混同しないよう明確に注意を促しているため、ここでは（得点計算式ではなく）
+*ゲームの仕組み*のみを、裏付けの取れた共通部分から採用しています。
 
-- Sequential targets **Double 1 → Double 20**, in order; only the current target's double advances
-  the player, any other hit (including a non-double hit on the correct number) is a non-advancing dart.
-- Final target after D20: **Bull** (either the outer or inner ring counts as completion — sources
-  disagree on whether an inner "double bull" is required, so the easier "any bull" reading was taken
-  to avoid inventing a harder rule than confirmed). **Interpreted.**
-- No hard round cap by default (darts used is the natural performance metric, consistent with the
-  task's own compareResults guidance), but a generous optional cap is offered for parity with the
-  British-Pentathlon-documented 42-dart convention. **Interpreted**, not asserted as JDA's own cap.
-- compareResults = fewer darts to complete all 21 targets wins; a player who doesn't complete records
-  their count of targets reached as a fallback ranking, clearly not a formal JDA score.
+- 順番に**ダブル1 → ダブル20**を狙う。現在のターゲットのダブルのみが進行条件となり、それ以外の当たり方
+  （正しい数字へのダブル以外の命中を含む）は進行しないダーツとして扱う。
+- D20の次の最終ターゲットは**ブル**（アウター・インナーいずれでも完了と見なす — インナーブル（ダブル
+  ブル）を必須とすべきかどうかは情報源によって見解が分かれたため、確認が取れていない厳しいルールを
+  勝手に採用しないよう、easier な「どちらのブルでも可」という解釈を採用。**解釈による実装**）。
+- デフォルトではラウンド上限を設けない（依頼のcompareResults方針に沿い、使用ダーツ数を自然な
+  成績指標とする）が、British Pentathlonの42投という慣行に準じた、任意設定可能な上限も用意。
+  こちらも**解釈による実装**であり、JDA自身の上限として確認されたものではありません。
+- compareResults ＝ 全21ターゲットを完了するまでの使用ダーツ数が少ない方が勝ち。完了できなかった
+  プレイヤーは到達ターゲット数を代替の順位付けとして記録しますが、これは正式なJDAスコアではありません。
 
-### 4. Golf
-**Confirmed** stroke-scoring convention (converges across multiple independent English-language
-dart-rule sites): each hole = one board number, played in ascending numerical order; up to 3 darts
-per hole, but a player may stop after dart 1 or 2 — **only the last dart thrown counts**, so continuing
-is a gamble, not a bonus. Strokes: Double = 1, Treble = 2, Single = 3, Miss = 5. Lowest total strokes
-wins. **Undetermined**: hole count for the JDA pentathlon specifically. Sources confirm both a 9-hole
-("half") and 18-hole variant exist generically; **9 holes (numbers 1–9) was chosen** as the practical
-default for a 5-event pentathlon, documented here as an implementation choice, not a confirmed JDA fact.
-compareResults = fewer total strokes wins; tie = draw.
+### 4. ゴルフ
+**確認済み**のストローク計算方式（複数の独立した英語ダーツルールサイトで一致）：各ホールはボード上の
+1つの数字に対応し、番号の昇順でプレイ。1ホールにつき最大3投可能ですが、1投目・2投目で投球を止めることも
+でき、**最後に投げたダーツのみが有効**（続けて投げるのは賭けであり、ボーナスにはなりません）。
+ストローク：ダブル＝1、トリプル＝2、シングル＝3、ミス＝5。合計ストロークが少ない方が勝ち。
+**未確定**：JDA Pentathlon固有のホール数。情報源からは9ホール（「ハーフ」）・18ホールの両方の
+バリエーションが一般的に存在することが確認できたため、5種目構成のPentathlonとして実用的な
+**9ホール（1～9番）を採用**しました。これはJDAの確認済み事実ではなく、実装上の判断としてここに
+明記します。compareResults ＝ 合計ストロークが少ない方が勝ち、同点は引き分け。
 
 ### 5. 301
-**Reasonably corroborated**: multiple Japanese sources describe "301" in a competitive/pentathlon
-context as **Double-In / Double-Out**, with a **13-round limit** (39 darts) — scoring 0 / a loss if not
-finished within the limit. This is different from n02's existing 通常01 (which is straight-in). The
-existing X01 engine gains an additive `doubleIn` option (default `false`, so 通常01/Checkout/501 are
-unaffected) used only by this discipline. compareResults = fewer darts wins; a player who doesn't
-finish inside the round limit is treated as not having checked out (loses to anyone who did).
+**概ね裏付けあり**：複数の日本語情報源が、競技／Pentathlonの文脈における「301」を**ダブルイン／
+ダブルアウト**、かつ**13ラウンド制限**（39投）とし、この制限内に上がれない場合は0点／敗北としています。
+これはn02の既存「通常01」（ストレートイン）とは異なります。既存X01エンジンには追加で `doubleIn`
+オプションを設けました（デフォルトは `false` のため、通常01／チェックアウト／501には影響しません）。
+この種目でのみ使用します。compareResults ＝ 使用ダーツ数が少ない方が勝ち。ラウンド制限内に
+上がれなかったプレイヤーは、上がったプレイヤーに対して負けとして扱います。
 
-**Note on "British Pentathlon"**: per the task's own instruction this must not be confused with JDA.
-British Pentathlon is a separately, well-documented event (Half-It / Shanghai / Round-the-Board-on-
-doubles, etc. per dartbase.com's summary) with its own scoring table; it was consulted only as
-corroborating background for the *mechanics* of Round the Clock on Doubles above, never adopted as
-"the JDA table."
+**「British Pentathlon」に関する注記**：依頼の指示通り、これはJDAと混同してはいけません。
+British Pentathlonは別に、よく文書化された種目（dartbase.comの要約によればハーフイット／
+シャンハイ／ラウンドザボードオンダブルス等）で構成され、独自の得点表を持ちます。今回はあくまで
+上記「ラウンドザクロック（オンダブルス）」の*仕組み*を補強する背景情報としてのみ参照しており、
+「JDAの得点表」として採用したことは一度もありません。
 
 ---
 
-## n01 / i-Pentathlon preset — Cork → 301 → Baseball → 501 → Cricket
+## n01 / i-Pentathlonプリセット — コーク → 301 → ベースボール → 501 → クリケット
 
-This lineup (Cork, 301, Baseball, 501, Cricket) matches both the user-specified nakka.com/i/pen/
-line-up and an independent secondary description of a Japanese darts "Pentathlon（五種競技）" found at
-a hobbyist blog (Road 2 9darts), which states the format explicitly:
+この5種目構成（コーク、301、ベースボール、501、クリケット）は、依頼で指定されたnakka.com/i/pen/の
+構成と一致するだけでなく、日本語ダーツの「ペンタスロン（五種競技）」を紹介する独立した二次情報源
+（個人ブログ「Road 2 9darts」）でも、フォーマットが明確に述べられていました。
 
 > 「ペンタスロンはコーク、301、ベースボール、501、クリケットの5種目を順にこなし、なるべく多く得点することを
 > 目指すゲームです。種目毎のスコアを得点換算表と照らし合せて、出てきたその得点を合計します。」
 
-This confirms the *existence* of an official score→points conversion-table system for this exact
-lineup (each discipline's raw result is looked up in a conversion table, and the resulting points are
-summed for the overall placing) — but the **numeric table itself was not retrievable** from this
-environment (the source page is a blocked domain; nakka.com itself, the authoritative source, is also
-blocked). This is the central limitation of this implementation: **see "Overall scoring" below.**
+これにより、この構成には公式の「素点→ポイント」換算表システムが*存在する*こと自体は裏付けられます
+（各種目の素点を換算表に照らして得点化し、その合計で総合順位を決めるという仕組み）。しかし、**その
+換算表の具体的な数値は本環境からは取得できませんでした**（出典ページはブロックされたドメインであり、
+一次情報源であるnakka.com自体もブロックされています）。これが今回の実装における最大の制約です
+（後述の「総合成績・順位」を参照）。
 
-### 1. Cork
-**Confirmed** base game ("diddle for the middle"): each player throws at the bull; inner bull (50)
-beats outer bull (25) beats any board hit by proximity; ties are re-thrown. This is normally used only
-to decide who throws first, not as a scored discipline in its own right, so **the exact format nakka.com
-uses when Cork appears as a full Pentathlon discipline (dart count, tie procedure) could not be
-confirmed** — no source describing it as a standalone scored event was found. **Interpreted**
-implementation: each player throws 1 dart at the bull; closest wins the discipline outright (Inner
-Bull > Outer Bull > single-dart board proximity > miss); an exact tie triggers a sudden-death re-throw.
-compareResults = closer to centre wins; true tie = draw.
+### 1. コーク
+**確認済み**の基本ゲーム（いわゆる「ディドル・フォー・ザ・ミドル」）：各プレイヤーがブルを狙って投げ、
+インナーブル（50点）＞アウターブル（25点）＞ボード上の近さ、の順で近い方が勝ち、同着は投げ直し。
+これは通常、単に「どちらが先攻か」を決めるためだけに使われるものであり、独立した採点対象の種目として
+用いられる例は一般的ではないため、**nakka.comが「コーク」をPentathlonの正式種目として使う際の
+具体的な形式（投数、同着時の処理）は確認できませんでした** — 独立した採点種目としての説明を記載した
+情報源は見つかりませんでした。**解釈による実装**：各プレイヤーがブルに向けて1投し、中心に近い方が
+その種目にそのまま勝利（インナーブル＞アウターブル＞ボードへの1投の近さ＞ミス）。完全な同着の場合は
+サドンデス方式で投げ直します。compareResults ＝ 中心に近い方が勝ち、真の同着は引き分け。
 
 ### 2. 301
-Same X01 engine as JDA's 301 above (**Reasonably corroborated**: Double-In/Double-Out, 13-round
-limit). Reused identically — one engine, two presets.
+上記JDAの301と同じX01エンジンを使用（**概ね裏付けあり**：ダブルイン／ダブルアウト、13ラウンド制限）。
+同一エンジンをそのまま再利用しています — 1つのエンジンを2つのプリセットで共有。
 
-### 3. Baseball
-**Confirmed**, converges across independent Japanese and English sources: 9 innings, inning *N* only
-scores hits on number *N* (other numbers don't count that inning), 3 darts/inning ("at-bats"),
-Single = 1 run, Double = 2 runs, Triple = 3 runs (max 9 runs/inning on three triples), miss = 0.
-Highest total runs after 9 innings wins; a tie plays extra innings (10, 11, …) until broken.
-compareResults = higher total runs wins; still tied after the extra-innings cap = draw (a bounded cap
-is applied for a practical UI rather than literally unbounded innings).
+### 3. ベースボール
+**確認済み**、独立した日本語・英語情報源の間で内容が一致：全9イニング、イニング*N*ではその数字*N*への
+命中のみが得点になります（他の数字はそのイニングでは無効）、1イニング3投（「打席」）、
+シングル＝1点、ダブル＝2点、トリプル＝3点（トリプル3本で1イニング最大9点）、ミス＝0点。
+9イニング終了時点で合計得点が高い方が勝ち。同点の場合は延長イニング（10、11、…）に入り、決着する
+まで続けます。compareResults ＝ 合計得点が高い方が勝ち。延長上限に達してもなお同点の場合は引き分け
+（実用上のUIとして、無制限にイニングを続けるのではなく上限を設けています）。
 
 ### 4. 501
-Same X01 engine as JDA's 501 (straight-in/double-out). One engine, two presets.
+JDAの501と同じX01エンジン（ストレートイン／ダブルアウト）。1つのエンジンを2つのプリセットで共有。
 
-### 5. Cricket
-**Confirmed** base mechanics, consistently documented: numbers 20, 19, 18, 17, 16, 15 and Bull only.
-Each target needs 3 marks to "open" (Single = 1 mark, Double = 2, Triple = 3 — Bull counts outer = 1,
-inner = 2 — accumulated across up to 3 darts/visit); marks beyond the 3rd on an opened target score
-points equal to `target value × surplus marks` (Bull = 25).
+### 5. クリケット
+**確認済み**の基本メカニクスで、内容は一貫して記載されています：使用する数字は20・19・18・17・16・15
+とブルのみ。各ターゲットは3マークで「オープン」（シングル＝1マーク、ダブル＝2マーク、トリプル＝
+3マーク — ブルはアウター＝1マーク、インナー＝2マーク — 1投につき最大3投まで累積可能）。オープン後、
+3マークを超えた分は `ターゲットの数字 × 超過マーク数` の得点になります（ブル＝25点扱い）。
 
-**Deliberate deviation — read this carefully.** In tournament Cricket the *opponent* can close your
-number and stop you scoring on it; that head-to-head territory-denial dynamic is the game's defining
-feature. n02's Pentathlon implements **independent per-player attempts instead**: each player opens
-and scores on their own targets and the opponent cannot close them out. This is a conscious trade-off
-forced by two hard requirements of this mode: (a) 1-player Pentathlon must play the same discipline
-at all, and (b) the task requires each player to *complete their own official result* rather than
-having one player's finish terminate the other's attempt. This is an **implementation decision, not a
-rule finding** — tournament Cricket is not what is being modelled here, and the interactive variant
-would need a different session model to support.
+**意図的な仕様の相違点 — ここは重要なので必ずお読みください。** 大会競技用のクリケットでは、
+*相手*が自分のオープンした数字をクローズさせることで、その数字への加点を止めることができ、この
+「陣地の奪い合い（テリトリー・デナイアル）」がこのゲームの本質的な特徴です。n02のPentathlonでは
+代わりに**各プレイヤーが完全に独立して攻略する方式**を採用しています：各プレイヤーは自分自身の
+ターゲットをオープンし、そこに加点していきますが、相手がそれをクローズすることはできません。
+これは、本モードが持つ2つの必須要件から意図的に選んだトレードオフです：(a) 1人プレイの
+Pentathlonでも同じ種目をプレイできる必要があること、(b) 依頼の要件として、片方が上がった瞬間に
+もう片方の挑戦が終了するのではなく、**各プレイヤーが自分自身の正式な成績を完走して確定させる**
+必要があること。これは**実装上の判断であり、ルール調査の結論ではありません** — つまり、ここで
+実装しているのは大会競技としてのクリケットそのものではなく、相手との駆け引きを伴うバリアント
+（対戦型）を実装するには、別のセッション設計が必要になります。
 
-An attempt ends when the player closes all 7 targets, or at a **20-round limit** (this cap is
-**interpreted**, not a confirmed nakka.com number). compareResults: closing all 7 targets outranks not
-closing them; among players of equal closing status, more points wins; otherwise draw.
+1回の挑戦は、7ターゲットすべてをクローズした時点、または**20ラウンドの上限**（この上限は
+**解釈による実装**であり、nakka.comで確認された数値ではありません）で終了します。
+compareResults：7ターゲットすべてをクローズした方が、していない方より優位。クローズの状況が
+同じ場合は得点が高い方が勝ち、それ以外は引き分け。
 
 ---
 
-## Overall Pentathlon result / ranking
+## 総合Pentathlon成績・順位
 
-The task requires: *if an official total-points system exists, use it — never invent an overall winner
-from win-count alone.* Research above establishes that **an official score-to-points conversion table
-almost certainly exists for the Cork/301/Baseball/501/Cricket lineup** (and plausibly for JDA's lineup
-too, per the British-Pentathlon-adjacent convention), but its **numeric values were not retrievable**
-from any source reachable in this environment.
+依頼の要件：*公式の総合ポイント制度が存在する場合はそれに従い、勝利数だけで独自に総合優勝を決めては
+ならない。* 上記の調査により、Cork/301/Baseball/501/Cricketの構成については**公式の素点→ポイント
+換算表がほぼ確実に存在する**こと（また、British Pentathlonに近い慣行から見て、JDA構成についても
+存在する可能性が高いこと）が分かりましたが、**その具体的な数値は本環境からは取得できませんでした**。
 
-Rather than fabricate plausible-looking numbers and present them as "the official points," the
-implementation:
+もっともらしく見える数値をでっち上げて「これが公式のポイントです」と提示するのではなく、
+本実装では以下のように扱っています。
 
-- Shows each discipline's **actual result** for both players (darts/score/runs/etc., whichever is
-  native to that discipline) side by side — this part is never in doubt.
-- Determines each discipline's **winner** via that engine's own `compareResults()` (never raw-number
-  comparison across unrelated disciplines).
-- Reports the Pentathlon **TOTAL/RESULT** as each player's **discipline-win count** (out of 5), clearly
-  labelled in the UI as "Discipline wins," explicitly **not** labelled as an official points total.
-- If a future contributor obtains the real conversion table, it is designed to slot into
-  `compareResults`'s neighbourhood (`src/domain/pentathlon/engines/*`) without changing the session
-  controller or UI contracts.
+- 各種目の**実際の成績**（ダーツ数／得点／得点／その種目固有の単位）を両プレイヤー並べて表示します
+  — ここには一切の疑いがありません。
+- 各種目の**勝者**は、そのゲームエンジン自身が持つ `compareResults()` によって判定します
+  （異なる種目間で単純に数値だけを比較することは絶対にしません）。
+- Pentathlonの**総合成績（TOTAL/RESULT）**は、各プレイヤーの**種目勝利数**（5種目中何勝したか）
+  として表示し、UI上でも「種目勝利数（Discipline wins）」であることを明示し、公式のポイント合計
+  では**ない**ことが分かるようにしています。
+- 将来、本物の換算表を入手できた場合に備え、`compareResults` の近く（`src/domain/pentathlon/engines/*`）
+  に組み込めるよう設計しており、Session Controllerやコンポーネント側の設計は変更せずに済みます。
 
-This is the "確定不能な場合は事実と実装上の扱いを明確にする" (undeterminable → state the fact and the
-implementation's actual behaviour) case the task anticipates, applied honestly rather than resolved by
-guesswork. It also directly answers the "can 2 players alone even populate an official points table"
-concern the task raises: most such tables are normalized against a wide competitive field (like a golf
-handicap table), so even *with* the real numbers, a 2-player casual session couldn't reproduce an
-official tournament placing anyway — win-count is the honest, self-consistent substitute for exactly
-that reason.
+これは依頼が想定していた「確定不能な場合は事実と実装上の扱いを明確にする」というケースに該当し、
+推測で押し切るのではなく、正直にその通りに対応したものです。また、依頼が挙げていた「2人だけでは
+公式の総合ポイントを確定できないのではないか」という懸念にも、これは直接の答えになっています：
+この種の換算表の多くは、ゴルフのハンディキャップ表のように、幅広い競技母集団に対して正規化されて
+いるものです。そのため、たとえ本物の数値を入手できたとしても、2人だけのカジュアルなセッションで
+公式大会の順位を再現することはそもそもできません。種目勝利数は、まさにその理由により、誠実かつ
+自己完結的な代替指標だと言えます。
 
-## Contradictions found
+## 見つかった矛盾点
 
-- **"Round the Clock" bull requirement**: sources disagree on whether the closing Bull must be the
-  harder inner ("double") bull or any bull. Not resolved by further searching within this session's
-  network constraints; documented above as an explicit implementation choice (any bull), not silently
-  picked.
-- No other direct rule-vs-rule contradiction was found between sources (most secondary sources agreed
-  with each other where they overlapped); the larger gap throughout is **missing** JDA/n01-specific
-  numeric detail (point tables, exact round caps) rather than conflicting numbers.
+- **「ラウンドザクロック」のブル要件**：クローズ時のブルが、より難しいインナー（ダブル）ブルで
+  なければならないのか、どちらのブルでもよいのかについて、情報源同士で見解が分かれていました。
+  このセッションのネットワーク制約の中ではこれ以上の調査による解決ができなかったため、上記の通り、
+  「どちらのブルでも可」という実装上の判断であることを明示し、黙って一方を採用することはしていません。
+- それ以外に、情報源同士が真っ向から矛盾するルールは見つかりませんでした（重複して確認できた
+  範囲では、二次情報源同士はおおむね一致していました）。全体を通して大きいのは、矛盾ではなく
+  JDA／n01固有の**数値情報の欠落**（ポイント表、正確なラウンド上限など）です。
