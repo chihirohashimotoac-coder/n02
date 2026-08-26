@@ -372,18 +372,18 @@ describe('X01 solo attempts', () => {
     expect(state.visits[2].bust).toBe(true);
   });
 
-  it('301: double-in means nothing scores until the player opens with a double', () => {
+  it('301: double-in is the player\'s own responsibility - entering 0 for a missed double leaves remaining unchanged', () => {
     let state = engine301.createState();
-    state = engine301.applyInput(state, { score: 60, openedWithDouble: false });
+    state = engine301.applyInput(state, { score: 0 });
     expect(state.remaining).toBe(301);
     expect(state.darts).toBe(3);
-    state = engine301.applyInput(state, { score: 60, openedWithDouble: true });
+    state = engine301.applyInput(state, { score: 60 });
     expect(state.remaining).toBe(241);
   });
 
   it('301: exceeding the 13-round limit ends the attempt as DNF', () => {
     let state = engine301.createState();
-    for (let i = 0; i < 14; i++) state = engine301.applyInput(state, { score: 0, openedWithDouble: true });
+    for (let i = 0; i < 14; i++) state = engine301.applyInput(state, { score: 0 });
     expect(engine301.isFinished(state)).toBe(true);
     expect(engine301.getResult(state).completed).toBe(false);
     expect(engine301.getResult(state).label).toBe('DNF');

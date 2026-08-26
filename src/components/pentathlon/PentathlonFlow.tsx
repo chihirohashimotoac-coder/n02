@@ -3,6 +3,7 @@ import TopBar from '../TopBar';
 import ThemeSelect from '../ThemeSelect';
 import PentathlonSetup from './PentathlonSetup';
 import PentathlonPlay from './PentathlonPlay';
+import PentathlonX01Play from './PentathlonX01Play';
 import DisciplineResult from './DisciplineResult';
 import PentathlonResult from './PentathlonResult';
 import {
@@ -10,10 +11,12 @@ import {
   applyTurn,
   canUndo as canUndoSession,
   createPentathlonSession,
+  currentDisciplineId,
   stageHit,
   undo as undoSession,
   type CreateSessionOptions,
 } from '../../domain/pentathlon/session';
+import { getEngine } from '../../domain/pentathlon/presets';
 import {
   clearPentathlonSession,
   loadPentathlonSession,
@@ -113,46 +116,44 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) 
     );
   }
 
-  return (
-    <div className="app-shell">
-      <TopBar
-        onBrandClick={handleExitToMenu}
-        actions={
-          <button type="button" className="subtle-button" onClick={handleExitToMenu}>
-            中断して設定へ
-          </button>
-        }
+  // Gameplay and its result screens are fullscreen, chrome-free views - same precedent as GameScreen
+  // (which bypasses TopBar entirely, including for its own match-result screen).
+  if (session.status === 'playing' && session.current) {
+    const engine = getEngine(currentDisciplineId(session));
+    return engine.meta.inputMode === 'visit-score' ? (
+      <PentathlonX01Play
+        key={session.currentDisciplineIndex}
+        session={session}
+        onTurn={handleTurn}
+        onUndo={handleUndo}
+        canUndo={canUndoSession(session)}
+        onExit={handleExitToMenu}
+        error={error}
+        onError={setError}
       />
-      <section className="setup-layout">
-        <div className="panel setup-panel">
-          {session.status === 'playing' && session.current && (
-            <PentathlonPlay
-              session={session}
-              onTurn={handleTurn}
-              onStageHit={handleStageHit}
-              onUndo={handleUndo}
-              canUndo={canUndoSession(session)}
-              onExit={handleExitToMenu}
-              error={error}
-              onError={setError}
-            />
-          )}
-          {session.status === 'between-disciplines' && (
-            <DisciplineResult
-              session={session}
-              onNext={() => update(advanceDiscipline(session))}
-              onUndo={handleUndo}
-              canUndo={canUndoSession(session)}
-            />
-          )}
-          {session.status === 'completed' && (
-            <PentathlonResult session={session} onFinish={handleFinish} />
-          )}
-        </div>
-        <div className="panel theme-panel">
-          <ThemeSelect theme={theme} onChange={onChangeTheme} />
-        </div>
-      </section>
-    </div>
-  );
+    ) : (
+      <PentathlonPlay
+        session={session}
+        onTurn={handleTurn}
+        onStageHit={handleStageHit}
+        onUndo={handleUndo}
+        canUndo={canUndoSession(session)}
+        onExit={handleExitToMenu}
+      />
+    );
+  }
+
+  if (session.status === 'between-disciplines') {
+    return (
+      <DisciplineResult
+        session={session}
+        onNext={() => update(advanceDiscipline(session))}
+        onUndo={handleUndo}
+        canUndo={canUndoSession(session)}
+        onExit={handleExitToMenu}
+      />
+    );
+  }
+
+  return <PentathlonResult session={session} onFinish={handleFinish} />;
 }

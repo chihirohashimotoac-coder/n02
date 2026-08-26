@@ -7,9 +7,10 @@ interface Props {
   onNext: () => void;
   onUndo: () => void;
   canUndo: boolean;
+  onExit: () => void;
 }
 
-export default function DisciplineResult({ session, onNext, onUndo, canUndo }: Props) {
+export default function DisciplineResult({ session, onNext, onUndo, canUndo, onExit }: Props) {
   const record = session.records[session.records.length - 1];
   if (!record) return null;
 
@@ -24,6 +25,7 @@ export default function DisciplineResult({ session, onNext, onUndo, canUndo }: P
       : null;
 
   return (
+    <div className="pent-game-shell">
     <div className="pent-play">
       <div className="section-heading">
         <div>
@@ -95,6 +97,10 @@ export default function DisciplineResult({ session, onNext, onUndo, canUndo }: P
           戻る（直前の入力をやり直す）
         </button>
       )}
+      <button type="button" className="text-button" onClick={onExit}>
+        中断してメニューへ（進行は保存されます）
+      </button>
+    </div>
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import { resolveVisit } from '../../x01Core';
-import { isDouble, type DartHit } from '../../darts';
 import type { CompareOutcome, DisciplineEngine, DisciplineId, DisciplineResult } from '../types';
 
 export interface X01SoloState {
@@ -9,16 +8,12 @@ export interface X01SoloState {
   round: number;
   finished: boolean;
   checkedOut: boolean;
-  /** Double-in only: has this player opened their scoring yet? */
-  opened: boolean;
   visits: Array<{ score: number; darts: number; bust: boolean; checkout: boolean }>;
 }
 
 export interface X01SoloInput {
   score: number;
   finishDarts?: number;
-  /** Double-in games: whether the visit's opening dart was a double. */
-  openedWithDouble?: boolean;
 }
 
 export interface X01SoloOptions {
@@ -58,28 +53,18 @@ export function createX01SoloEngine(
       round: 1,
       finished: false,
       checkedOut: false,
-      opened: !doubleIn,
       visits: [],
     }),
 
+    // Double-in is enforced by the player, not the UI: if a double-in visit didn't open the
+    // score, they simply enter 0, which resolveVisit treats as a no-op visit (3 darts, no change) -
+    // identical to how a bust or a deliberate miss is entered in 通常01/チェックアウト練習.
     applyInput(state, input) {
       if (state.finished) return state;
-
-      // Double-in: until the player opens with a double, nothing scores.
-      if (!state.opened && !input.openedWithDouble) {
-        const next: X01SoloState = {
-          ...state,
-          darts: state.darts + 3,
-          round: state.round + 1,
-          visits: [...state.visits, { score: 0, darts: 3, bust: false, checkout: false }],
-        };
-        return finalizeIfRoundLimitReached(next, roundLimit);
-      }
 
       const resolution = resolveVisit(state.remaining, input.score, input.finishDarts);
       const next: X01SoloState = {
         ...state,
-        opened: true,
         remaining: resolution.after,
         darts: state.darts + resolution.darts,
         round: state.round + 1,
@@ -122,7 +107,6 @@ export function createX01SoloEngine(
 
     describeTarget(state) {
       if (state.finished) return 'FINISHED';
-      if (!state.opened) return 'ダブルインで開始';
       return `残り ${state.remaining}`;
     },
   };
@@ -133,16 +117,4 @@ function finalizeIfRoundLimitReached(state: X01SoloState, roundLimit: number): X
     return { ...state, finished: true };
   }
   return state;
-}
-
-/** Convenience for UIs that collect dart hits rather than a typed visit total. */
-export function visitFromHits(hits: DartHit[]): { total: number; firstIsDouble: boolean } {
-  const total = hits.reduce((sum, hit) => sum + dartValue(hit), 0);
-  return { total, firstIsDouble: hits.length > 0 && isDouble(hits[0]) };
-}
-
-function dartValue(hit: DartHit): number {
-  if (hit.kind === 'miss') return 0;
-  if (hit.kind === 'bull') return hit.ring === 'inner' ? 50 : 25;
-  return hit.value * (hit.ring === 'triple' ? 3 : hit.ring === 'double' ? 2 : 1);
 }
