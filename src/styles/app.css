@@ -1513,7 +1513,7 @@ select:focus-visible {
   height: 62px;
   display: grid;
 }
-.n01-menu-table button {
+.n01-menu-table > button {
   color: #fff;
   cursor: pointer;
   background: 0 0;
@@ -1522,15 +1522,15 @@ select:focus-visible {
   font-size: 16px;
   font-weight: 700;
 }
-.n01-menu-table button:last-child {
+.n01-menu-table > button:last-child {
   border: 0;
   font-size: 20px;
 }
-.n01-menu-table button:hover,
-.n01-menu-table button.selected {
+.n01-menu-table > button:hover,
+.n01-menu-table > button.selected {
   background: var(--green);
 }
-.n01-menu-table button:disabled {
+.n01-menu-table > button:disabled {
   color: #ffffff59;
   cursor: not-allowed;
 }
@@ -2052,7 +2052,7 @@ select:focus-visible {
   .n01-menu-table {
     height: 48px;
   }
-  .n01-menu-table button {
+  .n01-menu-table > button {
     font-size: 12px;
   }
   .n01-key-table {
