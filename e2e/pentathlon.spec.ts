@@ -14,14 +14,6 @@ import {
   continueOpponentPlay,
 } from './helpers';
 
-/**
- * The five-discipline walkthroughs drive several hundred taps through a single page over ~10
- * minutes. WebKit's browser process does not survive that on the headless Linux CI runner (it dies
- * mid-run with "Target crashed"), so these are tagged and excluded from the iphone-webkit project
- * in playwright.config.ts. They still run in full on every Chromium project, desktop and mobile.
- */
-const LONG_SESSION = { tag: '@long-session' };
-
 /** Plays the starter to a 9-dart 501 finish, then the opponent to a slower finish. */
 async function play501TwoPlayers(page: import('@playwright/test').Page) {
   await enterPentScore(page, 180); // starter -> 321
@@ -209,7 +201,7 @@ test.describe('Pentathlon persistence and undo', () => {
 });
 
 test.describe('Pentathlon full session', () => {
-  test('plays all five n01 disciplines and shows the final result', LONG_SESSION, async ({ page }) => {
+  test('plays all five n01 disciplines and shows the final result', async ({ page }) => {
     test.slow();
     await openFreshApp(page);
     await openPentathlon(page);
@@ -290,7 +282,7 @@ test.describe('Pentathlon full session', () => {
     await expect(page.getByRole('button', { name: 'リザルトカードを共有' })).toBeVisible();
   });
 
-  test('plays all five JDA disciplines via the quick-target pad', LONG_SESSION, async ({ page }) => {
+  test('plays all five JDA disciplines via the quick-target pad', async ({ page }) => {
     test.slow();
     await openFreshApp(page);
     await openPentathlon(page);
@@ -489,7 +481,7 @@ test.describe('Pentathlon 2-player full sessions', () => {
     await confirmFinish(page);
   }
 
-  test('completes all five JDA disciplines with two players', LONG_SESSION, async ({ page }) => {
+  test('completes all five JDA disciplines with two players', async ({ page }) => {
     test.slow();
     await openFreshApp(page);
     await openPentathlon(page);
@@ -548,7 +540,7 @@ test.describe('Pentathlon 2-player full sessions', () => {
     await expect(page.locator('.pent-result-row.total')).toContainText('種目勝利数');
   });
 
-  test('completes all five n01 disciplines with two players', LONG_SESSION, async ({ page }) => {
+  test('completes all five n01 disciplines with two players', async ({ page }) => {
     test.slow();
     await openFreshApp(page);
     await openPentathlon(page);

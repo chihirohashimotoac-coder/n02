@@ -44,12 +44,17 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
 
+      # WebKit leans on shared memory heavily; the runner's default /dev/shm is small enough that a
+      # long run exhausts it and takes the browser process down with it.
+      - name: Enlarge /dev/shm for WebKit
+        run: sudo mount -o remount,size=2G /dev/shm
+
       - name: End-to-end tests
         run: npm run test:e2e
         env:
-          # WebKit's accelerated compositing crashes the browser process on headless Linux CI during
-          # long runs (many taps on one page). Disabling it is the standard Playwright workaround and
-          # affects only how WebKit paints on this runner, not what the tests exercise.
+          # WebKit's accelerated compositing is a known source of browser-process crashes on
+          # headless Linux CI. Disabling it changes only how WebKit paints on this runner, not what
+          # the tests exercise.
           WEBKIT_DISABLE_COMPOSITING_MODE: 1
 
       - name: Upload Playwright report

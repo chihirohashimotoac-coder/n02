@@ -73,16 +73,22 @@ export default defineConfig({
       use: { ...devices['Pixel 5'], viewport: VIEWPORTS.iphoneMax, ...chromium },
     },
 
-    // Real WebKit, on an iPhone device profile - the closest this suite gets to Mobile Safari.
-    // Everything runs here except the @long-session walkthroughs: those drive several hundred taps
-    // through one page over ~10 minutes, which kills WebKit's browser process on the headless Linux
-    // runner ("Target crashed"), independently of what the app does. They keep running in full on
-    // every Chromium project, so the five-discipline walkthroughs stay covered.
+    /*
+     * Real WebKit on an iPhone device profile - the closest this suite gets to Mobile Safari.
+     *
+     * Scoped to what actually needs a second rendering engine: layout and viewport geometry, the
+     * restored 01/checkout behaviour, and the absence of console errors. The gameplay walkthroughs
+     * stay on Chromium (desktop, Pixel 5, and every required iPhone viewport), which is where the
+     * game logic is verified. That split is deliberate: driving hundreds of taps through a single
+     * page keeps killing WebKit's own browser process on the headless Linux runner ("Target
+     * crashed") regardless of what the app does, and the engine-specific risk in those tests is
+     * layout, which layout.spec.ts covers here directly.
+     */
     ...(webkitAvailable
       ? [
           {
             name: 'iphone-webkit',
-            grepInvert: /@long-session/,
+            testMatch: /(layout|console|regression-x01)\.spec\.ts/,
             use: { ...devices['iPhone 13'] },
           },
           {
