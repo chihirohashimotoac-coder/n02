@@ -4,6 +4,8 @@ import { getEngine } from '../../domain/pentathlon/presets';
 import { currentDisciplineId } from '../../domain/pentathlon/session';
 import { InvalidVisitError } from '../../domain/x01Core';
 import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../../domain/darts';
+import { DISCIPLINE_RULE_TEXT } from '../../domain/ruleText';
+import RulesButton from '../RulesButton';
 import type { X01SoloState, X01SoloInput } from '../../domain/pentathlon/engines/x01Solo';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
 
@@ -13,6 +15,9 @@ interface Props {
   onUndo: () => void;
   canUndo: boolean;
   onExit: () => void;
+  /** Ends the discipline right now, recording the still-playing opponent's attempt as-is (DNF if
+   * they hadn't checked out) instead of waiting for them to finish it. */
+  onFinishDisciplineNow: () => void;
   error: string | null;
   onError: (message: string | null) => void;
 }
@@ -28,6 +33,7 @@ export default function PentathlonX01Play({
   onUndo,
   canUndo,
   onExit,
+  onFinishDisciplineNow,
   error,
   onError,
 }: Props) {
@@ -36,7 +42,8 @@ export default function PentathlonX01Play({
   const [acknowledgedFinishIndex, setAcknowledgedFinishIndex] = useState<PlayerIndex | null>(null);
 
   const current = session.current!;
-  const engine = getEngine(currentDisciplineId(session));
+  const disciplineId = currentDisciplineId(session);
+  const engine = getEngine(disciplineId);
   const active = current.active;
   const activeState = current.progress[active].state as X01SoloState;
   const players: PlayerIndex[] = session.playerCount === 1 ? [0] : [0, 1];
@@ -96,7 +103,16 @@ export default function PentathlonX01Play({
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (showCheckoutOverlay) return;
+      if (showCheckoutOverlay) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          onFinishDisciplineNow();
+        } else if (event.key === '1') {
+          event.preventDefault();
+          setAcknowledgedFinishIndex(waitingFinishedIndex);
+        }
+        return;
+      }
       if (pendingFinish !== null) {
         const counts = validFinishDartCounts(activeState.remaining);
         const digit = Number(event.key);
@@ -126,7 +142,17 @@ export default function PentathlonX01Play({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeState.remaining, entry, onUndo, pendingFinish, pressKey, showCheckoutOverlay, submitVisit]);
+  }, [
+    activeState.remaining,
+    entry,
+    onFinishDisciplineNow,
+    onUndo,
+    pendingFinish,
+    pressKey,
+    showCheckoutOverlay,
+    submitVisit,
+    waitingFinishedIndex,
+  ]);
 
   const finishCounts = pendingFinish !== null ? validFinishDartCounts(activeState.remaining) : [];
 
@@ -192,7 +218,8 @@ export default function PentathlonX01Play({
             const progress = current.progress[index];
             const state = progress.state as X01SoloState;
             const isActive = active === index && !progress.finished;
-            const route = !progress.finished ? suggestCheckoutRoute(state.remaining) : null;
+            const route =
+              session.showRoute && !progress.finished ? suggestCheckoutRoute(state.remaining) : null;
             return (
               <div key={index} className={isActive ? 'active' : ''}>
                 <strong>{progress.finished ? state.darts : state.remaining}</strong>
@@ -208,6 +235,11 @@ export default function PentathlonX01Play({
           })}
         </div>
 
+        <div className="n01-entry-display" aria-live="polite">
+          <span>{session.names[active]} の得点入力中</span>
+          <strong className={entry ? '' : 'empty'}>{entry || '−'}</strong>
+        </div>
+
         <nav className="n01-menu-table pent-x01-menu" aria-label="ゲームメニュー">
           <button type="button" onClick={onExit}>
             中断
@@ -218,6 +250,7 @@ export default function PentathlonX01Play({
           <button type="button" disabled={!canUndo} onClick={onUndo}>
             Undo
           </button>
+          <RulesButton {...DISCIPLINE_RULE_TEXT[disciplineId]} />
         </nav>
 
         <div className="n01-key-table" aria-label="得点入力テンキー">
@@ -258,7 +291,7 @@ export default function PentathlonX01Play({
       )}
 
       {showCheckoutOverlay && (
-        <div className="result-backdrop" role="dialog" aria-modal="true" aria-label="結果">
+        <div className="result-backdrop" role="dialog" aria-modal="true" aria-label="種目の続行選択">
           <div className="result-card">
             <div className="result-icon" aria-hidden="true">
               ✓
@@ -271,12 +304,15 @@ export default function PentathlonX01Play({
                 使用ダーツ
               </span>
             </div>
+            <button type="button" className="primary-button" onClick={onFinishDisciplineNow}>
+              次の種目へ進む <kbd>Enter</kbd>
+            </button>
             <button
               type="button"
-              className="primary-button"
+              className="secondary-button"
               onClick={() => setAcknowledgedFinishIndex(waitingFinishedIndex)}
             >
-              {session.names[active]}のスローへ進む
+              {session.names[active]}のチェックアウトを待つ <kbd>1</kbd>
             </button>
           </div>
         </div>

@@ -1164,6 +1164,21 @@ select:focus-visible {
   padding: 2px 6px;
   font-size: 9px;
 }
+.result-card .secondary-button {
+  width: 100%;
+  margin-top: 8px;
+}
+.result-card .secondary-button kbd {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 9px;
+}
 .n01-game-shell {
   z-index: 30;
   background: var(--canvas);
@@ -1255,7 +1270,7 @@ select:focus-visible {
   flex-direction: column;
   display: flex;
   position: absolute;
-  inset: 84px 0 252px;
+  inset: 84px 0 288px;
   overflow: hidden;
 }
 .n01-game-meta {
@@ -1414,10 +1429,40 @@ select:focus-visible {
   border-top: 2px solid var(--green-dark);
   z-index: 4;
   background: #fff;
-  height: 252px;
+  height: 288px;
   position: absolute;
   inset: auto 0 0;
   box-shadow: 0 -8px 30px #19241e14;
+}
+.n01-entry-display {
+  border-bottom: 1px solid var(--line);
+  background: #fbfbf8;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  height: 36px;
+  padding: 0 20px;
+  display: flex;
+}
+.n01-entry-display span {
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 700;
+}
+.n01-entry-display strong {
+  color: var(--green-dark);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 800;
+}
+.n01-entry-display strong.empty {
+  color: #b9c0ba;
+  font-weight: 600;
+}
+[data-theme="neon"] .n01-entry-display strong {
+  color: #2ee58a;
 }
 .n01-left-table {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1464,7 +1509,7 @@ select:focus-visible {
 .n01-menu-table {
   border-top: 1px solid var(--line);
   background: #26342d;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   height: 62px;
   display: grid;
 }
@@ -1535,6 +1580,14 @@ select:focus-visible {
   text-align: center;
   margin: 0 0 18px;
   font-size: 22px;
+}
+.rules-modal-body {
+  white-space: pre-line;
+  text-align: left;
+  color: var(--ink);
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.85;
 }
 .n01-modal-card label {
   grid-template-columns: 70px 1fr;
@@ -1937,7 +1990,7 @@ select:focus-visible {
     font-size: 19px;
   }
   .n01-score-area {
-    inset: 64px 0 360px;
+    inset: 64px 0 390px;
   }
   .n01-game-meta {
     min-height: 32px;
@@ -1970,7 +2023,17 @@ select:focus-visible {
     display: none;
   }
   .n01-game-footer {
-    height: 360px;
+    height: 390px;
+  }
+  .n01-entry-display {
+    height: 30px;
+    padding: 0 10px;
+  }
+  .n01-entry-display span {
+    font-size: 8px;
+  }
+  .n01-entry-display strong {
+    font-size: 17px;
   }
   .n01-left-table {
     height: 94px;

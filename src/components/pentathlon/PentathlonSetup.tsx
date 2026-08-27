@@ -16,6 +16,7 @@ export default function PentathlonSetup({ onStart, onCancel, hasSavedSession, on
   const [names, setNames] = useState<[string, string]>(['プレイヤー1', 'プレイヤー2']);
   const [initialStarter, setInitialStarter] = useState<PlayerIndex | 'random'>(0);
   const [starterMode, setStarterMode] = useState<StarterMode>('loser');
+  const [showRoute, setShowRoute] = useState(false);
 
   return (
     <div className="panel setup-panel pent-setup">
@@ -79,6 +80,18 @@ export default function PentathlonSetup({ onStart, onCancel, hasSavedSession, on
               <option value={1}>1人（自己記録）</option>
               <option value={2}>2人（対戦）</option>
             </select>
+          </label>
+
+          <label className="toggle-field">
+            <span>
+              <strong>アレンジルート</strong>
+              <small>501/301プレイ中にチェックアウトルートの参考表示（デフォルトOFF）</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={showRoute}
+              onChange={(event) => setShowRoute(event.target.checked)}
+            />
           </label>
         </div>
       </div>
@@ -151,7 +164,7 @@ export default function PentathlonSetup({ onStart, onCancel, hasSavedSession, on
       <button
         type="button"
         className="primary-button"
-        onClick={() => onStart({ preset, playerCount, names, starterMode, initialStarter })}
+        onClick={() => onStart({ preset, playerCount, names, starterMode, initialStarter, showRoute })}
       >
         ➤ ペンタスロンを開始
       </button>

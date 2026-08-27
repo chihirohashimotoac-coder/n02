@@ -40,7 +40,7 @@ export function createRtcDoublesEngine(
   return {
     meta: {
       id: 'rtc-doubles',
-      name: 'ON DOUBLES',
+      name: 'Round-the-Clock ON DOUBLES',
       description: 'D1→D20→BULL の順に攻略',
       inputMode: 'dart-hits',
       unit: 'darts',

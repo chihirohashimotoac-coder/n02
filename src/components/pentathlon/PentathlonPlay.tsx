@@ -1,7 +1,10 @@
 import DartHitPad from './DartHitPad';
 import PentathlonProgress from './PentathlonProgress';
+import { deriveQuickTarget } from './quickTarget';
 import { getEngine } from '../../domain/pentathlon/presets';
 import { currentDisciplineId } from '../../domain/pentathlon/session';
+import { DISCIPLINE_RULE_TEXT } from '../../domain/ruleText';
+import RulesButton from '../RulesButton';
 import type { DartHit } from '../../domain/darts';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
 
@@ -14,8 +17,9 @@ interface Props {
   onExit: () => void;
 }
 
-/** Dart-hit disciplines only (Cork / Baseball / Half-It / Golf / RTC-Doubles / Cricket). 301/501 use
- *  PentathlonX01Play instead, which mirrors 通常01・チェックアウト練習's own fullscreen UI. */
+/** Dart-hit disciplines except Cricket (Cork / Baseball / Half-It / Golf / RTC-Doubles) - Cricket has
+ *  its own dedicated scoreboard screen (PentathlonCricketPlay). 301/501 use PentathlonX01Play
+ *  instead, which mirrors 通常01・チェックアウト練習's own fullscreen UI. */
 export default function PentathlonPlay({
   session,
   onTurn,
@@ -25,10 +29,12 @@ export default function PentathlonPlay({
   onExit,
 }: Props) {
   const current = session.current!;
-  const engine = getEngine(currentDisciplineId(session));
+  const disciplineId = currentDisciplineId(session);
+  const engine = getEngine(disciplineId);
   const active = current.active;
   const activeProgress = current.progress[active];
   const activeState = activeProgress.state;
+  const quickTarget = deriveQuickTarget(disciplineId, activeState, current.pendingHits);
 
   const players: PlayerIndex[] = session.playerCount === 1 ? [0] : [0, 1];
 
@@ -94,12 +100,14 @@ export default function PentathlonPlay({
         onUndoHit={onUndo}
         onCommit={() => onTurn(current.pendingHits)}
         allowEarlyCommit={engine.meta.allowEarlyCommit}
+        target={quickTarget}
       />
 
-      <div className="pent-actions">
+      <div className="pent-actions pent-actions-3">
         <button type="button" className="secondary-button" disabled={!canUndo} onClick={onUndo}>
           1つ戻す
         </button>
+        <RulesButton className="secondary-button" label="ルール説明" {...DISCIPLINE_RULE_TEXT[disciplineId]} />
         <button type="button" className="secondary-button" onClick={onExit}>
           中断してメニューへ
         </button>
@@ -111,11 +119,8 @@ export default function PentathlonPlay({
 
 /** The headline number shown on each player card, in that discipline's own units. */
 function primaryValue(id: string, state: unknown): string {
-  const anyState = state as Record<string, number> & { self?: { points: number } };
+  const anyState = state as Record<string, number>;
   switch (id) {
-    case 'cricket':
-      // Cricket's state is a shared self/opponent view (head-to-head territory denial).
-      return String(anyState.self?.points ?? 0);
     case 'half-it':
       return String(anyState.points ?? anyState.score);
     case 'golf':
@@ -125,7 +130,7 @@ function primaryValue(id: string, state: unknown): string {
     case 'rtc-doubles':
       return `${anyState.targetIndex}/21`;
     case 'cork':
-      return String(anyState.darts > 0 ? anyState.best : '—');
+      return String(anyState.score);
     default:
       return '—';
   }

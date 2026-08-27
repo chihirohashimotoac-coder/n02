@@ -51,7 +51,7 @@ export const PRESETS: Record<PentathlonPreset, PresetDefinition> = {
     id: 'jda',
     name: 'JDA',
     subtitle: 'Japan Darts Association',
-    description: '501 / Half-It / On Doubles / Golf / 301',
+    description: '501 / Half-It / Round-the-Clock ON DOUBLES / Golf / 301',
     disciplines: ['x01-501', 'half-it', 'rtc-doubles', 'golf', 'x01-301'],
   },
   n01: {

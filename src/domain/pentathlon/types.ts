@@ -18,7 +18,7 @@ export type DisciplineId =
  * How a discipline's raw result should be read by the UI, so screens never hardcode per-game
  * assumptions ("fewer is better" vs "higher is better").
  */
-export type ResultUnit = 'darts' | 'points' | 'strokes' | 'runs' | 'proximity';
+export type ResultUnit = 'darts' | 'points' | 'strokes' | 'runs';
 
 export interface DisciplineResult {
   /** The primary comparable figure for this discipline, in `unit`s. */
@@ -115,6 +115,8 @@ export interface PentathlonSession {
   initialStarter: PlayerIndex;
   currentStarter: PlayerIndex;
   starterMode: StarterMode;
+  /** Whether 301/501 shows a suggested checkout route while throwing. Defaults to off. */
+  showRoute: boolean;
 
   currentDisciplineIndex: number;
   /** Completed discipline records, in play order. */
