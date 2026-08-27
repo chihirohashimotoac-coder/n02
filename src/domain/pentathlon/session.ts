@@ -2,8 +2,10 @@ import type { DartHit } from '../darts';
 import { getEngine, presetDisciplines } from './presets';
 import type {
   CompareOutcome,
+  DisciplineId,
   DisciplineResult,
   PentathlonDisciplineRecord,
+  PentathlonMode,
   PentathlonSession,
   PentathlonUndoEntry,
   PlayerIndex,
@@ -21,6 +23,10 @@ export interface CreateSessionOptions {
   initialStarter: PlayerIndex | 'random';
   /** Whether 301/501 shows a suggested checkout route while throwing. Defaults to off. */
   showRoute?: boolean;
+  /** Defaults to 'full' - the real five-discipline pentathlon. */
+  mode?: PentathlonMode;
+  /** 個別練習 only: the single discipline to play, instead of the preset's five. */
+  disciplines?: DisciplineId[];
 }
 
 const MAX_UNDO = 60;
@@ -35,6 +41,8 @@ export function createPentathlonSession(options: CreateSessionOptions): Pentathl
   const session: PentathlonSession = {
     version: 1,
     preset: options.preset,
+    mode: options.mode ?? 'full',
+    ...(options.disciplines ? { disciplines: options.disciplines } : {}),
     playerCount: options.playerCount,
     names: options.names,
     initialStarter: starter,
@@ -51,12 +59,22 @@ export function createPentathlonSession(options: CreateSessionOptions): Pentathl
   return startDiscipline(session);
 }
 
+/** The disciplines this session plays: 個別練習's single pick, or the preset's own five. */
+export function sessionDisciplines(session: PentathlonSession): DisciplineId[] {
+  return session.disciplines ?? presetDisciplines(session.preset);
+}
+
+/** True for a 個別練習 session - one discipline, no overall standing. */
+export function isSingleGameSession(session: PentathlonSession): boolean {
+  return (session.mode ?? 'full') === 'single';
+}
+
 export function currentDisciplineId(session: PentathlonSession) {
-  return presetDisciplines(session.preset)[session.currentDisciplineIndex];
+  return sessionDisciplines(session)[session.currentDisciplineIndex];
 }
 
 export function disciplineCount(session: PentathlonSession): number {
-  return presetDisciplines(session.preset).length;
+  return sessionDisciplines(session).length;
 }
 
 function startDiscipline(session: PentathlonSession): PentathlonSession {
@@ -260,7 +278,11 @@ export function advanceDiscipline(session: PentathlonSession): PentathlonSession
   });
 }
 
-/** Stages a dart hit for the active player's in-progress turn (dart-hit input UIs). */
+/**
+ * Stages a dart hit for the active player's in-progress turn (dart-hit input UIs). Staged hits live
+ * only in `pendingHits` and never touch the undo stack - taking one back is undoStagedHit(), which
+ * is a different operation from undoing an already-committed round.
+ */
 export function stageHit(session: PentathlonSession, hit: DartHit): PentathlonSession {
   const current = session.current;
   if (!current || session.status !== 'playing') return session;
@@ -269,7 +291,6 @@ export function stageHit(session: PentathlonSession, hit: DartHit): PentathlonSe
   if (current.pendingHits.length >= maxDarts) return session;
   return {
     ...session,
-    undo: pushUndo(session),
     current: { ...current, pendingHits: [...current.pendingHits, hit] },
   };
 }
@@ -281,9 +302,24 @@ export function commitHits(session: PentathlonSession): PentathlonSession {
   return applyTurn(session, current.pendingHits);
 }
 
-/** Undoes the most recent logical step (a staged dart, a committed turn, or a discipline advance). */
-export function undo(session: PentathlonSession): PentathlonSession {
-  if (session.undo.length === 0) return session;
+/** Takes back the last dart staged in the current, still-uncommitted turn. */
+export function undoStagedHit(session: PentathlonSession): PentathlonSession {
+  const current = session.current;
+  if (!current || current.pendingHits.length === 0) return session;
+  return { ...session, current: { ...current, pendingHits: current.pendingHits.slice(0, -1) } };
+}
+
+export function canUndoStagedHit(session: PentathlonSession): boolean {
+  return (session.current?.pendingHits.length ?? 0) > 0;
+}
+
+/**
+ * Undoes the most recent *committed* step - a completed turn or a discipline advance. Refuses while
+ * darts are staged for the current turn: those belong to undoStagedHit(), and undoing a committed
+ * round out from under a half-entered turn would silently discard it.
+ */
+export function undoRound(session: PentathlonSession): PentathlonSession {
+  if (!canUndoRound(session)) return session;
   const previous = session.undo[session.undo.length - 1];
   return {
     ...session,
@@ -296,8 +332,13 @@ export function undo(session: PentathlonSession): PentathlonSession {
   };
 }
 
+export function canUndoRound(session: PentathlonSession): boolean {
+  return session.undo.length > 0 && !canUndoStagedHit(session);
+}
+
+/** True if either kind of undo is currently available. */
 export function canUndo(session: PentathlonSession): boolean {
-  return session.undo.length > 0;
+  return canUndoStagedHit(session) || canUndoRound(session);
 }
 
 export interface PentathlonTotals {

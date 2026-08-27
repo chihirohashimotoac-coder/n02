@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PentathlonModal from './PentathlonModal';
 
 interface Props {
   title: string;
@@ -17,21 +18,13 @@ export default function PentathlonRulesButton({ title, body, label = 'RULES', cl
         {label}
       </button>
       {open && (
-        <div
-          className="n01-modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`${title}のルール`}
-          onClick={() => setOpen(false)}
-        >
-          <div className="n01-modal-card" onClick={(event) => event.stopPropagation()}>
-            <h2>{title} のルール</h2>
-            <p className="pent-rules-body">{body}</p>
-            <button type="button" className="n01-modal-primary" onClick={() => setOpen(false)}>
-              閉じる
-            </button>
-          </div>
-        </div>
+        <PentathlonModal label={`${title}のルール`} onClose={() => setOpen(false)}>
+          <h2>{title} のルール</h2>
+          <p className="pent-rules-body">{body}</p>
+          <button type="button" className="n01-modal-primary" onClick={() => setOpen(false)}>
+            閉じる
+          </button>
+        </PentathlonModal>
       )}
     </>
   );

@@ -7,10 +7,11 @@ import {
   enterPentScore,
   openFreshApp,
   openPentathlon,
-  proceedToNextDiscipline,
+  proceedWithDnf,
   tapAnyRingNumber,
+  tapBaseballOutcome,
   tapQuickTarget,
-  waitForOpponentCheckout,
+  continueOpponentPlay,
 } from './helpers';
 
 /** Plays the starter to a 9-dart 501 finish, then the opponent to a slower finish. */
@@ -23,7 +24,7 @@ async function play501TwoPlayers(page: import('@playwright/test').Page) {
   await confirmFinish(page);
   // The starter checked out first: choose to wait for the opponent to also check out (rather than
   // proceeding to the next discipline immediately) so both results are final.
-  await waitForOpponentCheckout(page);
+  await continueOpponentPlay(page);
   await enterPentScore(page, 180); // opponent -> 269
   await enterPentScore(page, 180); // opponent -> 89
   await enterPentScore(page, 89);
@@ -87,9 +88,9 @@ test.describe('Pentathlon 2-player progression', () => {
     await confirmFinish(page);
 
     // P1 checked out first: the hand-off choice names them explicitly before P2 continues.
-    await expect(page.locator('.result-card')).toContainText('プレイヤー1');
-    await expect(page.locator('.result-card')).toContainText('9');
-    await waitForOpponentCheckout(page);
+    await expect(page.locator('.pent-modal-card')).toContainText('プレイヤー1');
+    await expect(page.locator('.pent-modal-card')).toContainText('9');
+    await continueOpponentPlay(page);
 
     // P1 is locked at 9 darts; the discipline is NOT over and P2 keeps throwing.
     await expect(page.locator('.n01-player-name').first()).toContainText('FINISHED');
@@ -113,11 +114,13 @@ test.describe('Pentathlon 2-player progression', () => {
     await enterPentScore(page, 141);
     await confirmFinish(page);
 
-    await proceedToNextDiscipline(page);
+    await proceedWithDnf(page);
 
     await expect(page.getByText('DISCIPLINE COMPLETE')).toBeVisible();
-    await expect(page.locator('.pent-result-table')).toContainText('9 DARTS');
-    await expect(page.locator('.pent-result-table')).toContainText('DNF');
+    const rows = page.locator('.pent-result-table .pent-result-row');
+    await expect(rows.nth(1)).toContainText('COMPLETE');
+    await expect(rows.nth(1)).toContainText('9');
+    await expect(rows.nth(2)).toContainText('DNF');
   });
 
   test('loser starts the next discipline', async ({ page }) => {
@@ -127,13 +130,13 @@ test.describe('Pentathlon 2-player progression', () => {
     await play501TwoPlayers(page);
 
     await expect(page.getByText('DISCIPLINE COMPLETE')).toBeVisible();
-    await expect(page.locator('.pent-result-table')).toContainText('9 DARTS');
+    await expect(page.locator('.pent-result-table .pent-result-row').nth(1)).toContainText('COMPLETE');
     // P1 won on darts, so P2 (the loser) starts Half-It.
     await expect(page.locator('.pent-next-starter').last()).toContainText('プレイヤー2 START');
     await expect(page.locator('.pent-next-starter').last()).toContainText('敗者先攻');
 
     await page.getByRole('button', { name: /次の種目へ/ }).click();
-    await expect(page.locator('.pent-target')).toContainText('プレイヤー2');
+    await expect(page.locator('.pent-aim')).toContainText('プレイヤー2');
   });
 
   test('alternate mode swaps the starter regardless of who won', async ({ page }) => {
@@ -159,7 +162,7 @@ test.describe('Pentathlon persistence and undo', () => {
     expect(before).toBeTruthy();
 
     await page.reload();
-    await page.locator('.mode-card', { hasText: 'ペンタスロン' }).click();
+    await page.locator('.mode-card[data-mode="pentathlon"]').click();
     await page.getByRole('button', { name: /中断したペンタスロンを再開/ }).click();
 
     await expect(page.locator('.pent-progress')).toContainText('501');
@@ -174,7 +177,7 @@ test.describe('Pentathlon persistence and undo', () => {
     const x01Save = await page.evaluate(() => localStorage.getItem('n02-current-v1'));
 
     await page.goto('/');
-    await page.locator('.mode-card', { hasText: 'ペンタスロン' }).click();
+    await page.locator('.mode-card[data-mode="pentathlon"]').click();
     await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
     await enterPentScore(page, 100);
 
@@ -237,19 +240,28 @@ test.describe('Pentathlon full session', () => {
     await confirmFinish(page);
     await next();
 
-    // 3. Baseball: 9 innings, T+S on the inning number = 4 runs each -> 36 runs
+    // 3. Baseball: 9 innings via the four-outcome pad (the inning's number is never typed).
+    // Triple + single on the inning number = 4 runs each -> 36 runs.
     for (let inning = 1; inning <= 9; inning++) {
-      await enterPentHits(page, [`T${inning}`, `S${inning}`, 'MISS']);
+      await expect(page.locator('.pent-aim-target')).toContainText(String(inning));
+      await tapBaseballOutcome(page, 'トリプル');
+      await tapBaseballOutcome(page, 'シングル');
+      await tapBaseballOutcome(page, 'ミス');
+      await commitPentTurn(page);
     }
     await expect(page.locator('.pent-result-table')).toContainText('36 RUNS');
     await next();
 
-    // 4. 501 in 9 darts
+    // 4. 501 in 9 darts. Measured in darts, so the dart count belongs to the DARTS column alone -
+    // the SCORE column stays empty rather than repeating it.
     await enterPentScore(page, 180);
     await enterPentScore(page, 180);
     await enterPentScore(page, 141);
     await confirmFinish(page);
-    await expect(page.locator('.pent-result-table')).toContainText('9 DARTS');
+    const x01Row = page.locator('.pent-result-table .pent-result-row').nth(1);
+    await expect(x01Row).toContainText('COMPLETE');
+    await expect(x01Row).toContainText('9');
+    await expect(page.locator('.pent-result-table')).not.toContainText('9 DARTS');
     await next();
 
     // 5. Cricket: close all seven targets (each round is a fixed 3 darts), on the dedicated
@@ -350,7 +362,11 @@ test.describe('Pentathlon full session', () => {
     await tapQuickTarget(page, '成功（D20）');
     await tapQuickTarget(page, 'インナーブル');
     await commitPentTurn(page);
-    await expect(page.locator('.pent-result-table')).toContainText('21 DARTS');
+    // Measured in darts: the count belongs to the DARTS column alone, never repeated in SCORE.
+    const rtcRow = page.locator('.pent-result-table .pent-result-row').nth(1);
+    await expect(rtcRow).toContainText('COMPLETE');
+    await expect(rtcRow).toContainText('21');
+    await expect(page.locator('.pent-result-table')).not.toContainText('21 DARTS');
     await next();
 
     // 4. Golf: 9 holes, a double each for 1 stroke -> best possible round (9 strokes), stopping
@@ -369,7 +385,9 @@ test.describe('Pentathlon full session', () => {
     await enterPentScore(page, 61);
     await enterPentScore(page, 60);
     await confirmFinish(page);
-    await expect(page.locator('.pent-result-table')).toContainText('8 DARTS');
+    const x301Row = page.locator('.pent-result-table .pent-result-row').nth(1);
+    await expect(x301Row).toContainText('COMPLETE');
+    await expect(x301Row).toContainText('8');
     await next();
 
     await expect(page.locator('.pent-share-card')).toContainText('PENTATHLON');
@@ -414,16 +432,23 @@ test.describe('Pentathlon rule popup and arrange-route setting', () => {
     await expect(page.locator('.checkout-route').first()).toBeVisible();
   });
 
-  test('shows a live preview of the score being typed before Enter confirms it', async ({ page }) => {
+  test('previews the score only while it is being typed, then hides again', async ({ page }) => {
     await openFreshApp(page);
     await openPentathlon(page);
     await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
 
-    await expect(page.locator('.pent-entry-display strong')).toHaveText('−');
+    const preview = page.locator('.pent-entry-popover');
+    await expect(preview).toHaveCount(0);
     await page.keyboard.type('18');
-    await expect(page.locator('.pent-entry-display strong')).toHaveText('18');
+    await expect(preview.locator('strong')).toHaveText('18');
     await page.keyboard.press('Enter');
-    await expect(page.locator('.pent-entry-display strong')).toHaveText('−');
+    await expect(preview).toHaveCount(0);
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('483');
+
+    // Clearing the entry (Backspace to empty) also dismisses it.
+    await page.keyboard.type('4');
+    await expect(preview.locator('strong')).toHaveText('4');
+    await page.keyboard.press('Backspace');
+    await expect(preview).toHaveCount(0);
   });
 });

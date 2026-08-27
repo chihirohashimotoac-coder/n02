@@ -1,5 +1,6 @@
-import { getEngine, presetDisciplines } from '../../domain/pentathlon/presets';
-import { computeNextStarter } from '../../domain/pentathlon/session';
+import { getEngine } from '../../domain/pentathlon/presets';
+import { computeNextStarter, sessionDisciplines } from '../../domain/pentathlon/session';
+import DisciplineResultTable from './DisciplineResultTable';
 import type { PentathlonSession } from '../../domain/pentathlon/types';
 
 interface Props {
@@ -15,7 +16,7 @@ export default function DisciplineResult({ session, onNext, onUndo, canUndo, onE
   if (!record) return null;
 
   const engine = getEngine(record.id);
-  const disciplines = presetDisciplines(session.preset);
+  const disciplines = sessionDisciplines(session);
   const nextId = disciplines[session.currentDisciplineIndex + 1];
   const isLast = !nextId;
 
@@ -34,33 +35,11 @@ export default function DisciplineResult({ session, onNext, onUndo, canUndo, onE
         </div>
       </div>
 
-      <div className="pent-result-table">
-        <div className="pent-result-row head">
-          <span className="name">PLAYER</span>
-          <span>RESULT</span>
-          <span>DARTS</span>
-        </div>
-        {(session.playerCount === 1 ? [0] : [0, 1]).map((index) => {
-          const result = record.results[index];
-          const isWinner =
-            (index === 0 && record.outcome === 'p0') || (index === 1 && record.outcome === 'p1');
-          return (
-            <div className="pent-result-row" key={index}>
-              <span className="name">{session.names[index]}</span>
-              <span className={`value ${isWinner ? 'win' : ''}`}>
-                {isWinner && (
-                  <i className="pent-win-mark" aria-hidden="true">
-                    ★
-                  </i>
-                )}
-                {result?.label ?? '—'}
-                {isWinner && <span className="sr-only">（この種目の勝者）</span>}
-              </span>
-              <span className="value">{result?.darts ?? '—'}</span>
-            </div>
-          );
-        })}
-      </div>
+      <DisciplineResultTable
+        session={session}
+        results={record.results}
+        winner={record.outcome === 'p0' ? 0 : record.outcome === 'p1' ? 1 : null}
+      />
 
       {session.playerCount === 2 && (
         <div className="pent-next-starter">

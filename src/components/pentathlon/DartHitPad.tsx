@@ -216,34 +216,34 @@ function QuickTargetButtons({
   }
 
   if (target.kind === 'number') {
+    const outcomes = target.outcomes;
     return (
       <div className="pent-quick-grid pent-quick-4" role="group" aria-label="判定の選択">
+        {(['single', 'double', 'triple'] as const).map((ring) => {
+          const ringName = ring === 'single' ? 'シングル' : ring === 'double' ? 'ダブル' : 'トリプル';
+          return (
+            <button
+              key={ring}
+              type="button"
+              className={`pent-quick-btn ${ring === 'triple' ? 'hit' : ''}`}
+              disabled={busy}
+              aria-label={outcomes ? `${ringName}${target.number}・${outcomes[ring]}` : undefined}
+              onClick={() => tap({ kind: 'number', value: target.number, ring })}
+            >
+              {outcomes ? ringName : `${ringName}${target.number}`}
+              {outcomes && <em>{outcomes[ring]}</em>}
+            </button>
+          );
+        })}
         <button
           type="button"
-          className="pent-quick-btn"
+          className="pent-quick-btn miss"
           disabled={busy}
-          onClick={() => tap({ kind: 'number', value: target.number, ring: 'single' })}
+          aria-label={outcomes ? `ミス・${outcomes.miss}` : undefined}
+          onClick={() => tap({ kind: 'miss' })}
         >
-          シングル{target.number}
-        </button>
-        <button
-          type="button"
-          className="pent-quick-btn"
-          disabled={busy}
-          onClick={() => tap({ kind: 'number', value: target.number, ring: 'double' })}
-        >
-          ダブル{target.number}
-        </button>
-        <button
-          type="button"
-          className="pent-quick-btn hit"
-          disabled={busy}
-          onClick={() => tap({ kind: 'number', value: target.number, ring: 'triple' })}
-        >
-          トリプル{target.number}
-        </button>
-        <button type="button" className="pent-quick-btn miss" disabled={busy} onClick={() => tap({ kind: 'miss' })}>
           ミス
+          {outcomes && <em>{outcomes.miss}</em>}
         </button>
       </div>
     );

@@ -6,18 +6,24 @@ import type { PentathlonSession } from '../domain/pentathlon/types';
  */
 export const PENTATHLON_SESSION_KEY = 'n02-pentathlon-v1';
 
-export function savePentathlonSession(session: PentathlonSession | null): void {
+/**
+ * 個別練習 gets its own key again, so starting or finishing a single discipline can never touch -
+ * or leak a result into - a full pentathlon that is still in progress.
+ */
+export const PENTATHLON_SINGLE_SESSION_KEY = 'n02-pentathlon-single-v1';
+
+function write(key: string, session: PentathlonSession | null): void {
   try {
-    if (session === null) localStorage.removeItem(PENTATHLON_SESSION_KEY);
-    else localStorage.setItem(PENTATHLON_SESSION_KEY, JSON.stringify(session));
+    if (session === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(session));
   } catch {
     // Storage can be unavailable (private mode, quota); play continues in memory.
   }
 }
 
-export function loadPentathlonSession(): PentathlonSession | null {
+function read(key: string): PentathlonSession | null {
   try {
-    const raw = localStorage.getItem(PENTATHLON_SESSION_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PentathlonSession;
     if (!parsed || parsed.version !== 1) return null;
@@ -28,6 +34,26 @@ export function loadPentathlonSession(): PentathlonSession | null {
   }
 }
 
+export function savePentathlonSession(session: PentathlonSession | null): void {
+  write(PENTATHLON_SESSION_KEY, session);
+}
+
+export function loadPentathlonSession(): PentathlonSession | null {
+  return read(PENTATHLON_SESSION_KEY);
+}
+
 export function clearPentathlonSession(): void {
   savePentathlonSession(null);
+}
+
+export function saveSingleGameSession(session: PentathlonSession | null): void {
+  write(PENTATHLON_SINGLE_SESSION_KEY, session);
+}
+
+export function loadSingleGameSession(): PentathlonSession | null {
+  return read(PENTATHLON_SINGLE_SESSION_KEY);
+}
+
+export function clearSingleGameSession(): void {
+  saveSingleGameSession(null);
 }

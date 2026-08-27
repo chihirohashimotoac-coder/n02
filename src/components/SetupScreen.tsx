@@ -14,6 +14,7 @@ interface Props {
   theme: ThemeName;
   onChangeTheme: (theme: ThemeName) => void;
   onStartPentathlon: () => void;
+  onStartPentathlonSingle: () => void;
   hasSavedPentathlon: boolean;
 }
 
@@ -37,6 +38,7 @@ export default function SetupScreen({
   theme,
   onChangeTheme,
   onStartPentathlon,
+  onStartPentathlonSingle,
   hasSavedPentathlon,
 }: Props) {
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
@@ -131,7 +133,7 @@ export default function SetupScreen({
                   </b>
                 )}
               </button>
-              <button type="button" className="mode-card" onClick={onStartPentathlon}>
+              <button type="button" className="mode-card" data-mode="pentathlon" onClick={onStartPentathlon}>
                 <span className="mode-icon" aria-hidden="true">
                   5
                 </span>
@@ -139,9 +141,21 @@ export default function SetupScreen({
                 <small>5種目総合競技</small>
                 {hasSavedPentathlon && <b className="checkmark pent-resume-mark">▶</b>}
               </button>
+              <button
+                type="button"
+                className="mode-card"
+                data-mode="pentathlon-single"
+                onClick={onStartPentathlonSingle}
+              >
+                <span className="mode-icon" aria-hidden="true">
+                  ◇
+                </span>
+                <strong>ペンタスロン個別練習</strong>
+                <small>10種目から1つを選んでプレイ</small>
+              </button>
             </div>
             <p className="pent-note" style={{ marginTop: 10 }}>
-              ペンタスロンは JDA / n01・i-Pentathlon から選べる独立モードです。
+              ペンタスロンは JDA / n01・i-Pentathlon から選べる独立モードです。個別練習では各種目を1つずつ試せます。
               {hasSavedPentathlon && ' 中断したセッションを再開できます。'}
             </p>
           </div>

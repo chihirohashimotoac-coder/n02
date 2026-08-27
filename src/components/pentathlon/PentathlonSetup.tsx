@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { PRESETS, getEngine } from '../../domain/pentathlon/presets';
+import PentathlonRulesModal from './PentathlonRulesModal';
 import type { PentathlonPreset, PlayerIndex, StarterMode } from '../../domain/pentathlon/types';
 import type { CreateSessionOptions } from '../../domain/pentathlon/session';
 
@@ -63,9 +64,7 @@ export default function PentathlonSetup({ onStart, onCancel, hasSavedSession, on
             );
           })}
         </div>
-        <p className="pent-note" style={{ marginTop: 10 }}>
-          採用ルールと出典は <code>docs/pentathlon-rules.md</code> に記載しています。
-        </p>
+        <PentathlonRulesModal className="secondary-button" label="採用ルール・出典" />
       </div>
 
       <div className="field-section">

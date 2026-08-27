@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { getEngine } from '../../domain/pentathlon/presets';
 import { computeTotals } from '../../domain/pentathlon/session';
 import { shareNodeAsImage } from '../../share/shareCard';
+import PentathlonRulesModal from './PentathlonRulesModal';
 import type { PentathlonSession } from '../../domain/pentathlon/types';
 
 interface Props {
@@ -82,9 +83,12 @@ export default function PentathlonResult({ session, onFinish }: Props) {
       </div>
 
       <p className="pent-note">
-        総合成績は「種目勝利数」で表示しています。公式の得点換算表は一次情報を確認できなかったため、
-        推測した点数を公式値として表示することは避けています（詳細は docs/pentathlon-rules.md）。
+        {session.playerCount === 1
+          ? '各種目の結果記録です。'
+          : '総合順位は勝利種目数で決定します。勝利種目数が同じ場合は総合引き分けです。'}
       </p>
+
+      <PentathlonRulesModal className="secondary-button" label="採用ルール・出典" />
 
       <button
         type="button"

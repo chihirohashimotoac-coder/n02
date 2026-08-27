@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { deriveQuickTarget } from './quickTarget';
+import { deriveQuickTarget, describeAim } from './quickTarget';
+import { baseballEngine } from '../../domain/pentathlon/engines/baseball';
 import { createRtcDoublesEngine } from '../../domain/pentathlon/engines/rtcDoubles';
 import { golfEngine } from '../../domain/pentathlon/engines/golf';
 import { halfItEngine } from '../../domain/pentathlon/engines/halfIt';
@@ -49,9 +50,46 @@ describe('deriveQuickTarget', () => {
     expect(deriveQuickTarget('golf', state)).toBeNull();
   });
 
-  it('Baseball and Cricket keep the full grid (no QuickTarget)', () => {
-    expect(deriveQuickTarget('baseball', {})).toBeNull();
+  it('Cricket keeps the full grid (no QuickTarget)', () => {
     expect(deriveQuickTarget('cricket', {})).toBeNull();
+  });
+
+  describe('Baseball', () => {
+    it('targets the current inning number, with what each ring is worth', () => {
+      const state = baseballEngine.createState();
+      expect(deriveQuickTarget('baseball', state)).toEqual({
+        kind: 'number',
+        number: 1,
+        outcomes: { single: '1 RUN', double: '2 RUN', triple: '3 RUN', miss: '0 RUN' },
+      });
+    });
+
+    it('follows the inning forward', () => {
+      let state = baseballEngine.createState();
+      state = baseballEngine.applyInput(state, [{ kind: 'number', value: 1, ring: 'single' }]);
+      state = baseballEngine.applyInput(state, [{ kind: 'miss' }]);
+      const target = deriveQuickTarget('baseball', state);
+      expect(target).toMatchObject({ kind: 'number', number: 3 });
+    });
+
+    it('returns null once all innings are played', () => {
+      let state = baseballEngine.createState();
+      for (let inning = 1; inning <= 9; inning += 1) {
+        state = baseballEngine.applyInput(state, [{ kind: 'miss' }]);
+      }
+      expect(baseballEngine.isFinished(state)).toBe(true);
+      expect(deriveQuickTarget('baseball', state)).toBeNull();
+    });
+
+    it('describes the aim with the inning number as the headline', () => {
+      const state = baseballEngine.createState();
+      const aim = describeAim('baseball', state, deriveQuickTarget('baseball', state));
+      expect(aim).toEqual({
+        phase: '第1イニング',
+        target: '1',
+        hint: '1のシングル・ダブル・トリプルを狙ってください',
+      });
+    });
   });
 
   describe('RTC-on-Doubles', () => {
