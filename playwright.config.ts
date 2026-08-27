@@ -1,11 +1,35 @@
 import { existsSync } from 'node:fs';
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices, webkit } from '@playwright/test';
 
 const preinstalledChromium = '/opt/pw-browsers/chromium';
 const executablePath = existsSync(preinstalledChromium) ? preinstalledChromium : undefined;
 
+/**
+ * WebKit has to be downloaded separately and some sandboxes block that download. Its projects are
+ * registered only when the browser is actually present, so `npm run test:e2e` still runs everywhere;
+ * CI installs it, so the iPhone/WebKit coverage does run there.
+ */
+const webkitAvailable = (() => {
+  try {
+    return existsSync(webkit.executablePath());
+  } catch {
+    return false;
+  }
+})();
+
 const PORT = 4174;
 const HOST = '127.0.0.1';
+
+/** Viewport sizes the UI is required to work at (see e2e/layout.spec.ts). */
+const VIEWPORTS = {
+  desktop: { width: 1366, height: 768 },
+  desktopTall: { width: 1363, height: 936 },
+  iphone13: { width: 390, height: 844 },
+  iphone15: { width: 393, height: 852 },
+  iphoneMax: { width: 430, height: 932 },
+} as const;
+
+const chromium = executablePath ? { launchOptions: { executablePath } } : {};
 
 export default defineConfig({
   testDir: './e2e',
@@ -17,11 +41,49 @@ export default defineConfig({
   use: {
     baseURL: `http://${HOST}:${PORT}`,
     trace: 'on-first-retry',
-    ...(executablePath ? { launchOptions: { executablePath } } : {}),
+    ...chromium,
   },
   projects: [
-    { name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'mobile-chromium', use: { ...devices['Pixel 5'] } },
+    // Full suites, run on one desktop and one mobile viewport.
+    {
+      name: 'desktop-chromium',
+      use: { ...devices['Desktop Chrome'], viewport: VIEWPORTS.desktop, ...chromium },
+    },
+    { name: 'mobile-chromium', use: { ...devices['Pixel 5'], ...chromium } },
+
+    // Layout-only checks across every required viewport size.
+    {
+      name: 'layout-1363x936',
+      testMatch: /layout\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], viewport: VIEWPORTS.desktopTall, ...chromium },
+    },
+    {
+      name: 'layout-iphone-390',
+      testMatch: /layout\.spec\.ts/,
+      use: { ...devices['Pixel 5'], viewport: VIEWPORTS.iphone13, ...chromium },
+    },
+    {
+      name: 'layout-iphone-393',
+      testMatch: /layout\.spec\.ts/,
+      use: { ...devices['Pixel 5'], viewport: VIEWPORTS.iphone15, ...chromium },
+    },
+    {
+      name: 'layout-iphone-430',
+      testMatch: /layout\.spec\.ts/,
+      use: { ...devices['Pixel 5'], viewport: VIEWPORTS.iphoneMax, ...chromium },
+    },
+
+    // Real WebKit, on an iPhone device profile - the closest this suite gets to Mobile Safari.
+    ...(webkitAvailable
+      ? [
+          { name: 'iphone-webkit', use: { ...devices['iPhone 13'] } },
+          {
+            name: 'iphone-webkit-max',
+            testMatch: /layout\.spec\.ts/,
+            use: { ...devices['iPhone 14 Pro Max'] },
+          },
+        ]
+      : []),
   ],
   webServer: {
     command: `npm run preview -- --host ${HOST} --port ${PORT} --strictPort`,

@@ -29,7 +29,16 @@ export default function PentathlonModal({ label, onClose, children }: Props) {
     returnFocusRef.current = document.activeElement as HTMLElement | null;
     const first = cardRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE)[0];
     (first ?? cardRef.current)?.focus();
-    return () => returnFocusRef.current?.focus?.();
+    return () => {
+      const target = returnFocusRef.current;
+      if (!target?.isConnected) return;
+      // Deferred, and only when nothing else has claimed focus: closing this dialog to open another
+      // one (the DNF confirmation) must not yank focus back out of the replacement.
+      queueMicrotask(() => {
+        const active = document.activeElement;
+        if (active === null || active === document.body) target.focus();
+      });
+    };
   }, []);
 
   useEffect(() => {

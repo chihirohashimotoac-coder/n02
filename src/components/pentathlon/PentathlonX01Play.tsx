@@ -310,7 +310,8 @@ export default function PentathlonX01Play({
         </PentathlonModal>
       )}
 
-      {showCheckoutOverlay && stillPlayingIndex !== null && (
+      {/* Hidden while the DNF confirmation is up: only one dialog is ever open at a time. */}
+      {showCheckoutOverlay && !confirmingDnf && stillPlayingIndex !== null && (
         <PentathlonModal label="種目の続行選択" onClose={continuePlaying}>
           <h2>
             {session.names[waitingFinishedIndex!]}{' '}

@@ -452,3 +452,202 @@ test.describe('Pentathlon rule popup and arrange-route setting', () => {
     await expect(preview).toHaveCount(0);
   });
 });
+
+test.describe('Pentathlon 2-player full sessions', () => {
+  /** Commits dart-hit turns with a fixed tap sequence until the discipline result screen appears. */
+  async function playUntilResult(
+    page: import('@playwright/test').Page,
+    tap: () => Promise<void>,
+    maxTurns: number,
+  ) {
+    for (let turn = 0; turn < maxTurns; turn += 1) {
+      if (await page.locator('.pent-result-table').isVisible()) return;
+      await tap();
+      await commitPentTurn(page);
+    }
+    await expect(page.locator('.pent-result-table')).toBeVisible();
+  }
+
+  /** Plays one X01 attempt per player - both take the same route, so the discipline is a draw. */
+  async function play501Both(page: import('@playwright/test').Page) {
+    for (let visit = 0; visit < 2; visit += 1) {
+      await enterPentScore(page, 180);
+      await enterPentScore(page, 180);
+    }
+    await enterPentScore(page, 141);
+    await confirmFinish(page);
+    await continueOpponentPlay(page);
+    await enterPentScore(page, 141);
+    await confirmFinish(page);
+  }
+
+  test('completes all five JDA disciplines with two players', async ({ page }) => {
+    test.slow();
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    const next = () => page.getByRole('button', { name: /次の種目へ|総合リザルトへ/ }).click();
+
+    // 1. 501 - both players take the identical 9-dart route.
+    await play501Both(page);
+    await next();
+
+    // 2. Half-It - 9 rounds each, every dart a miss (both halve identically).
+    await playUntilResult(
+      page,
+      async () => {
+        for (let dart = 0; dart < 3; dart += 1) {
+          const anyRing = await page.locator('.pent-number-grid button.wide').count();
+          if (anyRing > 0) await tapAnyRingNumber(page, 'MISS');
+          else await tapQuickTarget(page, 'ミス');
+        }
+      },
+      24,
+    );
+    await next();
+
+    // 3. Round-the-Clock ON DOUBLES - RTC has no dart limit, so both players actually work their
+    // way through D1..D20 + BULL. The quick pad's "hit" button is always the current target, so
+    // tapping it repeatedly walks the sequence for whichever player is throwing.
+    await playUntilResult(page, async () => {
+      for (let dart = 0; dart < 3; dart += 1) {
+        const hit = page.locator('.pent-quick-btn.hit').first();
+        if (await hit.isEnabled()) await hit.click();
+      }
+    }, 20);
+    await next();
+
+    // 4. Golf - 9 holes each, one dart per hole (early commit).
+    await playUntilResult(page, async () => {
+      await tapQuickTarget(page, 'ミス');
+    }, 24);
+    await next();
+
+    // 5. 301.
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 61);
+    await enterPentScore(page, 61);
+    await enterPentScore(page, 60);
+    await confirmFinish(page);
+    await continueOpponentPlay(page);
+    await enterPentScore(page, 60);
+    await confirmFinish(page);
+    await next();
+
+    await expect(page.locator('.pent-share-card')).toContainText('JDA');
+    await expect(page.locator('.pent-result-row.total')).toContainText('種目勝利数');
+  });
+
+  test('completes all five n01 disciplines with two players', async ({ page }) => {
+    test.slow();
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.locator('.pent-preset-card', { hasText: 'i-Pentathlon' }).click();
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    const next = () => page.getByRole('button', { name: /次の種目へ|総合リザルトへ/ }).click();
+
+    // 1. Cork - 5 rounds of 3 bull darts each.
+    await playUntilResult(page, async () => {
+      for (let dart = 0; dart < 3; dart += 1) await tapQuickTarget(page, 'ミス');
+    }, 16);
+    await next();
+
+    // 2. 301.
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 61);
+    await enterPentScore(page, 61);
+    await enterPentScore(page, 60);
+    await confirmFinish(page);
+    await continueOpponentPlay(page);
+    await enterPentScore(page, 60);
+    await confirmFinish(page);
+    await next();
+
+    // 3. Baseball - a tie extends into extra innings, which the engine caps; play until it settles.
+    await playUntilResult(page, async () => {
+      for (let dart = 0; dart < 3; dart += 1) await tapBaseballOutcome(page, 'ミス');
+    }, 30);
+    await next();
+
+    // 4. 501.
+    await play501Both(page);
+    await next();
+
+    // 5. Cricket - both players close 20-15, then the starter takes BULL and wins on points.
+    await expect(page.locator('.pent-cricket-board')).toBeVisible();
+    await enterPentHits(page, ['T20', 'T19', 'T18']);
+    await enterPentHits(page, ['T20', 'T19', 'T18']);
+    await enterPentHits(page, ['T17', 'T16', 'T15']);
+    await enterPentHits(page, ['T17', 'T16', 'T15']);
+    await enterPentHits(page, ['BULL', 'BULL', 'MISS']);
+    await expect(page.locator('.pent-result-table')).toBeVisible();
+    await next();
+
+    await expect(page.locator('.pent-share-card')).toContainText('n01 / i-Pentathlon');
+  });
+});
+
+test.describe('Pentathlon X01 DNF safety', () => {
+  test('pressing Enter after a checkout continues play instead of marking the opponent DNF', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 26);
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 26);
+    await enterPentScore(page, 141);
+    await confirmFinish(page);
+
+    // The primary action is continuing the opponent's play - Enter must take that, never DNF.
+    await expect(page.getByRole('dialog')).toContainText('プレイヤー2 のプレイを続ける');
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByText('DISCIPLINE COMPLETE')).toHaveCount(0);
+    // Player 2 is still throwing, with no result recorded.
+    await expect(page.locator('.n01-player-name.active')).toContainText('プレイヤー2');
+    await expect(page.locator('.n01-left-table').last()).toContainText('449');
+  });
+
+  test('the DNF choice records nothing until its confirmation is accepted', async ({ page }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 26);
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 26);
+    await enterPentScore(page, 141);
+    await confirmFinish(page);
+
+    await page.getByRole('button', { name: /をDNFとして次の種目へ進む/ }).click();
+    // The confirmation names the player who would be marked DNF.
+    const confirm = page.getByRole('dialog');
+    await expect(confirm).toContainText('プレイヤー2');
+    await expect(confirm).toContainText('DNF');
+
+    // Cancelling records nothing and hands back to the still-playing player.
+    await page.getByRole('button', { name: 'キャンセル' }).click();
+    await expect(page.getByText('DISCIPLINE COMPLETE')).toHaveCount(0);
+    const stored = await page.evaluate(() => {
+      const raw = localStorage.getItem('n02-pentathlon-v1');
+      return raw ? (JSON.parse(raw).records as unknown[]).length : -1;
+    });
+    expect(stored).toBe(0);
+
+    // Confirming is what finally records the DNF.
+    await page.getByRole('button', { name: /をDNFとして次の種目へ進む/ }).click();
+    await page.getByRole('button', { name: /をDNFにして進む/ }).click();
+    await expect(page.getByText('DISCIPLINE COMPLETE')).toBeVisible();
+    await expect(page.locator('.pent-result-table .pent-result-row').nth(2)).toContainText('DNF');
+  });
+});

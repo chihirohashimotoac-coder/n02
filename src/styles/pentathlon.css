@@ -948,12 +948,25 @@
   background: #ffffff1f;
 }
 
-/* The X01 footer's own height, referenced by the entry popover so the two can never disagree. */
+/* The X01 footer's own height, referenced by the entry popover so the two can never disagree. The
+   footer lays its rows out as a column and lets the keypad take whatever is left, so the keys can
+   never overflow past the bottom edge however the rows above happen to measure. */
 .pent-x01-shell {
-  --pent-footer-h: 380px;
+  --pent-footer-h: 404px;
 }
 .pent-x01-shell .n01-game-footer {
   height: var(--pent-footer-h);
+  display: flex;
+  flex-direction: column;
+}
+.pent-x01-shell .n01-left-table,
+.pent-x01-shell .n01-menu-table,
+.pent-x01-shell .pent-key-hint {
+  flex: 0 0 auto;
+}
+.pent-x01-shell .n01-key-table {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .pent-x01-shell .n01-score-area {
   inset: 84px 0 var(--pent-footer-h);
@@ -982,7 +995,8 @@
     background: #354239;
     grid-template-rows: repeat(4, 1fr);
     grid-template-columns: repeat(3, 1fr);
-    height: 176px;
+    height: auto;
+    padding-bottom: 14px;
     display: grid;
   }
   .pent-x01-shell .n01-key-table button {
@@ -1018,10 +1032,10 @@
  */
 @media (width <= 720px) {
   .pent-x01-shell {
-    --pent-footer-h: calc(370px + env(safe-area-inset-bottom, 0px) + 20px);
+    --pent-footer-h: calc(400px + env(safe-area-inset-bottom, 0px) + 20px);
   }
   .pent-x01-shell .n01-key-table {
-    height: calc(218px + env(safe-area-inset-bottom, 0px) + 20px);
+    height: auto;
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
   }
   .pent-x01-shell .n01-left-table {
