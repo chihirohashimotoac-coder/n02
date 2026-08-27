@@ -4,7 +4,7 @@ import { deriveQuickTarget } from './quickTarget';
 import { getEngine } from '../../domain/pentathlon/presets';
 import { currentDisciplineId } from '../../domain/pentathlon/session';
 import { DISCIPLINE_RULE_TEXT } from '../../domain/ruleText';
-import RulesButton from '../RulesButton';
+import PentathlonRulesButton from './PentathlonRulesButton';
 import type { DartHit } from '../../domain/darts';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
 
@@ -107,7 +107,7 @@ export default function PentathlonPlay({
         <button type="button" className="secondary-button" disabled={!canUndo} onClick={onUndo}>
           1つ戻す
         </button>
-        <RulesButton className="secondary-button" label="ルール説明" {...DISCIPLINE_RULE_TEXT[disciplineId]} />
+        <PentathlonRulesButton className="secondary-button" label="ルール説明" {...DISCIPLINE_RULE_TEXT[disciplineId]} />
         <button type="button" className="secondary-button" onClick={onExit}>
           中断してメニューへ
         </button>

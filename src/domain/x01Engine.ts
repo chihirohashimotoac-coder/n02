@@ -1,5 +1,5 @@
 import { resolveVisit, InvalidVisitError } from './x01Core';
-import { isReachableScore } from './darts';
+import { isCheckoutPossible, isReachableScore } from './darts';
 import { simulateComVisit } from './comPlayer';
 
 export { InvalidVisitError };
@@ -109,21 +109,58 @@ function newPlayerStats(name: string): X01PlayerStats {
   };
 }
 
-function randomCheckoutTarget(min: number, max: number): number {
+/**
+ * Every remaining score in [min, max] that is worth setting as a checkout challenge: either a real
+ * double-out finish, or above 170 (where the practice is getting *into* a finish over several
+ * rounds). Bogey numbers like 159/162/163 are excluded because they can never be checked out.
+ */
+function checkoutTargetCandidates(min: number, max: number): number[] {
   const lo = Math.max(2, Math.min(min, max));
   const hi = Math.max(lo, max);
-  return lo + Math.floor(Math.random() * (hi - lo + 1));
+  const candidates: number[] = [];
+  for (let target = lo; target <= hi; target += 1) {
+    if (target > 170 || isCheckoutPossible(target)) candidates.push(target);
+  }
+  return candidates;
 }
 
-function legStartScore(settings: X01Settings, player: 0 | 1): number {
-  if (settings.mode === 'checkout') return randomCheckoutTarget(settings.checkoutMin, settings.checkoutMax);
-  if (settings.handicapEnabled[player]) return settings.handicapScores[player];
+/**
+ * The one checkout challenge for a leg. Drawn once and shared by both players - checkout practice is
+ * two people attacking the *same* number - and, where the range allows it, never the same number as
+ * the leg that just finished.
+ */
+function randomCheckoutTarget(settings: X01Settings, previousTarget?: number): number {
+  const candidates = checkoutTargetCandidates(settings.checkoutMin, settings.checkoutMax);
+  const pool = candidates.length > 1 ? candidates.filter((target) => target !== previousTarget) : candidates;
+  return pool[Math.floor(Math.random() * pool.length)] ?? Math.max(2, settings.checkoutMin);
+}
+
+function legStartScore(settings: X01Settings, previousTarget?: number): number {
+  if (settings.mode === 'checkout') return randomCheckoutTarget(settings, previousTarget);
   return settings.startScore;
 }
 
-function coreForNewLeg(settings: X01Settings, leg: number, legStarter: 0 | 1, players: [X01PlayerStats, X01PlayerStats]): X01CoreState {
-  const p0Start = legStartScore(settings, 0);
-  const p1Start = legStartScore(settings, 1);
+/**
+ * Per-player starting scores for a leg. Handicaps only apply to 01 - in checkout practice both
+ * players always start from the identical challenge score.
+ */
+function playerStartScores(settings: X01Settings, legStart: number): [number, number] {
+  if (settings.mode === 'checkout') return [legStart, legStart];
+  return [
+    settings.handicapEnabled[0] ? settings.handicapScores[0] : legStart,
+    settings.handicapEnabled[1] ? settings.handicapScores[1] : legStart,
+  ];
+}
+
+function coreForNewLeg(
+  settings: X01Settings,
+  leg: number,
+  legStarter: 0 | 1,
+  players: [X01PlayerStats, X01PlayerStats],
+  previousTarget?: number,
+): X01CoreState {
+  const legStart = legStartScore(settings, previousTarget);
+  const [p0Start, p1Start] = playerStartScores(settings, legStart);
   const nextPlayers: [X01PlayerStats, X01PlayerStats] = [
     { ...players[0], remaining: p0Start },
     { ...players[1], remaining: p1Start },
@@ -133,7 +170,7 @@ function coreForNewLeg(settings: X01Settings, leg: number, legStarter: 0 | 1, pl
     active: legStarter,
     leg,
     legStarter,
-    startScore: settings.mode === 'checkout' ? Math.max(p0Start, p1Start) : settings.startScore,
+    startScore: legStart,
     playerStartScores: [p0Start, p1Start],
     visits: [],
     legDarts: [0, 0],
@@ -312,7 +349,7 @@ export function advanceLeg(state: X01MatchState): X01MatchState {
   if (state.legResult === null || state.matchWinner !== null) return state;
   const lastCompletion = state.completed[state.completed.length - 1];
   const nextStarter: 0 | 1 = lastCompletion.winner === null ? (state.legStarter === 0 ? 1 : 0) : lastCompletion.winner === 0 ? 1 : 0;
-  const core = coreForNewLeg(state.settings, state.leg + 1, nextStarter, state.players);
+  const core = coreForNewLeg(state.settings, state.leg + 1, nextStarter, state.players, state.startScore);
   return { ...state, ...core, legResult: null, undo: [] };
 }
 

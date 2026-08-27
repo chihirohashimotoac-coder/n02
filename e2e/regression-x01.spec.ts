@@ -42,22 +42,17 @@ test.describe('通常01', () => {
     await expect(page.locator('.result-card h2')).toHaveText('プレイヤー1');
   });
 
-  test('shows a live preview of the score being typed before Enter confirms it', async ({ page }) => {
+  test('has no always-on entry preview and keeps its four-button menu', async ({ page }) => {
     await page.getByRole('button', { name: /ゲームを開始/ }).click();
-    await expect(page.locator('.n01-entry-display strong')).toHaveText('−');
+    await expect(page.locator('.n01-entry-display')).toHaveCount(0);
+    await expect(page.locator('.pent-entry-display')).toHaveCount(0);
+    await expect(page.locator('.n01-menu-table > button')).toHaveCount(4);
+    await expect(page.locator('.n01-menu-table button', { hasText: 'RULES' })).toHaveCount(0);
+
+    // Typing still works without any preview row - Enter is what commits it.
     await page.keyboard.type('45');
-    await expect(page.locator('.n01-entry-display strong')).toHaveText('45');
     await page.keyboard.press('Enter');
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('456');
-    await expect(page.locator('.n01-entry-display strong')).toHaveText('−');
-  });
-
-  test('the RULES popup explains the current mode', async ({ page }) => {
-    await page.getByRole('button', { name: /ゲームを開始/ }).click();
-    await page.getByRole('button', { name: 'RULES' }).click();
-    await expect(page.locator('.n01-modal-card h2')).toContainText('通常01');
-    await page.getByRole('button', { name: '閉じる' }).click();
-    await expect(page.locator('.n01-modal-card')).toHaveCount(0);
   });
 
   test('undo reverts the last visit', async ({ page }) => {
@@ -100,16 +95,60 @@ test.describe('通常01', () => {
 });
 
 test.describe('チェックアウト練習', () => {
-  test('starts with a randomised checkout target and shares the 01 engine', async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
     await openFreshApp(page);
     await page.locator('.mode-card', { hasText: 'チェックアウト練習' }).click();
     await page.getByRole('button', { name: /ゲームを開始/ }).click();
+  });
 
+  test('starts with a randomised checkout target and shares the 01 engine', async ({ page }) => {
     await expect(page.locator('.n01-game-meta')).toContainText('CHECKOUT');
     const target = await page.locator('.n01-left-table strong').first().innerText();
     const value = Number(target);
     expect(value).toBeGreaterThanOrEqual(41);
     expect(value).toBeLessThanOrEqual(170);
+  });
+
+  test('has no always-on entry preview', async ({ page }) => {
+    await expect(page.locator('.n01-entry-display')).toHaveCount(0);
+    await expect(page.locator('.pent-entry-display')).toHaveCount(0);
+    await expect(page.locator('.n01-menu-table > button')).toHaveCount(4);
+  });
+
+  test('gives both players the identical challenge score, before and after a hand-off', async ({ page }) => {
+    const remaining = page.locator('.n01-left-table strong');
+    const target = await remaining.nth(0).innerText();
+    await expect(remaining.nth(1)).toHaveText(target);
+
+    // Hand the turn over: the challenge belongs to the leg, not to whoever is throwing.
+    await enterGameScore(page, 0);
+    await expect(remaining.nth(0)).toHaveText(target);
+    await expect(remaining.nth(1)).toHaveText(target);
+  });
+
+  test('keeps both challenge scores in step across save and resume', async ({ page }) => {
+    const remaining = page.locator('.n01-left-table strong');
+    const target = await remaining.nth(0).innerText();
+    await enterGameScore(page, 0);
+
+    await page.reload();
+    await page.getByRole('button', { name: /保存した対戦を再開/ }).click();
+    await expect(remaining.nth(0)).toHaveText(target);
+    await expect(remaining.nth(1)).toHaveText(target);
+  });
+
+  test('draws one new shared challenge score for the next leg', async ({ page }) => {
+    const remaining = page.locator('.n01-left-table strong');
+    const firstTarget = await remaining.nth(0).innerText();
+
+    await enterGameScore(page, 0); // player 1 scores nothing
+    await enterGameScore(page, Number(firstTarget)); // player 2 checks out the challenge
+    await confirmFinish(page);
+    await page.getByRole('button', { name: /次のLegへ/ }).click();
+
+    const nextTarget = await remaining.nth(0).innerText();
+    await expect(remaining.nth(1)).toHaveText(nextTarget);
+    expect(Number(nextTarget)).not.toBeNaN();
   });
 });
 

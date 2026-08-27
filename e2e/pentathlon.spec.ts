@@ -385,7 +385,7 @@ test.describe('Pentathlon rule popup and arrange-route setting', () => {
 
     await page.getByRole('button', { name: 'RULES' }).click();
     await expect(page.locator('.n01-modal-card h2')).toContainText('501');
-    await expect(page.locator('.rules-modal-body')).toContainText('ダブル');
+    await expect(page.locator('.pent-rules-body')).toContainText('ダブル');
     await page.getByRole('button', { name: '閉じる' }).click();
     await expect(page.locator('.n01-modal-card')).toHaveCount(0);
   });
@@ -419,11 +419,11 @@ test.describe('Pentathlon rule popup and arrange-route setting', () => {
     await openPentathlon(page);
     await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
 
-    await expect(page.locator('.n01-entry-display strong')).toHaveText('−');
+    await expect(page.locator('.pent-entry-display strong')).toHaveText('−');
     await page.keyboard.type('18');
-    await expect(page.locator('.n01-entry-display strong')).toHaveText('18');
+    await expect(page.locator('.pent-entry-display strong')).toHaveText('18');
     await page.keyboard.press('Enter');
-    await expect(page.locator('.n01-entry-display strong')).toHaveText('−');
+    await expect(page.locator('.pent-entry-display strong')).toHaveText('−');
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('483');
   });
 });

@@ -5,7 +5,7 @@ import { currentDisciplineId } from '../../domain/pentathlon/session';
 import { InvalidVisitError } from '../../domain/x01Core';
 import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../../domain/darts';
 import { DISCIPLINE_RULE_TEXT } from '../../domain/ruleText';
-import RulesButton from '../RulesButton';
+import PentathlonRulesButton from './PentathlonRulesButton';
 import type { X01SoloState, X01SoloInput } from '../../domain/pentathlon/engines/x01Solo';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
 
@@ -166,7 +166,7 @@ export default function PentathlonX01Play({
   };
 
   return (
-    <section className="n01-game-shell">
+    <section className="n01-game-shell pent-x01-shell">
       <header className={`n01-game-header ${session.playerCount === 1 ? 'solo' : ''}`}>
         <div className={`n01-player-name ${active === 0 && !current.progress[0].finished ? 'active' : ''}`}>
           <span>{session.currentStarter === 0 ? '先攻' : '後攻'}</span>
@@ -235,7 +235,7 @@ export default function PentathlonX01Play({
           })}
         </div>
 
-        <div className="n01-entry-display" aria-live="polite">
+        <div className="pent-entry-display" aria-live="polite">
           <span>{session.names[active]} の得点入力中</span>
           <strong className={entry ? '' : 'empty'}>{entry || '−'}</strong>
         </div>
@@ -250,7 +250,7 @@ export default function PentathlonX01Play({
           <button type="button" disabled={!canUndo} onClick={onUndo}>
             Undo
           </button>
-          <RulesButton {...DISCIPLINE_RULE_TEXT[disciplineId]} />
+          <PentathlonRulesButton {...DISCIPLINE_RULE_TEXT[disciplineId]} />
         </nav>
 
         <div className="n01-key-table" aria-label="得点入力テンキー">
@@ -292,7 +292,7 @@ export default function PentathlonX01Play({
 
       {showCheckoutOverlay && (
         <div className="result-backdrop" role="dialog" aria-modal="true" aria-label="種目の続行選択">
-          <div className="result-card">
+          <div className="result-card pent-x01-result">
             <div className="result-icon" aria-hidden="true">
               ✓
             </div>

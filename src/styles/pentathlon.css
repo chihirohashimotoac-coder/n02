@@ -807,3 +807,96 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* ---------------------------------------------------------------------------
+   Pentathlon-only copies of styles that used to live in app.css. 通常01 /
+   チェックアウト練習 are restored to their pre-Pentathlon markup, so anything
+   Pentathlon adds on top of the shared .n01-* shell is namespaced here.
+   --------------------------------------------------------------------------- */
+
+.pent-entry-display {
+  border-bottom: 1px solid var(--line);
+  background: #fbfbf8;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  height: 36px;
+  padding: 0 20px;
+  display: flex;
+}
+.pent-entry-display span {
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 700;
+}
+.pent-entry-display strong {
+  color: var(--green-dark);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 800;
+}
+.pent-entry-display strong.empty {
+  color: #b9c0ba;
+  font-weight: 600;
+}
+[data-theme="neon"] .pent-entry-display strong {
+  color: #2ee58a;
+}
+
+.pent-rules-body {
+  white-space: pre-line;
+  text-align: left;
+  color: var(--ink);
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.85;
+}
+
+.pent-x01-result .secondary-button {
+  width: 100%;
+  margin-top: 8px;
+}
+.pent-x01-result .secondary-button kbd {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 9px;
+}
+
+@media (width <= 720px) {
+  .pent-entry-display {
+    height: 30px;
+    padding: 0 10px;
+  }
+  .pent-entry-display span {
+    font-size: 8px;
+  }
+  .pent-entry-display strong {
+    font-size: 17px;
+  }
+}
+
+/* The Pentathlon X01 footer carries one extra row (the entry display) on top of the shared
+   .n01-game-footer layout, so its footer/score-area split is taller than 通常01's. */
+.pent-x01-shell .n01-score-area {
+  inset: 84px 0 288px;
+}
+.pent-x01-shell .n01-game-footer {
+  height: 288px;
+}
+
+@media (width <= 720px) {
+  .pent-x01-shell .n01-score-area {
+    inset: 64px 0 390px;
+  }
+  .pent-x01-shell .n01-game-footer {
+    height: 390px;
+  }
+}

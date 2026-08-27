@@ -41,6 +41,76 @@ describe('createX01Match', () => {
     expect(state.leg).toBe(1);
     expect(state.legStarter).toBe(0);
   });
+
+  it('applies a per-player handicap start in 01 mode', () => {
+    const state = createX01Match(
+      baseSettings({ handicapEnabled: [false, true], handicapScores: [501, 301] }),
+    );
+    expect(state.playerStartScores).toEqual([501, 301]);
+  });
+});
+
+describe('checkout practice - shared challenge score', () => {
+  const checkoutSettings = (overrides: Partial<X01Settings> = {}) =>
+    baseSettings({ mode: 'checkout', checkoutMin: 41, checkoutMax: 170, ...overrides });
+
+  it('starts both players from the identical challenge score', () => {
+    // Drawn at random, so assert over many matches rather than a single lucky one.
+    for (let i = 0; i < 200; i += 1) {
+      const state = createX01Match(checkoutSettings());
+      expect(state.players[0].remaining).toBe(state.players[1].remaining);
+      expect(state.playerStartScores[0]).toBe(state.playerStartScores[1]);
+      expect(state.startScore).toBe(state.playerStartScores[0]);
+    }
+  });
+
+  it('keeps the same challenge score for both players across a turn hand-off', () => {
+    let state = createX01Match(checkoutSettings({ checkoutMin: 100, checkoutMax: 100 }));
+    expect(state.playerStartScores).toEqual([100, 100]);
+    state = applyVisit(state, 20); // player 0 throws, hand-off to player 1
+    expect(state.active).toBe(1);
+    expect(state.startScore).toBe(100);
+    expect(state.playerStartScores).toEqual([100, 100]);
+    expect(state.players[1].remaining).toBe(100);
+  });
+
+  it('draws one new shared challenge score for the next leg', () => {
+    let state = createX01Match(checkoutSettings({ checkoutMin: 40, checkoutMax: 60, targetLegs: 3 }));
+    const first = state.startScore;
+    state = applyVisit(state, 0);
+    state = applyVisit(state, state.players[1].remaining, 2); // player 1 checks out
+    state = advanceLeg(state);
+    expect(state.leg).toBe(2);
+    expect(state.playerStartScores[0]).toBe(state.playerStartScores[1]);
+    expect(state.players[0].remaining).toBe(state.players[1].remaining);
+    expect(state.startScore).toBe(state.playerStartScores[0]);
+    expect(state.startScore).not.toBe(first); // the range holds >1 candidate, so it must change
+  });
+
+  it('never draws a number that cannot be checked out', () => {
+    // 159/162/163/165/166/168/169 are bogey numbers: reachable as a remaining, impossible to finish.
+    const bogey = new Set([159, 162, 163, 165, 166, 168, 169]);
+    for (let i = 0; i < 400; i += 1) {
+      const state = createX01Match(checkoutSettings({ checkoutMin: 155, checkoutMax: 170 }));
+      expect(bogey.has(state.startScore)).toBe(false);
+    }
+  });
+
+  it('ignores 01 handicaps so the challenge stays identical for both players', () => {
+    const state = createX01Match(
+      checkoutSettings({ handicapEnabled: [true, false], handicapScores: [301, 501] }),
+    );
+    expect(state.playerStartScores[0]).toBe(state.playerStartScores[1]);
+  });
+
+  it('falls back to a single-candidate range without getting stuck', () => {
+    let state = createX01Match(checkoutSettings({ checkoutMin: 40, checkoutMax: 40, targetLegs: 3 }));
+    expect(state.startScore).toBe(40);
+    state = applyVisit(state, 40, 1); // player 0 checks out
+    state = advanceLeg(state);
+    expect(state.startScore).toBe(40);
+    expect(state.playerStartScores).toEqual([40, 40]);
+  });
 });
 
 describe('applyVisit - normal scoring', () => {
