@@ -42,6 +42,24 @@ test.describe('通常01', () => {
     await expect(page.locator('.result-card h2')).toHaveText('プレイヤー1');
   });
 
+  test('shows a live preview of the score being typed before Enter confirms it', async ({ page }) => {
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await expect(page.locator('.n01-entry-display strong')).toHaveText('−');
+    await page.keyboard.type('45');
+    await expect(page.locator('.n01-entry-display strong')).toHaveText('45');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('456');
+    await expect(page.locator('.n01-entry-display strong')).toHaveText('−');
+  });
+
+  test('the RULES popup explains the current mode', async ({ page }) => {
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await page.getByRole('button', { name: 'RULES' }).click();
+    await expect(page.locator('.n01-modal-card h2')).toContainText('通常01');
+    await page.getByRole('button', { name: '閉じる' }).click();
+    await expect(page.locator('.n01-modal-card')).toHaveCount(0);
+  });
+
   test('undo reverts the last visit', async ({ page }) => {
     await page.getByRole('button', { name: /ゲームを開始/ }).click();
     await enterGameScore(page, 100);

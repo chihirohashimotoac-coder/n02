@@ -47,6 +47,32 @@ export async function enterPentHits(page: Page, hits: string[]) {
   await page.locator('button', { hasText: 'この投球を確定' }).click();
 }
 
+/**
+ * Taps one button in the Cork/Golf/Half-It/RTC-on-Doubles "quick target" pad by its exact visible
+ * label (e.g. 'インナーブル', 'アウターブル', 'ミス', 'シングル3', 'ダブル3', 'トリプル3', '成功（D7）').
+ * Does not commit the turn - call commitPentTurn() once all darts for the turn are staged.
+ */
+export async function tapQuickTarget(page: Page, label: string) {
+  await page.locator('.pent-quick-btn', { hasText: new RegExp(`^${label}$`) }).click();
+}
+
+/** Half-It's "any double"/"any triple" rounds: taps a specific landed-on number, or 'MISS'. */
+export async function tapAnyRingNumber(page: Page, value: number | 'MISS') {
+  if (value === 'MISS') {
+    await page.locator('.pent-number-grid button.wide', { hasText: 'ミス' }).click();
+  } else {
+    await page
+      .locator('.pent-number-grid button', { hasText: new RegExp(`^${value}$`) })
+      .first()
+      .click();
+  }
+}
+
+/** Commits the currently staged dart hits as the active player's turn. */
+export async function commitPentTurn(page: Page) {
+  await page.locator('button', { hasText: 'この投球を確定' }).click();
+}
+
 /** Confirms a finish-darts declaration dialog, choosing the first offered count. */
 export async function confirmFinish(page: Page) {
   await page.locator('.n01-modal-card button', { hasText: /本目で終了/ }).first().click();
@@ -62,4 +88,20 @@ export async function openFreshApp(page: Page) {
 export async function openPentathlon(page: Page) {
   await page.locator('.mode-card', { hasText: 'ペンタスロン' }).click();
   await page.waitForSelector('.pent-preset-card');
+}
+
+/**
+ * On the Pentathlon X01 checkout hand-off choice (one player finished, the other hasn't): choose to
+ * keep waiting for the other player to check out too - the pre-existing behaviour.
+ */
+export async function waitForOpponentCheckout(page: Page) {
+  await page.getByRole('button', { name: /のチェックアウトを待つ/ }).click();
+}
+
+/**
+ * On the Pentathlon X01 checkout hand-off choice: choose to end the discipline now instead of
+ * waiting for the still-playing opponent to also check out.
+ */
+export async function proceedToNextDiscipline(page: Page) {
+  await page.getByRole('button', { name: /次の種目へ進む/ }).click();
 }

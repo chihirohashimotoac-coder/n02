@@ -1,11 +1,16 @@
 import { expect, test } from '@playwright/test';
 import {
+  commitPentTurn,
   confirmFinish,
   enterGameScore,
   enterPentHits,
   enterPentScore,
   openFreshApp,
   openPentathlon,
+  proceedToNextDiscipline,
+  tapAnyRingNumber,
+  tapQuickTarget,
+  waitForOpponentCheckout,
 } from './helpers';
 
 /** Plays the starter to a 9-dart 501 finish, then the opponent to a slower finish. */
@@ -16,12 +21,24 @@ async function play501TwoPlayers(page: import('@playwright/test').Page) {
   await enterPentScore(page, 26); // opponent -> 449
   await enterPentScore(page, 141); // starter declares finish
   await confirmFinish(page);
-  // The starter checked out first; dismiss the hand-off overlay before the opponent keeps throwing.
-  await page.getByRole('button', { name: /のスローへ進む/ }).click();
+  // The starter checked out first: choose to wait for the opponent to also check out (rather than
+  // proceeding to the next discipline immediately) so both results are final.
+  await waitForOpponentCheckout(page);
   await enterPentScore(page, 180); // opponent -> 269
   await enterPentScore(page, 180); // opponent -> 89
   await enterPentScore(page, 89);
   await confirmFinish(page);
+}
+
+/** Plays a full Cork attempt (5 rounds of 3 darts at bull) via the quick bull pad. */
+async function playCorkAttempt(
+  page: import('@playwright/test').Page,
+  hits: ('インナーブル' | 'アウターブル' | 'ミス')[],
+) {
+  for (let i = 0; i < hits.length; i += 3) {
+    for (const hit of hits.slice(i, i + 3)) await tapQuickTarget(page, hit);
+    await commitPentTurn(page);
+  }
 }
 
 test.describe('Pentathlon setup', () => {
@@ -69,10 +86,10 @@ test.describe('Pentathlon 2-player progression', () => {
     await enterPentScore(page, 141);
     await confirmFinish(page);
 
-    // P1 checked out first: the hand-off overlay names them explicitly before P2 continues.
+    // P1 checked out first: the hand-off choice names them explicitly before P2 continues.
     await expect(page.locator('.result-card')).toContainText('プレイヤー1');
     await expect(page.locator('.result-card')).toContainText('9');
-    await page.getByRole('button', { name: /のスローへ進む/ }).click();
+    await waitForOpponentCheckout(page);
 
     // P1 is locked at 9 darts; the discipline is NOT over and P2 keeps throwing.
     await expect(page.locator('.n01-player-name').first()).toContainText('FINISHED');
@@ -80,6 +97,27 @@ test.describe('Pentathlon 2-player progression', () => {
     await expect(page.locator('.n01-left-table').first()).toContainText('DARTS');
     await expect(page.locator('.n01-player-name.active')).toContainText('プレイヤー2');
     await expect(page.locator('.n01-game-meta')).toContainText('プレイヤー2');
+  });
+
+  test('choosing to proceed ends the discipline immediately, recording the still-playing opponent as DNF', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 26);
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 26);
+    await enterPentScore(page, 141);
+    await confirmFinish(page);
+
+    await proceedToNextDiscipline(page);
+
+    await expect(page.getByText('DISCIPLINE COMPLETE')).toBeVisible();
+    await expect(page.locator('.pent-result-table')).toContainText('9 DARTS');
+    await expect(page.locator('.pent-result-table')).toContainText('DNF');
   });
 
   test('loser starts the next discipline', async ({ page }) => {
@@ -151,8 +189,8 @@ test.describe('Pentathlon persistence and undo', () => {
     await page.locator('.pent-preset-card', { hasText: 'i-Pentathlon' }).click();
     await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
 
-    // Cork: stage a dart, then undo it.
-    await page.locator('.pent-ring-row button', { hasText: /^BULL$/ }).click();
+    // Cork: stage a dart via the quick bull pad, then undo it.
+    await tapQuickTarget(page, 'インナーブル');
     await expect(page.locator('.pent-pending-chip').first()).toHaveText('BULL');
     await page.getByRole('button', { name: '1投戻す' }).click();
     await expect(page.locator('.pent-pending-chip').first()).toContainText('1投目');
@@ -170,8 +208,25 @@ test.describe('Pentathlon full session', () => {
 
     const next = () => page.getByRole('button', { name: /次の種目へ|総合リザルトへ/ }).click();
 
-    // 1. Cork
-    await enterPentHits(page, ['BULL']);
+    // 1. Cork: 5 rounds of 3 darts (15 total) at bull via the quick pad - inner=2/outer=1/miss=0.
+    await playCorkAttempt(page, [
+      'インナーブル',
+      'アウターブル',
+      'ミス',
+      'インナーブル',
+      'アウターブル',
+      'ミス',
+      'インナーブル',
+      'アウターブル',
+      'ミス',
+      'インナーブル',
+      'アウターブル',
+      'ミス',
+      'インナーブル',
+      'アウターブル',
+      'ミス',
+    ]);
+    await expect(page.locator('.pent-result-table')).toContainText('15 POINTS');
     await next();
 
     // 2. 301 (double-in / double-out) - double-in is the player's own responsibility (enter 0 for
@@ -197,9 +252,15 @@ test.describe('Pentathlon full session', () => {
     await expect(page.locator('.pent-result-table')).toContainText('9 DARTS');
     await next();
 
-    // 5. Cricket: close all seven targets (each round is a fixed 3 darts)
+    // 5. Cricket: close all seven targets (each round is a fixed 3 darts), on the dedicated
+    // scoreboard grid screen (numbers down the middle, standard mark notation).
+    await expect(page.locator('.pent-cricket-board')).toBeVisible();
     await enterPentHits(page, ['T20', 'T19', 'T18']);
     await enterPentHits(page, ['T17', 'T16', 'T15']);
+    await expect(page.locator('.pent-cricket-mark.m3')).toHaveCount(6); // 20-15 closed, bull still open
+    // Closing BULL closes all seven targets, which finishes Cricket immediately (solo, 0-0 on
+    // points) and hands off straight to the discipline result screen - so no further grid assertion
+    // after this commit.
     await enterPentHits(page, ['BULL', '25', 'MISS']);
     await next();
 
@@ -207,5 +268,162 @@ test.describe('Pentathlon full session', () => {
     await expect(page.locator('.pent-share-card')).toContainText('n01 / i-Pentathlon');
     await expect(page.locator('.pent-share-card')).toContainText('36 RUNS');
     await expect(page.getByRole('button', { name: 'リザルトカードを共有' })).toBeVisible();
+  });
+
+  test('plays all five JDA disciplines via the quick-target pad', async ({ page }) => {
+    test.slow();
+    await openFreshApp(page);
+    await openPentathlon(page);
+    // JDA (501 / Half-It / Round-the-Clock ON DOUBLES / Golf / 301) is selected by default.
+    await page.locator('select').first().selectOption('1');
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    const next = () => page.getByRole('button', { name: /次の種目へ|総合リザルトへ/ }).click();
+
+    // 1. 501 in 9 darts.
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 141);
+    await confirmFinish(page);
+    await next();
+
+    // 2. Half-It: 9 rounds, exercising every quick-target shape (number / any-double / any-triple /
+    // bull). 40 -S15-> 55 -miss-> 27 -D7(any-double)-> 41 -D17-> 75 -miss-> 37 -T5(any-triple)-> 52
+    // -T19-> 109 -miss-> 54 -BULL-> 104.
+    await tapQuickTarget(page, 'シングル15');
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+
+    await tapAnyRingNumber(page, 7);
+    await tapAnyRingNumber(page, 'MISS');
+    await tapAnyRingNumber(page, 'MISS');
+    await commitPentTurn(page);
+
+    await tapQuickTarget(page, 'ダブル17');
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+
+    await tapAnyRingNumber(page, 5);
+    await tapAnyRingNumber(page, 'MISS');
+    await tapAnyRingNumber(page, 'MISS');
+    await commitPentTurn(page);
+
+    await tapQuickTarget(page, 'トリプル19');
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+
+    await tapQuickTarget(page, 'インナーブル');
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+
+    await expect(page.locator('.pent-result-table')).toContainText('104 POINTS');
+    await next();
+
+    // 3. Round-the-Clock ON DOUBLES: a perfect 21-dart run, hitting D1/D2/D3 etc. within the SAME
+    // turn each time - the quick pad must preview the target advancing mid-turn, not just per-commit.
+    for (let n = 1; n <= 18; n += 3) {
+      await tapQuickTarget(page, `成功（D${n}）`);
+      await tapQuickTarget(page, `成功（D${n + 1}）`);
+      await tapQuickTarget(page, `成功（D${n + 2}）`);
+      await commitPentTurn(page);
+    }
+    await tapQuickTarget(page, '成功（D19）');
+    await tapQuickTarget(page, '成功（D20）');
+    await tapQuickTarget(page, 'インナーブル');
+    await commitPentTurn(page);
+    await expect(page.locator('.pent-result-table')).toContainText('21 DARTS');
+    await next();
+
+    // 4. Golf: 9 holes, a double each for 1 stroke -> best possible round (9 strokes), stopping
+    // early after a single dart each time (allowEarlyCommit).
+    for (let hole = 1; hole <= 9; hole++) {
+      await tapQuickTarget(page, `ダブル${hole}`);
+      await commitPentTurn(page);
+    }
+    await expect(page.locator('.pent-result-table')).toContainText('9 STROKES');
+    await next();
+
+    // 5. 301 (double-in/out) - double-in is the player's own responsibility, same as the n01 test.
+    // Remaining 60 after the first two visits is checkout-able in as few as 2 darts (e.g. S20+D20),
+    // and confirmFinish() picks the fewest-darts option offered, for 3+3+2 = 8 darts total.
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 61);
+    await enterPentScore(page, 60);
+    await confirmFinish(page);
+    await expect(page.locator('.pent-result-table')).toContainText('8 DARTS');
+    await next();
+
+    await expect(page.locator('.pent-share-card')).toContainText('PENTATHLON');
+    await expect(page.locator('.pent-share-card')).toContainText('JDA');
+  });
+});
+
+test.describe('Pentathlon rule popup and arrange-route setting', () => {
+  test('the RULES popup shows the rule text for the current discipline', async ({ page }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    await page.getByRole('button', { name: 'RULES' }).click();
+    await expect(page.locator('.n01-modal-card h2')).toContainText('501');
+    await expect(page.locator('.rules-modal-body')).toContainText('ダブル');
+    await page.getByRole('button', { name: '閉じる' }).click();
+    await expect(page.locator('.n01-modal-card')).toHaveCount(0);
+  });
+
+  test('arrange-route suggestions default to off and can be turned on in setup', async ({ page }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.locator('select').first().selectOption('1'); // 1-player: both visits are the same player
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    // 141 remaining (suggestCheckoutRoute's supported range is <=170) has no shown route by default.
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 180);
+    await expect(page.locator('.checkout-route')).toHaveCount(0);
+  });
+
+  test('enabling the arrange-route setting shows a suggested checkout route', async ({ page }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.locator('select').first().selectOption('1'); // 1-player: both visits are the same player
+    await page.locator('.toggle-field', { hasText: 'アレンジルート' }).locator('input[type="checkbox"]').check();
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 180); // -> 141, within suggestCheckoutRoute's range
+    await expect(page.locator('.checkout-route').first()).toBeVisible();
+  });
+
+  test('shows a live preview of the score being typed before Enter confirms it', async ({ page }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+
+    await expect(page.locator('.n01-entry-display strong')).toHaveText('−');
+    await page.keyboard.type('18');
+    await expect(page.locator('.n01-entry-display strong')).toHaveText('18');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-entry-display strong')).toHaveText('−');
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('483');
   });
 });
