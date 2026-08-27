@@ -3,7 +3,7 @@ import type { DartHit } from '../../darts';
 import { HALF_IT_START_SCORE, HALF_IT_TARGETS, halfItDartValue, halfItEngine } from './halfIt';
 import { createRtcDoublesEngine, RTC_TARGET_COUNT, rtcAdvances, rtcTargetLabel } from './rtcDoubles';
 import { GOLF_HOLES, golfEngine, golfStrokes } from './golf';
-import { corkEngine, corkProximity } from './cork';
+import { CORK_DARTS, corkDartValue, corkEngine } from './cork';
 import { BASEBALL_INNINGS, baseballEngine, baseballRuns } from './baseball';
 import { CRICKET_ROUND_LIMIT, allCricketClosed, cricketEngine, cricketMarks } from './cricket';
 import { createX01SoloEngine } from './x01Solo';
@@ -181,24 +181,55 @@ describe('Golf', () => {
 });
 
 describe('Cork', () => {
-  it('ranks inner bull > outer bull > board > miss', () => {
-    expect(corkProximity(BULL)).toBeGreaterThan(corkProximity(OUTER));
-    expect(corkProximity(OUTER)).toBeGreaterThan(corkProximity(S(20)));
-    expect(corkProximity(S(20))).toBeGreaterThan(corkProximity(MISS));
+  it('scores inner bull = 2, outer bull = 1, anything else = 0', () => {
+    expect(corkDartValue(BULL)).toBe(2);
+    expect(corkDartValue(OUTER)).toBe(1);
+    expect(corkDartValue(S(20))).toBe(0);
+    expect(corkDartValue(MISS)).toBe(0);
   });
 
-  it('finishes after one dart', () => {
-    const state = corkEngine.applyInput(corkEngine.createState(), [BULL]);
+  it('is 5 rounds of 3 darts (15 darts total)', () => {
+    expect(CORK_DARTS).toBe(15);
+  });
+
+  it('is NOT finished before all 15 darts are thrown', () => {
+    let state = corkEngine.createState();
+    for (let i = 0; i < 4; i++) state = corkEngine.applyInput(state, [BULL, BULL, OUTER]);
+    expect(state.darts).toBe(12);
+    expect(corkEngine.isFinished(state)).toBe(false);
+  });
+
+  it('finishes after all 15 darts; a perfect run (all inner bull) scores 30', () => {
+    let state = corkEngine.createState();
+    for (let i = 0; i < 5; i++) state = corkEngine.applyInput(state, [BULL, BULL, BULL]);
     expect(corkEngine.isFinished(state)).toBe(true);
-    expect(corkEngine.getResult(state).label).toBe('BULL');
+    expect(state.darts).toBe(15);
+    expect(state.score).toBe(30);
+    expect(corkEngine.getResult(state).label).toBe('30 POINTS');
   });
 
-  it('compareResults: closer to centre wins, equal is a draw', () => {
-    const bull = { value: 3, unit: 'proximity' as const, completed: true, darts: 1, label: 'BULL' };
-    const outer = { value: 2, unit: 'proximity' as const, completed: true, darts: 1, label: 'OUTER BULL' };
-    expect(corkEngine.compareResults(bull, outer)).toBe('p0');
-    expect(corkEngine.compareResults(outer, bull)).toBe('p1');
-    expect(corkEngine.compareResults(bull, bull)).toBe('draw');
+  it('a worst run (all misses) scores 0', () => {
+    let state = corkEngine.createState();
+    for (let i = 0; i < 5; i++) state = corkEngine.applyInput(state, [MISS, MISS, MISS]);
+    expect(state.score).toBe(0);
+  });
+
+  it('mixes inner/outer/miss across a turn (hand-check: BULL + 25 + MISS = 2 + 1 + 0 = 3)', () => {
+    const state = corkEngine.applyInput(corkEngine.createState(), [BULL, OUTER, MISS]);
+    expect(state.score).toBe(3);
+    expect(state.darts).toBe(3);
+  });
+
+  it('compareResults: higher total wins, equal totals draw', () => {
+    const hi = { value: 20, unit: 'points' as const, completed: true, darts: 15, label: '20 POINTS' };
+    const lo = { value: 10, unit: 'points' as const, completed: true, darts: 15, label: '10 POINTS' };
+    expect(corkEngine.compareResults(hi, lo)).toBe('p0');
+    expect(corkEngine.compareResults(lo, hi)).toBe('p1');
+    expect(corkEngine.compareResults(hi, hi)).toBe('draw');
+  });
+
+  it('has no continueOnTie - an exact tie is a genuine draw under this rule', () => {
+    expect(corkEngine.continueOnTie).toBeUndefined();
   });
 });
 
