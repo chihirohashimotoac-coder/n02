@@ -9,6 +9,11 @@ interface Props {
   onCancel: () => void;
   /** Pre-selects a discipline, e.g. when coming back from a finished single game. */
   initialKey?: string;
+  /** True when 「中断してメニューへ」 left a single game part-way through. */
+  hasSavedSession: boolean;
+  onResume: () => void;
+  /** Label of the interrupted game, so the resume button says what it will pick back up. */
+  savedLabel?: string;
 }
 
 /**
@@ -16,7 +21,14 @@ interface Props {
  * from PentathlonSetup because none of the pentathlon-wide options (starter rotation between
  * disciplines, overall standing) mean anything for a single game.
  */
-export default function SingleGameSetup({ onStart, onCancel, initialKey }: Props) {
+export default function SingleGameSetup({
+  onStart,
+  onCancel,
+  initialKey,
+  hasSavedSession,
+  onResume,
+  savedLabel,
+}: Props) {
   const [selectedKey, setSelectedKey] = useState<string>(initialKey ?? SINGLE_GAME_OPTIONS[0].key);
   const [playerCount, setPlayerCount] = useState<1 | 2>(1);
   const [names, setNames] = useState<[string, string]>(['プレイヤー1', 'プレイヤー2']);
@@ -38,6 +50,13 @@ export default function SingleGameSetup({ onStart, onCancel, initialKey }: Props
       <p className="pent-note">
         ペンタスロンの各種目を1つだけ選んでプレイします。総合成績は付かず、進行中のペンタスロンにも影響しません。
       </p>
+
+      {hasSavedSession && (
+        <button type="button" className="resume-button" onClick={onResume}>
+          中断した個別練習を再開
+          <span>{savedLabel ? `${savedLabel}・途中から続行` : '途中から続行'}</span>
+        </button>
+      )}
 
       {(Object.keys(PRESETS) as PentathlonPreset[]).map((preset) => (
         <div className="field-section" key={preset}>

@@ -3,6 +3,11 @@ import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 interface Props {
   label: string;
   onClose: () => void;
+  /**
+   * Keys this dialog itself acts on (e.g. the finish-darts dialog's 1/2/3). Called before the
+   * keystroke is swallowed, so gameplay behind the dialog still never sees it.
+   */
+  onKeyDown?: (event: KeyboardEvent) => void;
   children: ReactNode;
 }
 
@@ -15,7 +20,7 @@ const FOCUSABLE =
  * while a click inside does not. Pentathlon-only - 通常01・チェックアウト練習 keep their own
  * pre-existing .n01-modal-backdrop markup untouched.
  */
-export default function PentathlonModal({ label, onClose, children }: Props) {
+export default function PentathlonModal({ label, onClose, onKeyDown, children }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   // Captured on mount so focus can go back exactly where it came from - usually the trigger button.
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -49,25 +54,33 @@ export default function PentathlonModal({ label, onClose, children }: Props) {
         onClose();
         return;
       }
-      if (event.key !== 'Tab') return;
-      const items = focusables();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      const active = document.activeElement;
-      if (event.shiftKey && (active === first || !cardRef.current?.contains(active))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault();
-        first.focus();
+      if (event.key === 'Tab') {
+        const items = focusables();
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        const active = document.activeElement;
+        if (event.shiftKey && (active === first || !cardRef.current?.contains(active))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && active === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
       }
+      // Anything else belongs to this dialog alone. It still reaches the focused control's own
+      // default action (Enter/Space activating a button), but is stopped before the gameplay
+      // screen's window listener sees it - otherwise Enter would also commit the score behind the
+      // dialog, and digits/Backspace/U would edit or undo hidden gameplay.
+      onKeyDown?.(event);
+      event.stopPropagation();
     };
-    // Capture phase: gameplay screens listen for Escape/keys on window too, and must not act on
+    // Capture phase: gameplay screens listen for keys on window too, and must not act on
     // keystrokes aimed at an open dialog.
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [focusables, onClose]);
+  }, [focusables, onClose, onKeyDown]);
 
   return (
     <div className="n01-modal-backdrop pent-modal-backdrop" onClick={onClose}>

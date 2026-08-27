@@ -109,28 +109,11 @@ export default function PentathlonX01Play({
     [entry, submitVisit],
   );
 
+  // Only ever the gameplay screen's own shortcuts: any open PentathlonModal swallows keystrokes
+  // before they reach this listener, and drives its own buttons natively (Enter/Space on the
+  // focused control), so there is no dialog-specific branch here to fall out of sync.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      // The DNF confirmation owns the keyboard while it is open, so Enter can never reach the
-      // "continue playing" choice underneath it and skip past the confirmation.
-      if (confirmingDnf) return;
-      if (showCheckoutOverlay) {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          continuePlaying();
-        }
-        return;
-      }
-      if (pendingFinish !== null) {
-        const counts = validFinishDartCounts(activeState.remaining);
-        const digit = Number(event.key);
-        if (counts.includes(digit)) {
-          event.preventDefault();
-          submitVisit(String(pendingFinish), digit);
-        }
-        if (event.key === 'Escape') setPendingFinish(null);
-        return;
-      }
       if (event.key >= '0' && event.key <= '9') {
         event.preventDefault();
         pressKey(event.key);
@@ -150,17 +133,7 @@ export default function PentathlonX01Play({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [
-    activeState.remaining,
-    confirmingDnf,
-    continuePlaying,
-    entry,
-    onUndoRound,
-    pendingFinish,
-    pressKey,
-    showCheckoutOverlay,
-    submitVisit,
-  ]);
+  }, [entry, onUndoRound, pressKey]);
 
   const finishCounts = pendingFinish !== null ? validFinishDartCounts(activeState.remaining) : [];
 
@@ -292,7 +265,17 @@ export default function PentathlonX01Play({
       </footer>
 
       {pendingFinish !== null && (
-        <PentathlonModal label="上がり本数を選択" onClose={() => setPendingFinish(null)}>
+        <PentathlonModal
+          label="上がり本数を選択"
+          onClose={() => setPendingFinish(null)}
+          onKeyDown={(event) => {
+            const digit = Number(event.key);
+            if (finishCounts.includes(digit)) {
+              event.preventDefault();
+              submitVisit(String(pendingFinish), digit);
+            }
+          }}
+        >
           <h2>上がり本数</h2>
           <div className="menu-list">
             {finishCounts.map((count) => (

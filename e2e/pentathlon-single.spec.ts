@@ -325,3 +325,93 @@ test.describe('ペンタスロン用ルールモーダルのアクセシビリ�
     await expect(page.locator('.pent-pending-chip').first()).toHaveText('BULL');
   });
 });
+
+test.describe('モーダルは背後のゲームへキー入力を漏らさない', () => {
+  test('Enter on an open RULES dialog does not also commit the score behind it', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501');
+
+    // Type a score but do not confirm it, then open the rules popup.
+    await page.keyboard.type('180');
+    await expect(page.locator('.pent-entry-popover strong')).toHaveText('180');
+    await page.getByRole('button', { name: 'RULES' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    // Enter activates the dialog's own focused button and nothing else.
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('501');
+    await expect(page.locator('.pent-entry-popover strong')).toHaveText('180');
+  });
+
+  test('digits, Backspace and U on an open dialog do not edit or undo hidden gameplay', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501');
+
+    await enterPentScore(page, 100); // 501 -> 401, one committed round
+    await page.keyboard.type('55');
+    await page.getByRole('button', { name: 'RULES' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    await page.keyboard.type('77');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('u');
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // The entry is exactly as it was left, and the committed round was not undone.
+    await expect(page.locator('.pent-entry-popover strong')).toHaveText('55');
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('401');
+  });
+
+  test('the finish-darts dialog still takes its own digit keys', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501');
+
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 180);
+    await page.keyboard.type('141');
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog')).toContainText('上がり本数');
+
+    await page.keyboard.press('3');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByText('GAME COMPLETE')).toBeVisible();
+  });
+});
+
+test.describe('個別練習の中断と再開', () => {
+  test('an interrupted single game can be resumed from the menu', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501');
+    await enterPentScore(page, 180);
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('321');
+
+    await page.getByRole('button', { name: '中断' }).click();
+    await page.locator('.mode-card[data-mode="pentathlon-single"]').click();
+
+    const resume = page.getByRole('button', { name: /中断した個別練習を再開/ });
+    await expect(resume).toBeVisible();
+    await expect(resume).toContainText('JDA 501');
+    await resume.click();
+
+    await expect(page.locator('.pent-x01-shell')).toBeVisible();
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('321');
+  });
+
+  test('finishing a game clears its saved session', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501');
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 141);
+    await confirmFinish(page);
+    await page.getByRole('button', { name: '別のゲームを選ぶ' }).click();
+
+    await expect(page.locator('.pent-single-card').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /中断した個別練習を再開/ })).toHaveCount(0);
+  });
+});

@@ -22,7 +22,7 @@ import {
   canUndoRound as canUndoRoundSession,
   type CreateSessionOptions,
 } from '../../domain/pentathlon/session';
-import { getEngine } from '../../domain/pentathlon/presets';
+import { findSingleGameOption, getEngine } from '../../domain/pentathlon/presets';
 import {
   clearPentathlonSession,
   clearSingleGameSession,
@@ -35,6 +35,13 @@ import { InvalidVisitError } from '../../domain/x01Core';
 import type { DartHit } from '../../domain/darts';
 import type { PentathlonSession } from '../../domain/pentathlon/types';
 import type { ThemeName } from '../../storage/matchStorage';
+
+/** The menu label of the discipline a saved 個別練習 session was playing. */
+function singleGameLabel(session: PentathlonSession): string | undefined {
+  const disciplineId = session.disciplines?.[0];
+  if (!disciplineId) return undefined;
+  return findSingleGameOption(`${session.preset}:${disciplineId}`)?.label;
+}
 
 interface Props {
   theme: ThemeName;
@@ -51,7 +58,7 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
   const clear = isSingle ? clearSingleGameSession : clearPentathlonSession;
 
   const [session, setSession] = useState<PentathlonSession | null>(null);
-  const [savedSession] = useState<PentathlonSession | null>(load);
+  const [savedSession, setSavedSession] = useState<PentathlonSession | null>(load);
   const [lastOptions, setLastOptions] = useState<CreateSessionOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -127,6 +134,7 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
   const handleFinish = useCallback(() => {
     clear();
     setSession(null);
+    setSavedSession(null);
     onExit();
   }, [clear, onExit]);
 
@@ -144,6 +152,9 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
                   ? `${lastOptions.preset}:${lastOptions.disciplines[0]}`
                   : undefined
               }
+              hasSavedSession={savedSession !== null}
+              onResume={resume}
+              savedLabel={savedSession ? singleGameLabel(savedSession) : undefined}
             />
           ) : (
             <PentathlonSetup
@@ -221,6 +232,7 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
           onChooseAnother={() => {
             clear();
             setSession(null);
+            setSavedSession(null);
             setError(null);
           }}
           onExit={handleFinish}
