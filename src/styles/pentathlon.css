@@ -17,9 +17,16 @@
   box-sizing: border-box;
 }
 
+/*
+ * Top-aligned, never vertically centred. The input pad's height changes between rounds (Half-It's
+ * any-double/any-triple rounds show a 21-button number grid where other rounds show four buttons;
+ * Baseball's aim banner grows with the inning), and centring re-positions the whole column on every
+ * one of those changes - which on iOS means the buttons visibly shift under the player's thumb
+ * mid-turn. Anchoring the top keeps every control still while a turn is being entered.
+ */
 .pent-game-shell > .pent-play {
   width: min(640px, 100%);
-  margin: auto 0;
+  margin: 0;
 }
 
 /* PentathlonX01Play's footer nav has 4 buttons (中断 / Finish / Undo / RULES), not the 5 of
@@ -71,7 +78,6 @@
   flex-direction: column;
   gap: 8px;
   transition:
-    transform 0.18s,
     border-color 0.18s,
     background 0.18s,
     box-shadow 0.18s;
@@ -83,9 +89,11 @@
   color: var(--ink);
 }
 
-.pent-preset-card:hover {
-  border-color: #a9b5ad;
-  transform: translateY(-2px);
+@media (hover: hover) {
+  .pent-preset-card:hover {
+    border-color: #a9b5ad;
+    transform: translateY(-2px);
+  }
 }
 
 .pent-preset-card.selected {
@@ -461,19 +469,23 @@
   font-weight: 800;
   cursor: pointer;
   touch-action: manipulation;
+  /* Colour only: an animated transform would move the button under a finger mid-tap. */
   transition:
-    transform 0.12s,
     border-color 0.12s,
     background 0.12s;
 }
 
-.pent-quick-btn:hover:not(:disabled) {
-  border-color: var(--green);
-  transform: translateY(-1px);
-}
+/* Lift on hover only where hovering is a real thing - on a touch screen the hover state latches on
+   tap and would shift the button the player is already pressing. */
+@media (hover: hover) {
+  .pent-quick-btn:hover:not(:disabled) {
+    border-color: var(--green);
+    transform: translateY(-1px);
+  }
 
-.pent-quick-btn:active:not(:disabled) {
-  transform: translateY(0);
+  .pent-quick-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
 }
 
 .pent-quick-btn:disabled {
@@ -1113,10 +1125,8 @@
   color: inherit;
 }
 
-/* Quick-pad buttons carrying a value line (Baseball's RUN counts). */
-.pent-quick-btn {
-  min-height: 56px;
-}
+/* Quick-pad buttons carrying a value line (Baseball's RUN counts). The button's own min-height of
+   64px already clears the 44px touch-target minimum, so only the value line is defined here. */
 .pent-quick-btn em {
   display: block;
   margin-top: 3px;
