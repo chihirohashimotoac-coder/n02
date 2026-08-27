@@ -16,6 +16,8 @@ async function play501TwoPlayers(page: import('@playwright/test').Page) {
   await enterPentScore(page, 26); // opponent -> 449
   await enterPentScore(page, 141); // starter declares finish
   await confirmFinish(page);
+  // The starter checked out first; dismiss the hand-off overlay before the opponent keeps throwing.
+  await page.getByRole('button', { name: /のスローへ進む/ }).click();
   await enterPentScore(page, 180); // opponent -> 269
   await enterPentScore(page, 180); // opponent -> 89
   await enterPentScore(page, 89);
@@ -67,11 +69,17 @@ test.describe('Pentathlon 2-player progression', () => {
     await enterPentScore(page, 141);
     await confirmFinish(page);
 
+    // P1 checked out first: the hand-off overlay names them explicitly before P2 continues.
+    await expect(page.locator('.result-card')).toContainText('プレイヤー1');
+    await expect(page.locator('.result-card')).toContainText('9');
+    await page.getByRole('button', { name: /のスローへ進む/ }).click();
+
     // P1 is locked at 9 darts; the discipline is NOT over and P2 keeps throwing.
-    await expect(page.locator('.pent-player').first()).toContainText('FINISHED');
-    await expect(page.locator('.pent-player').first()).toContainText('9 DARTS');
-    await expect(page.locator('.pent-player').nth(1)).toContainText('THROW');
-    await expect(page.locator('.pent-target')).toContainText('プレイヤー2');
+    await expect(page.locator('.n01-player-name').first()).toContainText('FINISHED');
+    await expect(page.locator('.n01-left-table').first()).toContainText('9');
+    await expect(page.locator('.n01-left-table').first()).toContainText('DARTS');
+    await expect(page.locator('.n01-player-name.active')).toContainText('プレイヤー2');
+    await expect(page.locator('.n01-game-meta')).toContainText('プレイヤー2');
   });
 
   test('loser starts the next discipline', async ({ page }) => {
@@ -166,9 +174,9 @@ test.describe('Pentathlon full session', () => {
     await enterPentHits(page, ['BULL']);
     await next();
 
-    // 2. 301 (double-in / double-out) - the opening visit must declare it started with a double,
-    // or (per the real rule) nothing would score.
-    await enterPentScore(page, 180, { openedWithDouble: true });
+    // 2. 301 (double-in / double-out) - double-in is the player's own responsibility (enter 0 for
+    // a visit that failed to open); this opening visit is simply played as a double already.
+    await enterPentScore(page, 180);
     await enterPentScore(page, 61);
     await enterPentScore(page, 60);
     await confirmFinish(page);

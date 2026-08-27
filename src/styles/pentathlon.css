@@ -1,6 +1,47 @@
 /* Pentathlon styles. Every colour here comes from the shared theme tokens defined in app.css, so
    the clean / neon / navy themes all apply without any Pentathlon-specific overrides. */
 
+/* Fullscreen, chrome-free shell for every in-session screen (play / discipline result / final
+   result) - the same "no TopBar once you're playing" precedent GameScreen already sets for 01. */
+.pent-game-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  overflow-y: auto;
+  background: var(--canvas);
+  color: var(--ink);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: clamp(16px, 4vw, 40px) 20px;
+  box-sizing: border-box;
+}
+
+.pent-game-shell > .pent-play {
+  width: min(640px, 100%);
+  margin: auto 0;
+}
+
+/* PentathlonX01Play's footer nav has 3 buttons (中断 / Finish / Undo), not the 4 of 01/Checkout's
+   New / Finish / Stats / ☰, so it needs its own column count on the shared .n01-menu-table grid. */
+.n01-menu-table.pent-x01-menu {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* 1-player Pentathlon X01: no opponent, so the header/footer collapse to a single side instead of
+   the usual two-player split. */
+.n01-game-header.solo {
+  grid-template-columns: minmax(0, 1fr) 170px;
+}
+.n01-left-table.solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (width <= 720px) {
+  .n01-game-header.solo {
+    grid-template-columns: minmax(0, 1fr) 94px;
+  }
+}
+
 .pent-setup {
   display: grid;
   gap: 16px;

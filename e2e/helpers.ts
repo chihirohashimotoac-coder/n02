@@ -19,23 +19,12 @@ export async function enterGameScore(page: Page, score: number | string) {
 }
 
 /**
- * Enters a visit score on the Pentathlon X01 keypad. For double-in disciplines (301), pass
- * `openedWithDouble: true` on the visit that should count as opening - the checkbox only renders
- * until the attempt is opened, so it's a no-op once already opened.
+ * Enters a visit score on the Pentathlon X01 screen (301/501), which reuses the exact same
+ * fullscreen keypad/keyboard input as 通常01・チェックアウト練習. Double-in is the player's own
+ * responsibility (enter 0 for a visit that failed to open) rather than anything the UI tracks.
  */
-export async function enterPentScore(
-  page: Page,
-  score: number | string,
-  options: { openedWithDouble?: boolean } = {},
-) {
-  if (options.openedWithDouble) {
-    const doubleInCheckbox = page.locator('.pent-keypad input[type="checkbox"]');
-    if (await doubleInCheckbox.count()) await doubleInCheckbox.check();
-  }
-  for (const char of String(score)) {
-    await page.locator('.pent-number-grid button', { hasText: new RegExp(`^${char}$`) }).first().click();
-  }
-  await page.locator('.pent-number-grid button.wide', { hasText: '確定' }).click();
+export async function enterPentScore(page: Page, score: number | string) {
+  await enterGameScore(page, score);
 }
 
 /**

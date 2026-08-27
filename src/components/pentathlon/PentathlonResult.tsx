@@ -16,6 +16,7 @@ export default function PentathlonResult({ session, onFinish }: Props) {
   const date = new Date(session.startedAt).toLocaleDateString('ja-JP');
 
   return (
+    <div className="pent-game-shell">
     <div className="pent-play">
       <div className="result-card pent-share-card" ref={cardRef} style={{ width: '100%' }}>
         <div className="pent-share-head">
@@ -97,6 +98,7 @@ export default function PentathlonResult({ session, onFinish }: Props) {
       <button type="button" className="primary-button" onClick={onFinish}>
         メニューへ戻る
       </button>
+    </div>
     </div>
   );
 }
