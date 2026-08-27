@@ -17,9 +17,16 @@
   box-sizing: border-box;
 }
 
+/*
+ * Top-aligned, never vertically centred. The input pad's height changes between rounds (Half-It's
+ * any-double/any-triple rounds show a 21-button number grid where other rounds show four buttons;
+ * Baseball's aim banner grows with the inning), and centring re-positions the whole column on every
+ * one of those changes - which on iOS means the buttons visibly shift under the player's thumb
+ * mid-turn. Anchoring the top keeps every control still while a turn is being entered.
+ */
 .pent-game-shell > .pent-play {
   width: min(640px, 100%);
-  margin: auto 0;
+  margin: 0;
 }
 
 /* PentathlonX01Play's footer nav has 4 buttons (中断 / Finish / Undo / RULES), not the 5 of
@@ -71,7 +78,6 @@
   flex-direction: column;
   gap: 8px;
   transition:
-    transform 0.18s,
     border-color 0.18s,
     background 0.18s,
     box-shadow 0.18s;
@@ -83,9 +89,11 @@
   color: var(--ink);
 }
 
-.pent-preset-card:hover {
-  border-color: #a9b5ad;
-  transform: translateY(-2px);
+@media (hover: hover) {
+  .pent-preset-card:hover {
+    border-color: #a9b5ad;
+    transform: translateY(-2px);
+  }
 }
 
 .pent-preset-card.selected {
@@ -461,19 +469,23 @@
   font-weight: 800;
   cursor: pointer;
   touch-action: manipulation;
+  /* Colour only: an animated transform would move the button under a finger mid-tap. */
   transition:
-    transform 0.12s,
     border-color 0.12s,
     background 0.12s;
 }
 
-.pent-quick-btn:hover:not(:disabled) {
-  border-color: var(--green);
-  transform: translateY(-1px);
-}
+/* Lift on hover only where hovering is a real thing - on a touch screen the hover state latches on
+   tap and would shift the button the player is already pressing. */
+@media (hover: hover) {
+  .pent-quick-btn:hover:not(:disabled) {
+    border-color: var(--green);
+    transform: translateY(-1px);
+  }
 
-.pent-quick-btn:active:not(:disabled) {
-  transform: translateY(0);
+  .pent-quick-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
 }
 
 .pent-quick-btn:disabled {
@@ -806,4 +818,437 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ===========================================================================
+   Pentathlon-only styles. 通常01・チェックアウト練習 are restored to their
+   pre-Pentathlon markup, so everything Pentathlon layers on top of the shared
+   .n01-* shell is namespaced under .pent-* / .pent-x01-shell and can never
+   reach those two modes.
+   =========================================================================== */
+
+.pent-rules-body {
+  white-space: pre-line;
+  text-align: left;
+  color: var(--ink);
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.85;
+}
+.pent-rules-scroll {
+  text-align: left;
+  max-height: min(58vh, 460px);
+  margin-bottom: 18px;
+  overflow-y: auto;
+}
+.pent-rules-section h3 {
+  color: var(--green-dark);
+  letter-spacing: 0.04em;
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.pent-rules-section + .pent-rules-section {
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+.pent-rules-section .pent-rules-body {
+  margin-bottom: 0;
+}
+[data-theme="neon"] .pent-rules-section h3,
+[data-theme="navy"] .pent-rules-section h3 {
+  color: inherit;
+}
+
+.pent-modal-card .menu-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+/* --- Pentathlon X01 (301/501) ------------------------------------------- */
+
+.pent-x01-result .secondary-button {
+  width: 100%;
+  margin-top: 8px;
+}
+.pent-x01-result .secondary-button kbd {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 9px;
+}
+
+/*
+ * Entry preview: shown only while a score is actually being typed, floating clear of the scoreboard
+ * above and the keypad below rather than permanently occupying a row of either. Sits above the
+ * footer, so it covers neither the remaining scores nor any keypad button.
+ */
+.pent-entry-popover {
+  position: absolute;
+  bottom: calc(var(--pent-footer-h) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 148px;
+  padding: 8px 18px;
+  border: 1px solid var(--green-dark);
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 6px 22px #19241e2e;
+  pointer-events: none;
+}
+.pent-entry-popover span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pent-entry-popover strong {
+  color: var(--green-dark);
+  font-variant-numeric: tabular-nums;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+[data-theme="neon"] .pent-entry-popover,
+[data-theme="navy"] .pent-entry-popover {
+  background: var(--surface);
+}
+[data-theme="neon"] .pent-entry-popover strong {
+  color: #2ee58a;
+}
+
+.pent-key-hint {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  text-align: center;
+  background: #fbfbf8;
+  margin: 0;
+  padding: 5px 10px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.pent-key-hint kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  margin: 0 2px;
+  padding: 1px 5px;
+  font-size: 9px;
+}
+[data-theme="neon"] .pent-key-hint,
+[data-theme="navy"] .pent-key-hint {
+  background: var(--surface);
+}
+[data-theme="neon"] .pent-key-hint kbd,
+[data-theme="navy"] .pent-key-hint kbd {
+  background: #ffffff1f;
+}
+
+/* The X01 footer's own height, referenced by the entry popover so the two can never disagree. The
+   footer lays its rows out as a column and lets the keypad take whatever is left, so the keys can
+   never overflow past the bottom edge however the rows above happen to measure. */
+.pent-x01-shell {
+  --pent-footer-h: 404px;
+}
+.pent-x01-shell .n01-game-footer {
+  height: var(--pent-footer-h);
+  display: flex;
+  flex-direction: column;
+}
+.pent-x01-shell .n01-left-table,
+.pent-x01-shell .n01-menu-table,
+.pent-x01-shell .pent-key-hint {
+  flex: 0 0 auto;
+}
+.pent-x01-shell .n01-key-table {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.pent-x01-shell .n01-score-area {
+  inset: 84px 0 var(--pent-footer-h);
+}
+.pent-x01-shell .n01-left-table {
+  height: 120px;
+}
+.pent-x01-shell .n01-left-table strong {
+  font-size: 56px;
+}
+.pent-x01-shell .n01-menu-table {
+  grid-template-columns: repeat(4, 1fr);
+}
+.pent-x01-shell .n01-menu-table button {
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+/*
+ * PC keeps a compact on-screen keypad: 通常01 hides it (desktop players type), but Pentathlon X01
+ * must be fully playable with a mouse alone. Scoped to .pent-x01-shell so 通常01 is untouched.
+ */
+@media (width > 720px) {
+  .pent-x01-shell .n01-key-table {
+    background: #354239;
+    grid-template-rows: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
+    height: auto;
+    padding-bottom: 14px;
+    display: grid;
+  }
+  .pent-x01-shell .n01-key-table button {
+    color: #fff;
+    cursor: pointer;
+    touch-action: manipulation;
+    background: 0 0;
+    border-top: 1px solid #ffffff24;
+    border-bottom: 0;
+    border-left: 0;
+    border-right: 1px solid #ffffff24;
+    font-size: 20px;
+    font-weight: 650;
+    min-height: 44px;
+  }
+  .pent-x01-shell .n01-key-table button:hover {
+    background: #ffffff1a;
+  }
+  .pent-x01-shell .n01-key-table button:active {
+    background: var(--green);
+  }
+  .pent-x01-shell .n01-key-table button.enter {
+    background: var(--green);
+    font-size: 13px;
+    font-weight: 800;
+  }
+}
+
+/*
+ * Mobile: keep the bottom row of keys clear of the home indicator. The shared rule already adds
+ * max(12px, safe-area), which on an iPhone lands the keys right on the indicator - Pentathlon adds
+ * a further 20px on top of the inset so repeated taps never reach the system gesture area.
+ */
+@media (width <= 720px) {
+  .pent-x01-shell {
+    --pent-footer-h: calc(400px + env(safe-area-inset-bottom, 0px) + 20px);
+  }
+  .pent-x01-shell .n01-key-table {
+    height: auto;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  }
+  .pent-x01-shell .n01-left-table {
+    height: 94px;
+  }
+  .pent-x01-shell .n01-left-table strong {
+    font-size: 46px;
+  }
+  .pent-entry-popover strong {
+    font-size: 22px;
+  }
+}
+
+/* Long player names (up to the 18-character input limit) must not push anything sideways. */
+.pent-x01-shell .n01-player-name strong,
+.pent-x01-shell .pent-player-label {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pent-x01-shell .n01-player-name {
+  min-width: 0;
+}
+
+/* --- Aim banner (Baseball / Golf / Half-It / Cork / RTC) ----------------- */
+
+.pent-aim {
+  border: 1px solid var(--green-dark);
+  border-radius: 14px;
+  background: #f4f8f4;
+  text-align: center;
+  margin: 10px 0;
+  padding: 10px 14px;
+  display: grid;
+  gap: 2px;
+}
+.pent-aim-phase {
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+.pent-aim-target {
+  color: var(--green-dark);
+  font-size: clamp(38px, 9vw, 58px);
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.pent-aim-target em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.pent-aim-hint {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
+[data-theme="neon"] .pent-aim,
+[data-theme="navy"] .pent-aim {
+  background: var(--surface);
+}
+[data-theme="neon"] .pent-aim-target,
+[data-theme="navy"] .pent-aim-target {
+  color: inherit;
+}
+
+/* Quick-pad buttons carrying a value line (Baseball's RUN counts). The button's own min-height of
+   64px already clears the 44px touch-target minimum, so only the value line is defined here. */
+.pent-quick-btn em {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+/* --- Cricket: keep the pad reachable in the first viewport --------------- */
+
+.pent-progress-collapsible > .pent-progress-head {
+  cursor: pointer;
+  list-style: none;
+}
+.pent-progress-collapsible > .pent-progress-head::-webkit-details-marker {
+  display: none;
+}
+.pent-progress-collapsible > .pent-progress-head::after {
+  content: "▾";
+  color: var(--muted);
+  margin-left: 8px;
+  font-size: 11px;
+}
+.pent-progress-collapsible[open] > .pent-progress-head::after {
+  content: "▴";
+}
+
+.pent-cricket-shell .pent-cricket-row {
+  min-height: 30px;
+}
+.pent-cricket-shell .pent-cricket-num {
+  font-size: 14px;
+}
+.pent-cricket-shell .pent-cricket-mark {
+  font-size: 17px;
+}
+.pent-cricket-shell .pent-cricket-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pent-cricket-shell .pent-cricket-board {
+  margin-bottom: 8px;
+}
+.pent-target.compact {
+  margin: 0 0 8px;
+  padding: 6px 12px;
+}
+
+/*
+ * The input pad sticks to the bottom of the scrolling column so it stays reachable whatever the
+ * scoreboard above costs in height, while still scrolling with (not floating over) the page - so it
+ * covers neither the menu buttons nor the undo row, which travel with it.
+ */
+.pent-sticky-pad {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background: var(--canvas);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  margin: 0 -4px;
+  padding-left: 4px;
+  padding-right: 4px;
+  box-shadow: 0 -10px 18px -12px #19241e40;
+}
+
+/* --- 個別練習 (single-game) menu ---------------------------------------- */
+
+.pent-single-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 10px;
+}
+.pent-single-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  padding: 12px 14px;
+  min-height: 64px;
+  display: grid;
+  gap: 4px;
+  position: relative;
+}
+.pent-single-card:hover {
+  border-color: var(--green);
+}
+.pent-single-card.selected {
+  border-color: var(--green);
+  box-shadow: inset 0 0 0 1px var(--green);
+}
+.pent-single-card strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+.pent-single-card small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.pent-single-card .checkmark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* --- Result tables ------------------------------------------------------- */
+
+.pent-result-table-4 .pent-result-row {
+  grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
+}
+.pent-result-row > span.name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pent-result-row > span.value {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

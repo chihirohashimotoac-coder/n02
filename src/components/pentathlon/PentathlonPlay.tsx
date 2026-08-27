@@ -1,10 +1,10 @@
 import DartHitPad from './DartHitPad';
 import PentathlonProgress from './PentathlonProgress';
-import { deriveQuickTarget } from './quickTarget';
+import { deriveQuickTarget, describeAim } from './quickTarget';
 import { getEngine } from '../../domain/pentathlon/presets';
 import { currentDisciplineId } from '../../domain/pentathlon/session';
-import { DISCIPLINE_RULE_TEXT } from '../../domain/ruleText';
-import RulesButton from '../RulesButton';
+import { DISCIPLINE_RULE_TEXT } from '../../domain/pentathlon/ruleText';
+import PentathlonRulesButton from './PentathlonRulesButton';
 import type { DartHit } from '../../domain/darts';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
 
@@ -12,8 +12,12 @@ interface Props {
   session: PentathlonSession;
   onTurn: (input: unknown) => void;
   onStageHit: (hit: DartHit) => void;
-  onUndo: () => void;
+  /** Takes back only the last dart staged in the current, uncommitted turn. */
+  onUndoStagedHit: () => void;
+  /** Takes back the previous already-committed round. */
+  onUndoRound: () => void;
   canUndo: boolean;
+  canUndoRound: boolean;
   onExit: () => void;
 }
 
@@ -24,8 +28,10 @@ export default function PentathlonPlay({
   session,
   onTurn,
   onStageHit,
-  onUndo,
+  onUndoStagedHit,
+  onUndoRound,
   canUndo,
+  canUndoRound,
   onExit,
 }: Props) {
   const current = session.current!;
@@ -35,6 +41,7 @@ export default function PentathlonPlay({
   const activeProgress = current.progress[active];
   const activeState = activeProgress.state;
   const quickTarget = deriveQuickTarget(disciplineId, activeState, current.pendingHits);
+  const aim = activeProgress.finished ? null : describeAim(disciplineId, activeState, quickTarget);
 
   const players: PlayerIndex[] = session.playerCount === 1 ? [0] : [0, 1];
 
@@ -83,31 +90,50 @@ export default function PentathlonPlay({
         })}
       </div>
 
-      {!activeProgress.finished && (
-        <div className="pent-target">
-          <span>NOW THROWING</span>
-          <strong>
-            {session.names[active]}・{engine.describeTarget(activeState as never)}
-          </strong>
-        </div>
-      )}
+      {!activeProgress.finished &&
+        (aim ? (
+          <div className="pent-aim">
+            <span className="pent-aim-phase">
+              {session.names[active]}
+              {aim.phase ? `・${aim.phase}` : ''}
+            </span>
+            <strong className="pent-aim-target">
+              <em>TARGET</em>
+              {aim.target}
+            </strong>
+            <span className="pent-aim-hint">{aim.hint}</span>
+          </div>
+        ) : (
+          <div className="pent-target">
+            <span>NOW THROWING</span>
+            <strong>
+              {session.names[active]}・{engine.describeTarget(activeState as never)}
+            </strong>
+          </div>
+        ))}
 
       <DartHitPad
         pendingHits={current.pendingHits}
         maxDarts={engine.dartsRemainingThisTurn?.(activeState as never) ?? 3}
         disabled={activeProgress.finished}
         onStage={onStageHit}
-        onUndoHit={onUndo}
+        onUndoHit={onUndoStagedHit}
         onCommit={() => onTurn(current.pendingHits)}
         allowEarlyCommit={engine.meta.allowEarlyCommit}
         target={quickTarget}
       />
 
       <div className="pent-actions pent-actions-3">
-        <button type="button" className="secondary-button" disabled={!canUndo} onClick={onUndo}>
-          1つ戻す
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={!canUndoRound}
+          onClick={onUndoRound}
+          title={canUndo && !canUndoRound ? '先に「1投戻す」で入力中の投球を取り消してください' : undefined}
+        >
+          前の確定ラウンドに戻す
         </button>
-        <RulesButton className="secondary-button" label="ルール説明" {...DISCIPLINE_RULE_TEXT[disciplineId]} />
+        <PentathlonRulesButton className="secondary-button" label="ルール説明" {...DISCIPLINE_RULE_TEXT[disciplineId]} />
         <button type="button" className="secondary-button" onClick={onExit}>
           中断してメニューへ
         </button>

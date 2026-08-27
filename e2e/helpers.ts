@@ -86,22 +86,36 @@ export async function openFreshApp(page: Page) {
 }
 
 export async function openPentathlon(page: Page) {
-  await page.locator('.mode-card', { hasText: 'ペンタスロン' }).click();
+  // By data-mode: the menu also carries a 「ペンタスロン個別練習」 card whose label contains this one's.
+  await page.locator('.mode-card[data-mode="pentathlon"]').click();
   await page.waitForSelector('.pent-preset-card');
 }
 
-/**
- * On the Pentathlon X01 checkout hand-off choice (one player finished, the other hasn't): choose to
- * keep waiting for the other player to check out too - the pre-existing behaviour.
- */
-export async function waitForOpponentCheckout(page: Page) {
-  await page.getByRole('button', { name: /のチェックアウトを待つ/ }).click();
+/** Opens the 個別練習 menu and selects one discipline by its exact card label (e.g. 'n01 301'). */
+export async function openSingleGame(page: Page, label: string) {
+  await page.locator('.mode-card[data-mode="pentathlon-single"]').click();
+  await page.waitForSelector('.pent-single-card');
+  await page.locator('.pent-single-card', { hasText: new RegExp(`^${label}`) }).first().click();
 }
 
 /**
- * On the Pentathlon X01 checkout hand-off choice: choose to end the discipline now instead of
- * waiting for the still-playing opponent to also check out.
+ * On the Pentathlon X01 checkout hand-off choice (one player finished, the other hasn't): the
+ * primary action - let the still-playing player carry on throwing.
  */
-export async function proceedToNextDiscipline(page: Page) {
-  await page.getByRole('button', { name: /次の種目へ進む/ }).click();
+export async function continueOpponentPlay(page: Page) {
+  await page.getByRole('button', { name: /のプレイを続ける/ }).click();
+}
+
+/**
+ * On the Pentathlon X01 checkout hand-off choice: end the discipline now, marking the still-playing
+ * opponent DNF. Goes through the explicit confirmation dialog, as the UI requires.
+ */
+export async function proceedWithDnf(page: Page) {
+  await page.getByRole('button', { name: /をDNFとして次の種目へ進む/ }).click();
+  await page.getByRole('button', { name: /をDNFにして進む/ }).click();
+}
+
+/** Taps one of Baseball's four per-dart outcome buttons ('シングル' | 'ダブル' | 'トリプル' | 'ミス'). */
+export async function tapBaseballOutcome(page: Page, label: string) {
+  await page.locator('.pent-quick-btn', { hasText: new RegExp(`^${label}`) }).click();
 }

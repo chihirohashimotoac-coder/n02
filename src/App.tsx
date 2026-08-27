@@ -14,7 +14,7 @@ import {
 } from './storage/matchStorage';
 import { loadPentathlonSession } from './storage/pentathlonStorage';
 
-type Screen = 'setup' | 'game' | 'pentathlon';
+type Screen = 'setup' | 'game' | 'pentathlon' | 'pentathlon-single';
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('setup');
@@ -68,9 +68,11 @@ export default function App() {
     setHasSavedPentathlon(loadPentathlonSession() !== null);
   }, []);
 
-  if (screen === 'pentathlon') {
+  if (screen === 'pentathlon' || screen === 'pentathlon-single') {
     return (
       <PentathlonFlow
+        key={screen}
+        variant={screen === 'pentathlon-single' ? 'single' : 'full'}
         theme={theme}
         onChangeTheme={changeTheme}
         onExit={() => {
@@ -95,6 +97,7 @@ export default function App() {
       theme={theme}
       onChangeTheme={changeTheme}
       onStartPentathlon={() => setScreen('pentathlon')}
+      onStartPentathlonSingle={() => setScreen('pentathlon-single')}
       hasSavedPentathlon={hasSavedPentathlon}
     />
   );

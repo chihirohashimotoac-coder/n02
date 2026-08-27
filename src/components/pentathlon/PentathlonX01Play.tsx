@@ -1,22 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import PentathlonProgress from './PentathlonProgress';
+import PentathlonModal from './PentathlonModal';
 import { getEngine } from '../../domain/pentathlon/presets';
 import { currentDisciplineId } from '../../domain/pentathlon/session';
 import { InvalidVisitError } from '../../domain/x01Core';
 import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../../domain/darts';
-import { DISCIPLINE_RULE_TEXT } from '../../domain/ruleText';
-import RulesButton from '../RulesButton';
+import { DISCIPLINE_RULE_TEXT } from '../../domain/pentathlon/ruleText';
+import PentathlonRulesButton from './PentathlonRulesButton';
 import type { X01SoloState, X01SoloInput } from '../../domain/pentathlon/engines/x01Solo';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
 
 interface Props {
   session: PentathlonSession;
   onTurn: (input: X01SoloInput) => void;
-  onUndo: () => void;
-  canUndo: boolean;
+  /** Takes back the previous committed round (X01 has no per-dart staging). */
+  onUndoRound: () => void;
+  canUndoRound: boolean;
   onExit: () => void;
-  /** Ends the discipline right now, recording the still-playing opponent's attempt as-is (DNF if
-   * they hadn't checked out) instead of waiting for them to finish it. */
+  /** Ends the discipline right now, recording the still-playing opponent as DNF. Confirmed first. */
   onFinishDisciplineNow: () => void;
   error: string | null;
   onError: (message: string | null) => void;
@@ -24,14 +25,14 @@ interface Props {
 
 /**
  * 301/501 in Pentathlon: each player plays an independent attempt (not a shared race), but the UI is
- * otherwise the same fullscreen shell/keypad as 通常01・チェックオプ練習 (GameScreen), per explicit
+ * otherwise the same fullscreen shell/keypad as 通常01・チェックアウト練習 (GameScreen), per explicit
  * request - round-by-round history is the only thing intentionally left out.
  */
 export default function PentathlonX01Play({
   session,
   onTurn,
-  onUndo,
-  canUndo,
+  onUndoRound,
+  canUndoRound,
   onExit,
   onFinishDisciplineNow,
   error,
@@ -40,6 +41,7 @@ export default function PentathlonX01Play({
   const [entry, setEntry] = useState('');
   const [pendingFinish, setPendingFinish] = useState<number | null>(null);
   const [acknowledgedFinishIndex, setAcknowledgedFinishIndex] = useState<PlayerIndex | null>(null);
+  const [confirmingDnf, setConfirmingDnf] = useState(false);
 
   const current = session.current!;
   const disciplineId = currentDisciplineId(session);
@@ -55,8 +57,14 @@ export default function PentathlonX01Play({
     session.playerCount === 2 && current.progress[0].finished !== current.progress[1].finished
       ? (current.progress[0].finished ? 0 : 1)
       : null;
+  const stillPlayingIndex: PlayerIndex | null =
+    waitingFinishedIndex === null ? null : waitingFinishedIndex === 0 ? 1 : 0;
   const showCheckoutOverlay =
     waitingFinishedIndex !== null && waitingFinishedIndex !== acknowledgedFinishIndex;
+
+  const continuePlaying = useCallback(() => {
+    setAcknowledgedFinishIndex(waitingFinishedIndex);
+  }, [waitingFinishedIndex]);
 
   const submitVisit = useCallback(
     (rawValue: string, finishDarts?: number) => {
@@ -101,28 +109,11 @@ export default function PentathlonX01Play({
     [entry, submitVisit],
   );
 
+  // Only ever the gameplay screen's own shortcuts: any open PentathlonModal swallows keystrokes
+  // before they reach this listener, and drives its own buttons natively (Enter/Space on the
+  // focused control), so there is no dialog-specific branch here to fall out of sync.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (showCheckoutOverlay) {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          onFinishDisciplineNow();
-        } else if (event.key === '1') {
-          event.preventDefault();
-          setAcknowledgedFinishIndex(waitingFinishedIndex);
-        }
-        return;
-      }
-      if (pendingFinish !== null) {
-        const counts = validFinishDartCounts(activeState.remaining);
-        const digit = Number(event.key);
-        if (counts.includes(digit)) {
-          event.preventDefault();
-          submitVisit(String(pendingFinish), digit);
-        }
-        if (event.key === 'Escape') setPendingFinish(null);
-        return;
-      }
       if (event.key >= '0' && event.key <= '9') {
         event.preventDefault();
         pressKey(event.key);
@@ -137,22 +128,12 @@ export default function PentathlonX01Play({
         setEntry('');
       } else if (event.key.toLowerCase() === 'u') {
         event.preventDefault();
-        onUndo();
+        onUndoRound();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [
-    activeState.remaining,
-    entry,
-    onFinishDisciplineNow,
-    onUndo,
-    pendingFinish,
-    pressKey,
-    showCheckoutOverlay,
-    submitVisit,
-    waitingFinishedIndex,
-  ]);
+  }, [entry, onUndoRound, pressKey]);
 
   const finishCounts = pendingFinish !== null ? validFinishDartCounts(activeState.remaining) : [];
 
@@ -166,7 +147,7 @@ export default function PentathlonX01Play({
   };
 
   return (
-    <section className="n01-game-shell">
+    <section className="n01-game-shell pent-x01-shell">
       <header className={`n01-game-header ${session.playerCount === 1 ? 'solo' : ''}`}>
         <div className={`n01-player-name ${active === 0 && !current.progress[0].finished ? 'active' : ''}`}>
           <span>{session.currentStarter === 0 ? '先攻' : '後攻'}</span>
@@ -212,6 +193,18 @@ export default function PentathlonX01Play({
         </div>
       </div>
 
+      {/* Only while something is actually being typed: floats clear of both the scoreboard above and
+          the keypad below, and disappears again the moment Enter commits or the entry is cleared. */}
+      {entry !== '' && (
+        <div className="pent-entry-popover" role="status">
+          <span>{session.names[active]} の得点</span>
+          <strong>{entry}</strong>
+        </div>
+      )}
+      <p className="sr-only" aria-live="polite">
+        {entry === '' ? '入力中の得点はありません' : `入力中の得点 ${entry}`}
+      </p>
+
       <footer className="n01-game-footer">
         <div className={`n01-left-table ${session.playerCount === 1 ? 'solo' : ''}`}>
           {players.map((index) => {
@@ -228,16 +221,11 @@ export default function PentathlonX01Play({
                 ) : route ? (
                   <span className="checkout-route">{route.map(dartLabel).join(' - ')}</span>
                 ) : (
-                  <span>{session.names[index]}</span>
+                  <span className="pent-player-label">{session.names[index]}</span>
                 )}
               </div>
             );
           })}
-        </div>
-
-        <div className="n01-entry-display" aria-live="polite">
-          <span>{session.names[active]} の得点入力中</span>
-          <strong className={entry ? '' : 'empty'}>{entry || '−'}</strong>
         </div>
 
         <nav className="n01-menu-table pent-x01-menu" aria-label="ゲームメニュー">
@@ -247,11 +235,16 @@ export default function PentathlonX01Play({
           <button type="button" onClick={openFinishModal}>
             Finish
           </button>
-          <button type="button" disabled={!canUndo} onClick={onUndo}>
-            Undo
+          <button type="button" disabled={!canUndoRound} onClick={onUndoRound}>
+            前の確定ラウンドに戻す
           </button>
-          <RulesButton {...DISCIPLINE_RULE_TEXT[disciplineId]} />
+          <PentathlonRulesButton {...DISCIPLINE_RULE_TEXT[disciplineId]} />
         </nav>
+
+        <p className="pent-key-hint">
+          <kbd>0</kbd>–<kbd>9</kbd> 得点入力・<kbd>Enter</kbd> 確定・<kbd>Backspace</kbd> 1文字削除・
+          <kbd>U</kbd> 前の確定ラウンドに戻す
+        </p>
 
         <div className="n01-key-table" aria-label="得点入力テンキー">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((key) => (
@@ -272,50 +265,75 @@ export default function PentathlonX01Play({
       </footer>
 
       {pendingFinish !== null && (
-        <div className="n01-modal-backdrop" role="dialog" aria-modal="true" aria-label="上がり本数を選択">
-          <div className="n01-modal-card menu-list">
-            <h2>上がり本数</h2>
+        <PentathlonModal
+          label="上がり本数を選択"
+          onClose={() => setPendingFinish(null)}
+          onKeyDown={(event) => {
+            const digit = Number(event.key);
+            if (finishCounts.includes(digit)) {
+              event.preventDefault();
+              submitVisit(String(pendingFinish), digit);
+            }
+          }}
+        >
+          <h2>上がり本数</h2>
+          <div className="menu-list">
             {finishCounts.map((count) => (
               <button key={count} type="button" onClick={() => submitVisit(String(pendingFinish), count)}>
                 <kbd>{count}</kbd>{'　'}{count}本目で終了
               </button>
             ))}
-            <p>
-              残り{activeState.remaining}は最短{finishCounts[0]}本で上がれます。
-            </p>
-            <button type="button" onClick={() => setPendingFinish(null)}>
-              戻る
-            </button>
           </div>
-        </div>
+          <p>
+            残り{activeState.remaining}は最短{finishCounts[0]}本で上がれます。
+          </p>
+          <button type="button" onClick={() => setPendingFinish(null)}>
+            戻る
+          </button>
+        </PentathlonModal>
       )}
 
-      {showCheckoutOverlay && (
-        <div className="result-backdrop" role="dialog" aria-modal="true" aria-label="種目の続行選択">
-          <div className="result-card">
-            <div className="result-icon" aria-hidden="true">
-              ✓
-            </div>
-            <p>{current.progress[waitingFinishedIndex!].result!.completed ? 'CHECKOUT' : 'DNF'}</p>
-            <h2>{session.names[waitingFinishedIndex!]}</h2>
-            <div className="result-numbers">
-              <span>
-                <strong>{current.progress[waitingFinishedIndex!].result!.darts || '—'}</strong>
-                使用ダーツ
-              </span>
-            </div>
-            <button type="button" className="primary-button" onClick={onFinishDisciplineNow}>
-              次の種目へ進む <kbd>Enter</kbd>
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => setAcknowledgedFinishIndex(waitingFinishedIndex)}
-            >
-              {session.names[active]}のチェックアウトを待つ <kbd>1</kbd>
-            </button>
-          </div>
-        </div>
+      {/* Hidden while the DNF confirmation is up: only one dialog is ever open at a time. */}
+      {showCheckoutOverlay && !confirmingDnf && stillPlayingIndex !== null && (
+        <PentathlonModal label="種目の続行選択" onClose={continuePlaying}>
+          <h2>
+            {session.names[waitingFinishedIndex!]}{' '}
+            {current.progress[waitingFinishedIndex!].result!.completed ? 'チェックアウト' : 'DNF'}
+          </h2>
+          <p>
+            使用ダーツ {current.progress[waitingFinishedIndex!].result!.darts || '—'} 本。
+            {session.names[stillPlayingIndex]} はまだ投げ終えていません。
+          </p>
+          <button type="button" className="n01-modal-primary" onClick={continuePlaying}>
+            {session.names[stillPlayingIndex]} のプレイを続ける <kbd>Enter</kbd>
+          </button>
+          <button type="button" onClick={() => setConfirmingDnf(true)}>
+            {session.names[stillPlayingIndex]} をDNFとして次の種目へ進む
+          </button>
+        </PentathlonModal>
+      )}
+
+      {confirmingDnf && stillPlayingIndex !== null && (
+        <PentathlonModal label="DNFの確認" onClose={() => setConfirmingDnf(false)}>
+          <h2>DNFとして記録します</h2>
+          <p>
+            {session.names[stillPlayingIndex]} は投げ終えていないため、DNF（未完了）として記録され、
+            この種目は負け扱いになります。よろしいですか？
+          </p>
+          <button
+            type="button"
+            className="n01-modal-primary"
+            onClick={() => {
+              setConfirmingDnf(false);
+              onFinishDisciplineNow();
+            }}
+          >
+            {session.names[stillPlayingIndex]} をDNFにして進む
+          </button>
+          <button type="button" onClick={() => setConfirmingDnf(false)}>
+            キャンセル
+          </button>
+        </PentathlonModal>
       )}
     </section>
   );

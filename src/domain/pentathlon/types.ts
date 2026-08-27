@@ -106,9 +106,22 @@ export interface PentathlonDisciplineRecord {
   starter: PlayerIndex;
 }
 
+/**
+ * 'full' is the real five-discipline pentathlon. 'single' is 個別練習: one discipline played on its
+ * own, with no overall standing and no bearing on a saved full session.
+ */
+export type PentathlonMode = 'full' | 'single';
+
 export interface PentathlonSession {
   version: 1;
   preset: PentathlonPreset;
+  /** Omitted on sessions saved before 個別練習 existed; treat as 'full'. */
+  mode?: PentathlonMode;
+  /**
+   * The disciplines this session actually plays, in order. Omitted on full sessions (and on anything
+   * saved before 個別練習 existed), where the preset's own five disciplines are used.
+   */
+  disciplines?: DisciplineId[];
   playerCount: 1 | 2;
   names: [string, string];
 

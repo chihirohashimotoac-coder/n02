@@ -1,26 +1,6 @@
-import type { DisciplineId } from './pentathlon/types';
+import type { DisciplineId } from './types';
 
-/** Rule text shown by the in-game "RULES" popup. 01/チェックアウト練習 + every Pentathlon discipline. */
-
-export const X01_MODE_RULE_TEXT: Record<'01' | 'checkout', { title: string; body: string }> = {
-  '01': {
-    title: '通常01',
-    body: [
-      '設定した開始点数（501など）からスタートし、0点ちょうどにした方がそのLegの勝者です。',
-      '1人3投（1ラウンド）投げ、入力した得点だけ残り点数が減ります。',
-      '残り点数を超える得点を入力すると「バスト」となり、そのラウンドの得点は取り消されます（残り点数は変わりません）。',
-      '残り点数を0にする最後の1投は必ず「ダブル」（またはインナーブル）で決める必要があります（ダブルアウト）。残り1点はどうやっても上がれないため、その得点はバスト扱いになります。',
-    ].join('\n\n'),
-  },
-  checkout: {
-    title: 'チェックアウト練習',
-    body: [
-      'ランダムに出題された残り点数（41〜170）から、ダブルアウトで0点ちょうどに上がる練習モードです。',
-      '2人で同じ課題に交互に挑戦し、少ないダーツ数で上がった方の勝ちです。',
-      '残り点数を0にする最後の1投は必ず「ダブル」（またはインナーブル）で決める必要があります。',
-    ].join('\n\n'),
-  },
-};
+/** Rule text shown by the Pentathlon "RULES" / "採用ルール・出典" popups. */
 
 export const DISCIPLINE_RULE_TEXT: Record<DisciplineId, { title: string; body: string }> = {
   'x01-501': {
@@ -89,3 +69,32 @@ export const DISCIPLINE_RULE_TEXT: Record<DisciplineId, { title: string; body: s
     ].join('\n\n'),
   },
 };
+
+/**
+ * The "採用ルール・出典" summary. Describes the rules the app plays by and how the overall standing
+ * is decided - written for players, so it names no internal files or implementation details.
+ */
+export const PENTATHLON_RULE_SUMMARY: Array<{ title: string; body: string }> = [
+  {
+    title: 'CRICKET の方式',
+    body: [
+      'n01プリセットのCRICKETは、ソフトダーツ機や大会競技で一般的な「スタンダードクリケット」方式を採用しています。',
+      '20・19・18・17・16・15とブルの7ナンバーを使い、3マークでオープン（クローズ）、相手がまだクローズしていないナンバーでのみ超過分が得点になります。7ナンバーすべてをクローズし、かつ得点が相手以上になった時点で勝利です。',
+    ].join('\n\n'),
+  },
+  {
+    title: '総合順位の決め方',
+    body: [
+      '総合順位は「5種目のうち何種目に勝ったか」（勝利種目数）で決定します。',
+      '各種目の勝敗は、その種目自身のルールで判定します（501は使用ダーツ数が少ない方、HALF-ITは得点が高い方、GOLFはストロークが少ない方、というように種目ごとに基準が異なります）。異なる種目の数値どうしを比較することはありません。',
+      '勝利種目数が同じ場合は、総合引き分けとします。',
+    ].join('\n\n'),
+  },
+  {
+    title: '先攻の決め方',
+    body: [
+      '第1種目の先攻は設定画面で選べます（ランダムを選んだ場合は開始時に1度だけ決定し、再開時に引き直しません）。',
+      '第2種目以降は「敗者先攻」または「交互先攻」から選べます。敗者先攻で引き分けになった場合は、その種目の後攻が次の先攻になります。',
+    ].join('\n\n'),
+  },
+];

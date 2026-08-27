@@ -2,11 +2,13 @@ import { useCallback, useState } from 'react';
 import TopBar from '../TopBar';
 import ThemeSelect from '../ThemeSelect';
 import PentathlonSetup from './PentathlonSetup';
+import SingleGameSetup from './SingleGameSetup';
 import PentathlonPlay from './PentathlonPlay';
 import PentathlonX01Play from './PentathlonX01Play';
 import PentathlonCricketPlay from './PentathlonCricketPlay';
 import DisciplineResult from './DisciplineResult';
 import PentathlonResult from './PentathlonResult';
+import SingleGameResult from './SingleGameResult';
 import {
   advanceDiscipline,
   applyTurn,
@@ -15,38 +17,62 @@ import {
   currentDisciplineId,
   finishDisciplineNow,
   stageHit,
-  undo as undoSession,
+  undoRound as undoRoundSession,
+  undoStagedHit as undoStagedHitSession,
+  canUndoRound as canUndoRoundSession,
   type CreateSessionOptions,
 } from '../../domain/pentathlon/session';
-import { getEngine } from '../../domain/pentathlon/presets';
+import { findSingleGameOption, getEngine } from '../../domain/pentathlon/presets';
 import {
   clearPentathlonSession,
+  clearSingleGameSession,
   loadPentathlonSession,
+  loadSingleGameSession,
   savePentathlonSession,
+  saveSingleGameSession,
 } from '../../storage/pentathlonStorage';
 import { InvalidVisitError } from '../../domain/x01Core';
 import type { DartHit } from '../../domain/darts';
 import type { PentathlonSession } from '../../domain/pentathlon/types';
 import type { ThemeName } from '../../storage/matchStorage';
 
+/** The menu label of the discipline a saved 個別練習 session was playing. */
+function singleGameLabel(session: PentathlonSession): string | undefined {
+  const disciplineId = session.disciplines?.[0];
+  if (!disciplineId) return undefined;
+  return findSingleGameOption(`${session.preset}:${disciplineId}`)?.label;
+}
+
 interface Props {
   theme: ThemeName;
   onChangeTheme: (theme: ThemeName) => void;
   onExit: () => void;
+  /** 'single' is 個別練習: one discipline, stored under its own key, no overall standing. */
+  variant?: 'full' | 'single';
 }
 
-export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) {
+export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant = 'full' }: Props) {
+  const isSingle = variant === 'single';
+  const load = isSingle ? loadSingleGameSession : loadPentathlonSession;
+  const save = isSingle ? saveSingleGameSession : savePentathlonSession;
+  const clear = isSingle ? clearSingleGameSession : clearPentathlonSession;
+
   const [session, setSession] = useState<PentathlonSession | null>(null);
-  const [savedSession] = useState<PentathlonSession | null>(loadPentathlonSession);
+  const [savedSession, setSavedSession] = useState<PentathlonSession | null>(load);
+  const [lastOptions, setLastOptions] = useState<CreateSessionOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const update = useCallback((next: PentathlonSession) => {
-    setSession(next);
-    savePentathlonSession(next);
-  }, []);
+  const update = useCallback(
+    (next: PentathlonSession) => {
+      setSession(next);
+      save(next);
+    },
+    [save],
+  );
 
   const start = useCallback(
     (options: CreateSessionOptions) => {
+      setLastOptions(options);
       update(createPentathlonSession(options));
       setError(null);
     },
@@ -54,12 +80,12 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) 
   );
 
   const resume = useCallback(() => {
-    const stored = loadPentathlonSession();
+    const stored = load();
     if (stored) {
       setSession(stored);
       setError(null);
     }
-  }, []);
+  }, [load]);
 
   const handleTurn = useCallback(
     (input: unknown) => {
@@ -83,9 +109,15 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) 
     [session, update],
   );
 
-  const handleUndo = useCallback(() => {
+  const handleUndoStagedHit = useCallback(() => {
     if (!session) return;
-    update(undoSession(session));
+    update(undoStagedHitSession(session));
+    setError(null);
+  }, [session, update]);
+
+  const handleUndoRound = useCallback(() => {
+    if (!session) return;
+    update(undoRoundSession(session));
     setError(null);
   }, [session, update]);
 
@@ -100,22 +132,38 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) 
   }, [onExit]);
 
   const handleFinish = useCallback(() => {
-    clearPentathlonSession();
+    clear();
     setSession(null);
+    setSavedSession(null);
     onExit();
-  }, [onExit]);
+  }, [clear, onExit]);
 
   if (!session) {
     return (
       <div className="app-shell">
         <TopBar onBrandClick={onExit} />
         <section className="setup-layout">
-          <PentathlonSetup
-            onStart={start}
-            onCancel={onExit}
-            hasSavedSession={savedSession !== null}
-            onResume={resume}
-          />
+          {isSingle ? (
+            <SingleGameSetup
+              onStart={start}
+              onCancel={onExit}
+              initialKey={
+                lastOptions?.disciplines
+                  ? `${lastOptions.preset}:${lastOptions.disciplines[0]}`
+                  : undefined
+              }
+              hasSavedSession={savedSession !== null}
+              onResume={resume}
+              savedLabel={savedSession ? singleGameLabel(savedSession) : undefined}
+            />
+          ) : (
+            <PentathlonSetup
+              onStart={start}
+              onCancel={onExit}
+              hasSavedSession={savedSession !== null}
+              onResume={resume}
+            />
+          )}
           <div className="panel theme-panel">
             <ThemeSelect theme={theme} onChange={onChangeTheme} />
           </div>
@@ -135,8 +183,8 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) 
           key={session.currentDisciplineIndex}
           session={session}
           onTurn={handleTurn}
-          onUndo={handleUndo}
-          canUndo={canUndoSession(session)}
+          onUndoRound={handleUndoRound}
+          canUndoRound={canUndoRoundSession(session)}
           onExit={handleExitToMenu}
           onFinishDisciplineNow={handleFinishDisciplineNow}
           error={error}
@@ -150,8 +198,10 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) 
           session={session}
           onTurn={handleTurn}
           onStageHit={handleStageHit}
-          onUndo={handleUndo}
+          onUndoStagedHit={handleUndoStagedHit}
+          onUndoRound={handleUndoRound}
           canUndo={canUndoSession(session)}
+          canUndoRound={canUndoRoundSession(session)}
           onExit={handleExitToMenu}
         />
       );
@@ -161,20 +211,40 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) 
         session={session}
         onTurn={handleTurn}
         onStageHit={handleStageHit}
-        onUndo={handleUndo}
+        onUndoStagedHit={handleUndoStagedHit}
+        onUndoRound={handleUndoRound}
         canUndo={canUndoSession(session)}
+        canUndoRound={canUndoRoundSession(session)}
         onExit={handleExitToMenu}
       />
     );
   }
 
   if (session.status === 'between-disciplines') {
+    // A single game has nowhere to advance to, so its one discipline result IS the final screen.
+    if (isSingle) {
+      return (
+        <SingleGameResult
+          session={session}
+          onPlayAgain={() => {
+            if (lastOptions) start(lastOptions);
+          }}
+          onChooseAnother={() => {
+            clear();
+            setSession(null);
+            setSavedSession(null);
+            setError(null);
+          }}
+          onExit={handleFinish}
+        />
+      );
+    }
     return (
       <DisciplineResult
         session={session}
         onNext={() => update(advanceDiscipline(session))}
-        onUndo={handleUndo}
-        canUndo={canUndoSession(session)}
+        onUndo={handleUndoRound}
+        canUndo={canUndoRoundSession(session)}
         onExit={handleExitToMenu}
       />
     );

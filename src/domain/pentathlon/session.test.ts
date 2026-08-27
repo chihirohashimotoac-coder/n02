@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   advanceDiscipline,
   applyTurn,
-  canUndo,
+  canUndoRound,
+  canUndoStagedHit,
   computeNextStarter,
   computeTotals,
   createPentathlonSession,
@@ -10,7 +11,11 @@ import {
   disciplineCount,
   finishDisciplineNow,
   isDisciplineComplete,
-  undo,
+  isSingleGameSession,
+  sessionDisciplines,
+  stageHit,
+  undoRound,
+  undoStagedHit,
   type CreateSessionOptions,
 } from './session';
 import type { DartHit } from '../darts';
@@ -172,7 +177,7 @@ describe('finishDisciplineNow (the Pentathlon X01 "proceed without waiting" choi
     session = finishDisciplineNow(session);
     expect(session.status).toBe('between-disciplines');
 
-    session = undo(session);
+    session = undoRound(session);
     expect(session.status).toBe('playing');
     expect(session.records).toHaveLength(0);
     expect(session.current?.progress[1].finished).toBe(false);
@@ -313,7 +318,7 @@ describe('undo', () => {
     let session = newSession({ initialStarter: 0 });
     session = applyTurn(session, { score: 100 });
     expect(session.current!.active).toBe(1);
-    session = undo(session);
+    session = undoRound(session);
     expect(session.current!.active).toBe(0);
     const state = session.current!.progress[0].state as { remaining: number };
     expect(state.remaining).toBe(501);
@@ -323,7 +328,7 @@ describe('undo', () => {
     let session = newSession({ playerCount: 1 });
     session = play501Finish(session);
     expect(session.current!.progress[0].finished).toBe(true);
-    session = undo(session);
+    session = undoRound(session);
     expect(session.current!.progress[0].finished).toBe(false);
     expect(session.current!.progress[0].result).toBeNull();
   });
@@ -333,7 +338,7 @@ describe('undo', () => {
     session = play501Finish(session);
     session = advanceDiscipline(session);
     expect(currentDisciplineId(session)).toBe('half-it');
-    session = undo(session);
+    session = undoRound(session);
     expect(currentDisciplineId(session)).toBe('x01-501');
     expect(session.status).toBe('between-disciplines');
     expect(session.records).toHaveLength(1);
@@ -344,7 +349,7 @@ describe('undo', () => {
     session = applyTurn(session, { score: 180 });
     const afterFirst = structuredClone(session.current!.progress[0].state);
     session = applyTurn(session, { score: 100 });
-    session = undo(session);
+    session = undoRound(session);
     expect(session.current!.progress[0].state).toEqual(afterFirst);
     session = applyTurn(session, { score: 100 });
     const state = session.current!.progress[0].state as { remaining: number; darts: number };
@@ -354,8 +359,8 @@ describe('undo', () => {
 
   it('is a no-op with nothing to undo', () => {
     const session = newSession();
-    expect(canUndo(session)).toBe(false);
-    expect(undo(session)).toBe(session);
+    expect(canUndoRound(session)).toBe(false);
+    expect(undoRound(session)).toBe(session);
   });
 });
 
@@ -515,5 +520,111 @@ describe('Cricket territory denial through the session controller (regression)',
     // Mirrored back to P0: a further triple on 20 now scores nothing, since P1 has also closed it.
     session = applyTurn(session, [T(20)]);
     expect((session.current?.progress[0].state as { self: { points: number } }).self.points).toBe(120);
+  });
+});
+
+describe('個別練習 (single-game sessions)', () => {
+  const singleSession = (disciplineId: 'x01-501' | 'baseball' | 'cricket', playerCount: 1 | 2 = 1) =>
+    newSession({
+      preset: 'n01',
+      mode: 'single',
+      disciplines: [disciplineId],
+      playerCount,
+    });
+
+  it('plays exactly the chosen discipline, not the preset five', () => {
+    const session = singleSession('baseball');
+    expect(isSingleGameSession(session)).toBe(true);
+    expect(sessionDisciplines(session)).toEqual(['baseball']);
+    expect(disciplineCount(session)).toBe(1);
+    expect(currentDisciplineId(session)).toBe('baseball');
+  });
+
+  it('can pick a discipline out of the middle of a preset', () => {
+    expect(currentDisciplineId(singleSession('cricket'))).toBe('cricket');
+    expect(currentDisciplineId(singleSession('x01-501'))).toBe('x01-501');
+  });
+
+  it('stops after its one discipline instead of moving on to another', () => {
+    let session = play501Finish(singleSession('x01-501'));
+    expect(session.status).toBe('between-disciplines');
+    expect(session.records).toHaveLength(1);
+
+    session = advanceDiscipline(session);
+    expect(session.status).toBe('completed');
+    expect(session.current).toBeNull();
+  });
+
+  it('records only its own discipline, so nothing can leak into a full pentathlon', () => {
+    const session = play501Finish(singleSession('x01-501'));
+    expect(session.records.map((record) => record.id)).toEqual(['x01-501']);
+  });
+
+  it('treats a session saved before 個別練習 existed as a full pentathlon', () => {
+    const legacy = newSession();
+    delete legacy.mode;
+    delete legacy.disciplines;
+    expect(isSingleGameSession(legacy)).toBe(false);
+    expect(disciplineCount(legacy)).toBe(5);
+  });
+});
+
+describe('undo split: staged dart vs committed round', () => {
+  const baseballSession = () =>
+    newSession({ preset: 'n01', mode: 'single', disciplines: ['baseball'], playerCount: 1 });
+
+  it('undoStagedHit removes only the last staged dart, leaving committed rounds alone', () => {
+    let session = baseballSession();
+    session = applyTurn(session, [{ kind: 'number', value: 1, ring: 'triple' }]); // inning 1: 3 runs
+    const afterFirstRound = (session.current!.progress[0].state as { runs: number }).runs;
+    expect(afterFirstRound).toBe(3);
+
+    session = stageHit(session, { kind: 'number', value: 2, ring: 'double' });
+    session = stageHit(session, { kind: 'number', value: 2, ring: 'single' });
+    expect(session.current!.pendingHits).toHaveLength(2);
+
+    session = undoStagedHit(session);
+    expect(session.current!.pendingHits).toHaveLength(1);
+    // The committed round is untouched by a staged-dart undo.
+    expect((session.current!.progress[0].state as { runs: number }).runs).toBe(3);
+    expect((session.current!.progress[0].state as { inning: number }).inning).toBe(2);
+  });
+
+  it('undoRound reverts the previous committed round, not the staged darts', () => {
+    let session = baseballSession();
+    session = applyTurn(session, [{ kind: 'number', value: 1, ring: 'triple' }]);
+    expect((session.current!.progress[0].state as { runs: number }).runs).toBe(3);
+
+    session = undoRound(session);
+    expect((session.current!.progress[0].state as { runs: number }).runs).toBe(0);
+    expect((session.current!.progress[0].state as { inning: number }).inning).toBe(1);
+  });
+
+  it('blocks the round undo while darts are staged, so a half-entered turn is never discarded', () => {
+    let session = baseballSession();
+    session = applyTurn(session, [{ kind: 'number', value: 1, ring: 'single' }]);
+    expect(canUndoRound(session)).toBe(true);
+
+    session = stageHit(session, { kind: 'number', value: 2, ring: 'single' });
+    expect(canUndoStagedHit(session)).toBe(true);
+    expect(canUndoRound(session)).toBe(false);
+    expect(undoRound(session)).toBe(session);
+
+    session = undoStagedHit(session);
+    expect(canUndoStagedHit(session)).toBe(false);
+    expect(canUndoRound(session)).toBe(true);
+  });
+
+  it('staging darts never grows the undo stack', () => {
+    let session = baseballSession();
+    const before = session.undo.length;
+    session = stageHit(session, { kind: 'number', value: 1, ring: 'single' });
+    session = stageHit(session, { kind: 'number', value: 1, ring: 'single' });
+    expect(session.undo.length).toBe(before);
+  });
+
+  it('undoStagedHit is a no-op with nothing staged', () => {
+    const session = baseballSession();
+    expect(undoStagedHit(session)).toBe(session);
   });
 });
