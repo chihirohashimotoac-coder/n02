@@ -1,88 +1,64 @@
-import { dartScore, type DartHit } from '../../darts';
+import type { DartHit } from '../../darts';
 import type { CompareOutcome, DisciplineEngine, DisciplineResult } from '../types';
 
+/**
+ * Cork: 5 rounds of 3 darts (15 darts total), every dart thrown at BULL. The rule (given directly
+ * by the user, superseding the earlier "closest to centre, sudden-death on a tie" interpretation -
+ * see docs/pentathlon-rules.md): inner bull counts as 2, outer bull as 1, anything else as 0. The
+ * player with the higher total wins; max possible is 30 (15 darts x inner bull).
+ */
+export const CORK_ROUNDS = 5;
+export const CORK_DARTS = CORK_ROUNDS * 3;
+
+/** Points contributed by one dart: inner bull = 2, outer bull = 1, anything else = 0. */
+export function corkDartValue(hit: DartHit): number {
+  if (hit.kind !== 'bull') return 0;
+  return hit.ring === 'inner' ? 2 : 1;
+}
+
 export interface CorkState {
-  /** Proximity rank of the best dart thrown; higher is closer to the centre. */
-  best: number;
+  score: number;
   darts: number;
   finished: boolean;
   hits: DartHit[];
-}
-
-export const CORK_DARTS = 1;
-
-/**
- * Proximity ranking: inner bull (50) beats outer bull (25) beats any other board hit beats a miss.
- * Real cork is judged by physical distance to centre, which a scorer app cannot observe - this rank
- * is the closest faithful approximation from segment data alone (see docs/pentathlon-rules.md).
- */
-export function corkProximity(hit: DartHit): number {
-  if (hit.kind === 'bull') return hit.ring === 'inner' ? 3 : 2;
-  if (hit.kind === 'miss') return 0;
-  return 1;
-}
-
-export function corkLabel(best: number): string {
-  switch (best) {
-    case 3:
-      return 'BULL';
-    case 2:
-      return 'OUTER BULL';
-    case 1:
-      return 'BOARD';
-    default:
-      return 'MISS';
-  }
 }
 
 export const corkEngine: DisciplineEngine<CorkState, DartHit[]> = {
   meta: {
     id: 'cork',
     name: 'CORK',
-    description: 'ブルに近いほど優位',
+    description: `${CORK_ROUNDS}ラウンド・計${CORK_DARTS}投を全てブルへ / インナー2本・アウター1本でカウント`,
     inputMode: 'dart-hits',
-    unit: 'proximity',
+    unit: 'points',
   },
 
-  createState: (): CorkState => ({ best: 0, darts: 0, finished: false, hits: [] }),
+  createState: (): CorkState => ({ score: 0, darts: 0, finished: false, hits: [] }),
 
   applyInput(state, hits) {
     if (state.finished || hits.length === 0) return state;
-    const best = hits.reduce((max, hit) => Math.max(max, corkProximity(hit)), state.best);
+    const gained = hits.reduce((sum, hit) => sum + corkDartValue(hit), 0);
     const darts = state.darts + hits.length;
-    return { best, darts, finished: darts >= CORK_DARTS, hits: [...state.hits, ...hits] };
+    return { score: state.score + gained, darts, finished: darts >= CORK_DARTS, hits: [...state.hits, ...hits] };
   },
 
   isFinished: (state) => state.finished,
 
   getResult: (state): DisciplineResult => ({
-    value: state.best,
-    unit: 'proximity',
+    value: state.score,
+    unit: 'points',
     completed: state.finished,
     darts: state.darts,
-    label: corkLabel(state.best),
+    label: `${state.score} POINTS`,
   }),
 
-  // Closer to the centre wins.
+  // Higher total wins; an exact tie is a genuine draw (no sudden-death re-throw under this rule).
   compareResults: (a, b): CompareOutcome => {
     if (a.value > b.value) return 'p0';
     if (b.value > a.value) return 'p1';
     return 'draw';
   },
 
-  describeTarget: (state) => (state.finished ? 'FINISHED' : 'BULL'),
+  describeTarget: (state) => (state.finished ? 'FINISHED' : `BULL（残り${CORK_DARTS - state.darts}投）`),
 
-  dartsRemainingThisTurn: (state) => Math.max(0, CORK_DARTS - state.darts),
-
-  // An exact tie (both same proximity - e.g. both miss, or both land on the board) is sudden-death:
-  // both players re-throw rather than the discipline ending in a draw (see docs/pentathlon-rules.md).
-  continueOnTie: (): [CorkState, CorkState] => [
-    { best: 0, darts: 0, finished: false, hits: [] },
-    { best: 0, darts: 0, finished: false, hits: [] },
-  ],
+  dartsRemainingThisTurn: () => 3,
 };
-
-/** Exposed for the share card / result display. */
-export function corkDartSummary(hits: DartHit[]): string {
-  return hits.map((hit) => (hit.kind === 'miss' ? 'MISS' : String(dartScore(hit)))).join(' / ');
-}

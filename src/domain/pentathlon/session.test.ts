@@ -8,6 +8,7 @@ import {
   createPentathlonSession,
   currentDisciplineId,
   disciplineCount,
+  finishDisciplineNow,
   isDisciplineComplete,
   undo,
   type CreateSessionOptions,
@@ -50,6 +51,20 @@ function play501TwoPlayers(session: PentathlonSession): PentathlonSession {
   next = applyTurn(next, { score: 180 }); // opponent -> 269
   next = applyTurn(next, { score: 180 }); // opponent -> 89
   return applyTurn(next, { score: 89, finishDarts: 3 }); // opponent OUT in 15
+}
+
+/**
+ * Fast-forwards through Cork's 5 rounds (15 darts per player) under the 15-dart bull-count rule.
+ * With p0AllInner true, P0 hits inner bull throughout (30 points) while P1 misses every dart (0) -
+ * an outright win with no tie. With it false, both players miss every dart for an exact 0-0 tie.
+ */
+function playCorkOutright(session: PentathlonSession, options: { p0AllInner: boolean }): PentathlonSession {
+  let next = session;
+  for (let round = 0; round < 5; round++) {
+    next = applyTurn(next, options.p0AllInner ? [BULL, BULL, BULL] : [MISS, MISS, MISS]);
+    next = applyTurn(next, [MISS, MISS, MISS]);
+  }
+  return next;
 }
 
 describe('createPentathlonSession', () => {
@@ -123,6 +138,50 @@ describe('two-player progression', () => {
     expect(record.results[0]!.label).toBe('9 DARTS');
     expect(record.results[1]!.label).toBe('15 DARTS');
     expect(record.outcome).toBe('p0'); // fewer darts wins 501
+  });
+});
+
+describe('finishDisciplineNow (the Pentathlon X01 "proceed without waiting" choice)', () => {
+  it('ends the discipline immediately, recording the still-playing opponent as DNF at their current progress', () => {
+    let session = newSession({ initialStarter: 0 });
+    // P1 finishes in 9 darts; P2 has only thrown two visits so far (301 remaining, not checked out).
+    session = applyTurn(session, { score: 180 }); // P1 -> 321
+    session = applyTurn(session, { score: 100 }); // P2 -> 401
+    session = applyTurn(session, { score: 180 }); // P1 -> 141
+    session = applyTurn(session, { score: 100 }); // P2 -> 301
+    session = applyTurn(session, { score: 141, finishDarts: 3 }); // P1 OUT in 9
+    expect(isDisciplineComplete(session)).toBe(false);
+
+    session = finishDisciplineNow(session);
+
+    expect(session.status).toBe('between-disciplines');
+    const record = session.records[0];
+    expect(record.results[0]!.label).toBe('9 DARTS');
+    expect(record.results[1]!.completed).toBe(false);
+    expect(record.results[1]!.label).toBe('DNF');
+    expect(record.outcome).toBe('p0');
+  });
+
+  it('is undoable, restoring the discipline to playing with the opponent still unfinished', () => {
+    let session = newSession({ initialStarter: 0 });
+    session = applyTurn(session, { score: 180 });
+    session = applyTurn(session, { score: 100 });
+    session = applyTurn(session, { score: 180 });
+    session = applyTurn(session, { score: 100 });
+    session = applyTurn(session, { score: 141, finishDarts: 3 });
+    session = finishDisciplineNow(session);
+    expect(session.status).toBe('between-disciplines');
+
+    session = undo(session);
+    expect(session.status).toBe('playing');
+    expect(session.records).toHaveLength(0);
+    expect(session.current?.progress[1].finished).toBe(false);
+  });
+
+  it('is a no-op once the discipline has already finished normally', () => {
+    const session = play501Finish(newSession({ playerCount: 1 }));
+    expect(session.status).toBe('between-disciplines');
+    expect(finishDisciplineNow(session)).toBe(session);
   });
 });
 
@@ -347,27 +406,39 @@ function playUntilDisciplineComplete(session: PentathlonSession, input: unknown)
   return s;
 }
 
-describe('Cork sudden-death re-throw on a tie (regression)', () => {
-  it('does not record a draw on an exact tie; re-throws until broken', () => {
+describe('Cork: 15-dart bull count (regression)', () => {
+  it('is not finished until both players have thrown all 15 darts', () => {
     let session = newSession({ preset: 'n01' });
     expect(currentDisciplineId(session)).toBe('cork');
 
-    session = applyTurn(session, [MISS]); // P0 (starter)
-    session = applyTurn(session, [MISS]); // P1 - exact tie (both proximity 0)
+    session = applyTurn(session, [BULL, BULL, BULL]); // P0, round 1
+    session = applyTurn(session, [MISS, MISS, MISS]); // P1, round 1
 
-    // Must NOT finalize as a draw: Cork keeps playing with both players reset for a re-throw.
     expect(session.status).toBe('playing');
     expect(session.records).toHaveLength(0);
     expect(session.current?.progress[0].finished).toBe(false);
-    expect(session.current?.progress[1].finished).toBe(false);
-    expect(session.current?.progress[0].state).toMatchObject({ darts: 0, best: 0 });
+    expect(session.current?.progress[0].state).toMatchObject({ darts: 3, score: 6 });
+  });
 
-    // Re-throw breaks the tie: P0 hits the board, P1 misses.
-    session = applyTurn(session, [S(20)]);
-    session = applyTurn(session, [MISS]);
+  it('records an exact tie as a genuine draw - no sudden-death re-throw under this rule', () => {
+    let session = newSession({ preset: 'n01' });
+    session = playCorkOutright(session, { p0AllInner: false });
+
     expect(session.status).toBe('between-disciplines');
     expect(session.records).toHaveLength(1);
+    expect(session.records[0].outcome).toBe('draw');
+    expect(session.records[0].results[0]!.label).toBe('0 POINTS');
+    expect(session.records[0].results[1]!.label).toBe('0 POINTS');
+  });
+
+  it('the higher 15-dart total wins outright (max possible score is 30)', () => {
+    let session = newSession({ preset: 'n01' });
+    session = playCorkOutright(session, { p0AllInner: true });
+
+    expect(session.status).toBe('between-disciplines');
     expect(session.records[0].outcome).toBe('p0');
+    expect(session.records[0].results[0]!.label).toBe('30 POINTS');
+    expect(session.records[0].results[1]!.label).toBe('0 POINTS');
   });
 });
 
@@ -375,8 +446,7 @@ describe('Baseball extra innings on a tie (regression)', () => {
   it('continues past inning 9 instead of recording a 0-0 draw, then finalizes once broken', () => {
     // Fast-forward through Cork (P0 wins outright, no tie) and 301 (both DNF -> draw) to reach Baseball.
     let session = newSession({ preset: 'n01' });
-    session = applyTurn(session, [S(20)]); // Cork: P0 hits the board
-    session = applyTurn(session, [MISS]); // Cork: P1 misses -> P0 wins
+    session = playCorkOutright(session, { p0AllInner: true });
     session = advanceDiscipline(session);
     expect(currentDisciplineId(session)).toBe('x01-301');
     session = playUntilDisciplineComplete(session, { score: 0, openedWithDouble: false });
@@ -409,8 +479,7 @@ describe('Cricket territory denial through the session controller (regression)',
   it('mirrors a closed number into the other player so their scoring on it is blocked, end to end', () => {
     // Fast-forward through Cork, 301, Baseball and 501 to reach Cricket (discipline 5 of n01).
     let session = newSession({ preset: 'n01' });
-    session = applyTurn(session, [S(20)]); // Cork: P0 hits the board
-    session = applyTurn(session, [MISS]); // Cork: P1 misses -> P0 wins outright
+    session = playCorkOutright(session, { p0AllInner: true });
     session = advanceDiscipline(session);
     expect(currentDisciplineId(session)).toBe('x01-301');
     session = playUntilDisciplineComplete(session, { score: 0, openedWithDouble: false }); // both DNF -> draw

@@ -19,6 +19,8 @@ export interface CreateSessionOptions {
   starterMode: StarterMode;
   /** 'random' is resolved exactly once, here, and then persisted - never re-rolled on resume. */
   initialStarter: PlayerIndex | 'random';
+  /** Whether 301/501 shows a suggested checkout route while throwing. Defaults to off. */
+  showRoute?: boolean;
 }
 
 const MAX_UNDO = 60;
@@ -38,6 +40,7 @@ export function createPentathlonSession(options: CreateSessionOptions): Pentathl
     initialStarter: starter,
     currentStarter: starter,
     starterMode: options.starterMode,
+    showRoute: options.showRoute ?? false,
     currentDisciplineIndex: 0,
     records: [],
     current: null,
@@ -201,6 +204,18 @@ function finishDiscipline(session: PentathlonSession): PentathlonSession {
     current: { ...current, pendingHits: [] },
     status: 'between-disciplines',
   };
+}
+
+/**
+ * Ends the current discipline immediately even though the non-active player hasn't reached
+ * isFinished() yet - their in-progress attempt is recorded exactly as it stands (DNF if they hadn't
+ * checked out). finishDiscipline() already falls back to engine.getResult() on the raw state for
+ * anyone without a committed result, so this needs no extra bookkeeping. Used only by the Pentathlon
+ * X01 "proceed to the next discipline without waiting for the opponent's checkout" choice.
+ */
+export function finishDisciplineNow(session: PentathlonSession): PentathlonSession {
+  if (!session.current || session.status !== 'playing') return session;
+  return finishDiscipline({ ...session, undo: pushUndo(session) });
 }
 
 /**

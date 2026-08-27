@@ -4,6 +4,7 @@ import ThemeSelect from '../ThemeSelect';
 import PentathlonSetup from './PentathlonSetup';
 import PentathlonPlay from './PentathlonPlay';
 import PentathlonX01Play from './PentathlonX01Play';
+import PentathlonCricketPlay from './PentathlonCricketPlay';
 import DisciplineResult from './DisciplineResult';
 import PentathlonResult from './PentathlonResult';
 import {
@@ -12,6 +13,7 @@ import {
   canUndo as canUndoSession,
   createPentathlonSession,
   currentDisciplineId,
+  finishDisciplineNow,
   stageHit,
   undo as undoSession,
   type CreateSessionOptions,
@@ -87,6 +89,12 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) 
     setError(null);
   }, [session, update]);
 
+  const handleFinishDisciplineNow = useCallback(() => {
+    if (!session) return;
+    update(finishDisciplineNow(session));
+    setError(null);
+  }, [session, update]);
+
   const handleExitToMenu = useCallback(() => {
     onExit();
   }, [onExit]);
@@ -119,19 +127,36 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit }: Props) 
   // Gameplay and its result screens are fullscreen, chrome-free views - same precedent as GameScreen
   // (which bypasses TopBar entirely, including for its own match-result screen).
   if (session.status === 'playing' && session.current) {
-    const engine = getEngine(currentDisciplineId(session));
-    return engine.meta.inputMode === 'visit-score' ? (
-      <PentathlonX01Play
-        key={session.currentDisciplineIndex}
-        session={session}
-        onTurn={handleTurn}
-        onUndo={handleUndo}
-        canUndo={canUndoSession(session)}
-        onExit={handleExitToMenu}
-        error={error}
-        onError={setError}
-      />
-    ) : (
+    const disciplineId = currentDisciplineId(session);
+    const engine = getEngine(disciplineId);
+    if (engine.meta.inputMode === 'visit-score') {
+      return (
+        <PentathlonX01Play
+          key={session.currentDisciplineIndex}
+          session={session}
+          onTurn={handleTurn}
+          onUndo={handleUndo}
+          canUndo={canUndoSession(session)}
+          onExit={handleExitToMenu}
+          onFinishDisciplineNow={handleFinishDisciplineNow}
+          error={error}
+          onError={setError}
+        />
+      );
+    }
+    if (disciplineId === 'cricket') {
+      return (
+        <PentathlonCricketPlay
+          session={session}
+          onTurn={handleTurn}
+          onStageHit={handleStageHit}
+          onUndo={handleUndo}
+          canUndo={canUndoSession(session)}
+          onExit={handleExitToMenu}
+        />
+      );
+    }
+    return (
       <PentathlonPlay
         session={session}
         onTurn={handleTurn}

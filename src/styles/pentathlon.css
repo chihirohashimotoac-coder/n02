@@ -22,10 +22,11 @@
   margin: auto 0;
 }
 
-/* PentathlonX01Play's footer nav has 3 buttons (中断 / Finish / Undo), not the 4 of 01/Checkout's
-   New / Finish / Stats / ☰, so it needs its own column count on the shared .n01-menu-table grid. */
+/* PentathlonX01Play's footer nav has 4 buttons (中断 / Finish / Undo / RULES), not the 5 of
+   01/Checkout's New / Finish / Stats / RULES / ☰, so it needs its own column count on the shared
+   .n01-menu-table grid. */
 .n01-menu-table.pent-x01-menu {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
 }
 
 /* 1-player Pentathlon X01: no opponent, so the header/footer collapse to a single side instead of
@@ -434,6 +435,67 @@
   font-size: 13px;
 }
 
+/* --- quick target pad (Cork / Golf / Half-It / RTC-on-Doubles) --- */
+
+.pent-quick-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.pent-quick-2,
+.pent-quick-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pent-quick-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pent-quick-btn {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 12px;
+  min-height: 64px;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    transform 0.12s,
+    border-color 0.12s,
+    background 0.12s;
+}
+
+.pent-quick-btn:hover:not(:disabled) {
+  border-color: var(--green);
+  transform: translateY(-1px);
+}
+
+.pent-quick-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.pent-quick-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pent-quick-btn.hit {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green-dark);
+}
+
+[data-theme='neon'] .pent-quick-btn.hit {
+  color: #2ee58a;
+}
+
+.pent-quick-btn.miss {
+  color: var(--muted);
+  border-style: dashed;
+}
+
 .pent-actions {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -443,6 +505,121 @@
 
 .pent-actions .secondary-button {
   white-space: nowrap;
+}
+
+.pent-actions.pent-actions-3 {
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+/* --- cricket scoreboard (standard numbers-down-the-middle layout, n02's own styling) --- */
+
+.pent-cricket-board {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.pent-cricket-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr);
+  align-items: center;
+  border-top: 1px solid var(--line);
+  min-height: 44px;
+}
+
+.pent-cricket-board.solo .pent-cricket-row {
+  grid-template-columns: minmax(0, 1fr) 64px;
+}
+
+.pent-cricket-row:first-child {
+  border-top: 0;
+}
+
+.pent-cricket-row.head {
+  background: var(--green-dark);
+  color: #fff;
+  min-height: 36px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.pent-cricket-name {
+  text-align: center;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pent-cricket-name.active {
+  text-decoration: underline;
+  text-decoration-color: currentcolor;
+  text-underline-offset: 3px;
+}
+
+.pent-cricket-num {
+  text-align: center;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pent-cricket-row.head .pent-cricket-num {
+  color: #fff;
+}
+
+.pent-cricket-row.dead {
+  opacity: 0.45;
+}
+
+.pent-cricket-row.total {
+  background: var(--surface-soft);
+}
+
+.pent-cricket-row.total .pent-cricket-num {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+.pent-cricket-row.total strong {
+  text-align: center;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--green-dark);
+}
+
+[data-theme='neon'] .pent-cricket-row.total strong {
+  color: #2ee58a;
+}
+
+.pent-cricket-mark {
+  display: grid;
+  place-items: center;
+  height: 34px;
+  font-size: 19px;
+  font-weight: 900;
+  color: var(--muted);
+}
+
+.pent-cricket-mark.m1,
+.pent-cricket-mark.m2 {
+  color: var(--ink);
+}
+
+.pent-cricket-mark.m3 {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto;
+  border: 2px solid var(--green);
+  border-radius: 50%;
+  color: var(--green-dark);
+}
+
+[data-theme='neon'] .pent-cricket-mark.m3 {
+  color: #2ee58a;
 }
 
 /* --- discipline / final result --- */

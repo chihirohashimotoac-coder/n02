@@ -15,7 +15,9 @@ import {
 } from '../domain/x01Engine';
 import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../domain/darts';
 import { appendHistory } from '../storage/matchStorage';
+import { X01_MODE_RULE_TEXT } from '../domain/ruleText';
 import MatchResultCard from './MatchResultCard';
+import RulesButton from './RulesButton';
 
 interface Props {
   state: X01MatchState;
@@ -286,6 +288,13 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
           ))}
         </div>
 
+        <div className="n01-entry-display" aria-live="polite">
+          <span>
+            {activePlayer.name} の{remainingEntryMode ? '残り点数' : '得点'}入力中
+          </span>
+          <strong className={entry ? '' : 'empty'}>{entry || '−'}</strong>
+        </div>
+
         <nav className="n01-menu-table" aria-label="ゲームメニュー">
           <button type="button" onClick={() => onExit({ clearSave: true })}>
             New
@@ -307,6 +316,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
           <button type="button" onClick={() => setModal('stats')}>
             Stats
           </button>
+          <RulesButton {...X01_MODE_RULE_TEXT[state.settings.mode]} />
           <button type="button" aria-label="メニュー" onClick={() => setModal('menu')}>
             ☰
           </button>
