@@ -74,9 +74,17 @@ export default defineConfig({
     },
 
     // Real WebKit, on an iPhone device profile - the closest this suite gets to Mobile Safari.
+    // Everything runs here except the @long-session walkthroughs: those drive several hundred taps
+    // through one page over ~10 minutes, which kills WebKit's browser process on the headless Linux
+    // runner ("Target crashed"), independently of what the app does. They keep running in full on
+    // every Chromium project, so the five-discipline walkthroughs stay covered.
     ...(webkitAvailable
       ? [
-          { name: 'iphone-webkit', use: { ...devices['iPhone 13'] } },
+          {
+            name: 'iphone-webkit',
+            grepInvert: /@long-session/,
+            use: { ...devices['iPhone 13'] },
+          },
           {
             name: 'iphone-webkit-max',
             testMatch: /layout\.spec\.ts/,
