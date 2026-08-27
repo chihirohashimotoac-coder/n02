@@ -24,6 +24,14 @@ export default function PentathlonModal({ label, onClose, onKeyDown, children }:
   const cardRef = useRef<HTMLDivElement>(null);
   // Captured on mount so focus can go back exactly where it came from - usually the trigger button.
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  // Callers pass these as inline closures, so keeping them in refs lets the key listener be
+  // registered exactly once per open dialog instead of being torn down and re-added every render.
+  const onCloseRef = useRef(onClose);
+  const onKeyDownRef = useRef(onKeyDown);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    onKeyDownRef.current = onKeyDown;
+  });
 
   const focusables = useCallback(
     () => Array.from(cardRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []),
@@ -51,7 +59,7 @@ export default function PentathlonModal({ label, onClose, onKeyDown, children }:
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key === 'Tab') {
@@ -73,14 +81,14 @@ export default function PentathlonModal({ label, onClose, onKeyDown, children }:
       // default action (Enter/Space activating a button), but is stopped before the gameplay
       // screen's window listener sees it - otherwise Enter would also commit the score behind the
       // dialog, and digits/Backspace/U would edit or undo hidden gameplay.
-      onKeyDown?.(event);
+      onKeyDownRef.current?.(event);
       event.stopPropagation();
     };
     // Capture phase: gameplay screens listen for keys on window too, and must not act on
     // keystrokes aimed at an open dialog.
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [focusables, onClose, onKeyDown]);
+  }, [focusables]);
 
   return (
     <div className="n01-modal-backdrop pent-modal-backdrop" onClick={onClose}>
