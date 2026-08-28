@@ -150,6 +150,7 @@ export default function PentathlonPlay({
           onUndoRound={onUndoRound}
           onExit={onExit}
           onClose={() => setMenuOpen(false)}
+          padKind={quickTarget && quickTarget.kind !== 'any-ring' ? 'quick' : 'grid'}
         />
       )}
     </div>

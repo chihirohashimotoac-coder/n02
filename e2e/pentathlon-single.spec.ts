@@ -439,3 +439,78 @@ test.describe('個別練習の中断と再開', () => {
     await expect(page.getByRole('button', { name: /中断した個別練習を再開/ })).toHaveCount(0);
   });
 });
+
+test.describe('PCキーボード操作（ダーツ入力系の種目）', () => {
+  test('a quick-target pad binds its buttons to the number keys in display order', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CORK');
+
+    // CORK's pad is アウターブル / インナーブル / ミス, so 1/2/3 stage exactly those.
+    await page.keyboard.press('1');
+    await page.keyboard.press('2');
+    await page.keyboard.press('3');
+    const chips = page.locator('.pent-pending-chip');
+    await expect(chips.nth(0)).toHaveText('OUTER BULL');
+    await expect(chips.nth(1)).toHaveText('BULL');
+    await expect(chips.nth(2)).toHaveText('MISS');
+
+    // Backspace takes the last dart back, Enter commits the turn.
+    await page.keyboard.press('Backspace');
+    await expect(chips.nth(2)).toContainText('3投目');
+    await page.keyboard.press('3');
+    await page.keyboard.press('Enter');
+    // 1 inner (2) + 1 outer (1) = 3 bulls counted.
+    await expect(page.locator('.pent-player-value').first()).toHaveText('3');
+  });
+
+  test('the full number grid takes darts notation, with the digits shown as they are typed', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET');
+
+    // "2" alone can only ever become 20 on a Cricket pad, so the ring key resolves it.
+    await page.keyboard.press('2');
+    await expect(page.locator('.pent-typing')).toContainText('2');
+    await page.keyboard.press('t');
+    await expect(page.locator('.pent-pending-chip').nth(0)).toHaveText('T20');
+    await expect(page.locator('.pent-typing')).toHaveCount(0);
+
+    // A number that is unambiguous the moment it is complete stages without any terminator.
+    await page.keyboard.press('1');
+    await page.keyboard.press('9');
+    await expect(page.locator('.pent-pending-chip').nth(1)).toHaveText('S19');
+
+    // B is the inner bull, and M is a miss.
+    await page.keyboard.press('b');
+    await expect(page.locator('.pent-pending-chip').nth(2)).toHaveText('BULL');
+    await page.keyboard.press('Enter');
+
+    await page.keyboard.press('m');
+    await expect(page.locator('.pent-pending-chip').nth(0)).toHaveText('MISS');
+  });
+
+  test('S/D/T change the selected ring while no number is part-typed', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET');
+
+    await page.keyboard.press('d');
+    await expect(page.locator('.pent-ring-row button.selected')).toHaveText('D');
+    await page.keyboard.press('1');
+    await page.keyboard.press('5');
+    await expect(page.locator('.pent-pending-chip').nth(0)).toHaveText('D15');
+  });
+
+  test('lists the shortcuts for the pad the screen is actually showing', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CORK');
+    await openPentGameMenu(page);
+    await expect(page.getByRole('dialog')).toContainText('各ボタン');
+    await page.keyboard.press('Escape');
+
+    await page.goto('/');
+    await startSingleGame(page, 'CRICKET');
+    await openPentGameMenu(page);
+    await expect(page.getByRole('dialog')).toContainText('T20');
+  });
+});

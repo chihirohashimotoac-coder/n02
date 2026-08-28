@@ -133,6 +133,7 @@ export default function PentathlonCricketPlay({
           onUndoRound={onUndoRound}
           onExit={onExit}
           onClose={() => setMenuOpen(false)}
+          padKind="grid"
         />
       )}
     </div>

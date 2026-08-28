@@ -1052,6 +1052,59 @@
   color: inherit;
 }
 
+/* --- keyboard operation (PC) -------------------------------------------- */
+
+/*
+ * Quick-pad buttons carry their number key as a corner badge. Drawn from data-key in CSS rather
+ * than as markup so it never becomes part of the button's text or accessible name, and only on
+ * pointer-and-keyboard screens - on a phone there is no key to press.
+ */
+@media (width > 720px) {
+  .pent-quick-btn[data-key]::before {
+    content: attr(data-key);
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    min-width: 16px;
+    padding: 1px 4px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .pent-quick-btn[data-key] {
+    position: relative;
+  }
+}
+
+/* The digits typed so far towards a number, e.g. "T1…" on the way to T15. */
+.pent-typing {
+  display: inline-flex;
+  align-items: baseline;
+  border: 1px dashed var(--green);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.pent-typing em {
+  font-style: normal;
+  opacity: 0.6;
+}
+[data-theme="neon"] .pent-typing,
+[data-theme="navy"] .pent-typing {
+  background: var(--surface);
+  color: inherit;
+}
+
 /* Quick-pad buttons carrying a value line (Baseball's RUN counts). The button's own min-height of
    64px already clears the 44px touch-target minimum, so only the value line is defined here. */
 .pent-quick-btn em {

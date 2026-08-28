@@ -11,6 +11,11 @@ interface Props {
   onUndoRound: () => void;
   onExit: () => void;
   onClose: () => void;
+  /**
+   * Which input pad this screen is showing, so the shortcut list describes the keys that actually
+   * do something here: a quick pad binds its buttons to 1-4, the full grid takes darts notation.
+   */
+  padKind: 'quick' | 'grid';
 }
 
 /**
@@ -26,6 +31,7 @@ export default function PentathlonPlayMenu({
   onUndoRound,
   onExit,
   onClose,
+  padKind,
 }: Props) {
   const [view, setView] = useState<'menu' | 'rules'>('menu');
   const rules = DISCIPLINE_RULE_TEXT[disciplineId];
@@ -70,6 +76,23 @@ export default function PentathlonPlayMenu({
           中断してメニューへ
         </button>
       </div>
+      <p>
+        キーボード：
+        {padKind === 'quick' ? (
+          <>
+            <kbd>1</kbd>–<kbd>4</kbd> 各ボタン
+          </>
+        ) : (
+          <>
+            数字→<kbd>S</kbd>
+            <kbd>D</kbd>
+            <kbd>T</kbd> でナンバー（例 <kbd>2</kbd>
+            <kbd>0</kbd>
+            <kbd>T</kbd> でT20）・<kbd>B</kbd> インナーブル・<kbd>O</kbd> アウターブル
+          </>
+        )}
+        ・<kbd>M</kbd> ミス・<kbd>Enter</kbd> この投球を確定・<kbd>Backspace</kbd> 1投戻す
+      </p>
       <button type="button" onClick={onClose}>
         戻る
       </button>
