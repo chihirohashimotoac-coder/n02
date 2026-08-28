@@ -15,7 +15,7 @@ import {
   canUndo as canUndoSession,
   createPentathlonSession,
   currentDisciplineId,
-  finishDisciplineNow,
+  setPendingHits,
   stageHit,
   undoRound as undoRoundSession,
   undoStagedHit as undoStagedHitSession,
@@ -109,6 +109,14 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
     [session, update],
   );
 
+  const handleSetPendingHits = useCallback(
+    (hits: DartHit[]) => {
+      if (!session) return;
+      update(setPendingHits(session, hits));
+    },
+    [session, update],
+  );
+
   const handleUndoStagedHit = useCallback(() => {
     if (!session) return;
     update(undoStagedHitSession(session));
@@ -118,12 +126,6 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
   const handleUndoRound = useCallback(() => {
     if (!session) return;
     update(undoRoundSession(session));
-    setError(null);
-  }, [session, update]);
-
-  const handleFinishDisciplineNow = useCallback(() => {
-    if (!session) return;
-    update(finishDisciplineNow(session));
     setError(null);
   }, [session, update]);
 
@@ -186,7 +188,6 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
           onUndoRound={handleUndoRound}
           canUndoRound={canUndoRoundSession(session)}
           onExit={handleExitToMenu}
-          onFinishDisciplineNow={handleFinishDisciplineNow}
           error={error}
           onError={setError}
         />
@@ -198,6 +199,7 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
           session={session}
           onTurn={handleTurn}
           onStageHit={handleStageHit}
+          onSetPendingHits={handleSetPendingHits}
           onUndoStagedHit={handleUndoStagedHit}
           onUndoRound={handleUndoRound}
           canUndo={canUndoSession(session)}

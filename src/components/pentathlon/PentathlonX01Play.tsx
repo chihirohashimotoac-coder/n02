@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
-import PentathlonProgress from './PentathlonProgress';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PentathlonModal from './PentathlonModal';
 import { getEngine } from '../../domain/pentathlon/presets';
-import { currentDisciplineId } from '../../domain/pentathlon/session';
+import {
+  currentDisciplineId,
+  disciplineCount,
+  isSingleGameSession,
+} from '../../domain/pentathlon/session';
 import { InvalidVisitError } from '../../domain/x01Core';
 import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../../domain/darts';
 import { DISCIPLINE_RULE_TEXT } from '../../domain/pentathlon/ruleText';
-import PentathlonRulesButton from './PentathlonRulesButton';
 import type { X01SoloState, X01SoloInput } from '../../domain/pentathlon/engines/x01Solo';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
 
@@ -17,16 +19,21 @@ interface Props {
   onUndoRound: () => void;
   canUndoRound: boolean;
   onExit: () => void;
-  /** Ends the discipline right now, recording the still-playing opponent as DNF. Confirmed first. */
-  onFinishDisciplineNow: () => void;
   error: string | null;
   onError: (message: string | null) => void;
 }
 
+type Modal = 'none' | 'finish-darts' | 'menu' | 'stats' | 'rules';
+
 /**
- * 301/501 in Pentathlon: each player plays an independent attempt (not a shared race), but the UI is
- * otherwise the same fullscreen shell/keypad as 通常01・チェックアウト練習 (GameScreen), per explicit
- * request - round-by-round history is the only thing intentionally left out.
+ * 301/501 in Pentathlon. Deliberately the same screen as 通常01・チェックアウト練習 (GameScreen): the
+ * same fullscreen shell, the same round-by-round score table, the same footer and keypad, and the
+ * same race - whoever checks out first wins the discipline outright. GameScreen itself is left
+ * untouched; this is a parallel implementation over the Pentathlon session state, because the two
+ * screens read from completely different engines.
+ *
+ * The one intentional omission is GameScreen's edit-a-past-score flow: the Pentathlon X01 engine has
+ * no equivalent editVisit operation, so score cells here are display-only.
  */
 export default function PentathlonX01Play({
   session,
@@ -34,37 +41,21 @@ export default function PentathlonX01Play({
   onUndoRound,
   canUndoRound,
   onExit,
-  onFinishDisciplineNow,
   error,
   onError,
 }: Props) {
   const [entry, setEntry] = useState('');
+  const [modal, setModal] = useState<Modal>('none');
   const [pendingFinish, setPendingFinish] = useState<number | null>(null);
-  const [acknowledgedFinishIndex, setAcknowledgedFinishIndex] = useState<PlayerIndex | null>(null);
-  const [confirmingDnf, setConfirmingDnf] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const current = session.current!;
   const disciplineId = currentDisciplineId(session);
   const engine = getEngine(disciplineId);
   const active = current.active;
   const activeState = current.progress[active].state as X01SoloState;
-  const players: PlayerIndex[] = session.playerCount === 1 ? [0] : [0, 1];
-
-  // In 2-player mode, a player who finishes first simply waits - the discipline isn't over until the
-  // other player's own result is final too (see session.ts). That hand-off is easy to miss, so it
-  // gets one explicit, dismissible confirmation instead of just quietly switching whose turn it is.
-  const waitingFinishedIndex: PlayerIndex | null =
-    session.playerCount === 2 && current.progress[0].finished !== current.progress[1].finished
-      ? (current.progress[0].finished ? 0 : 1)
-      : null;
-  const stillPlayingIndex: PlayerIndex | null =
-    waitingFinishedIndex === null ? null : waitingFinishedIndex === 0 ? 1 : 0;
-  const showCheckoutOverlay =
-    waitingFinishedIndex !== null && waitingFinishedIndex !== acknowledgedFinishIndex;
-
-  const continuePlaying = useCallback(() => {
-    setAcknowledgedFinishIndex(waitingFinishedIndex);
-  }, [waitingFinishedIndex]);
+  const solo = session.playerCount === 1;
+  const players: PlayerIndex[] = solo ? [0] : [0, 1];
 
   const submitVisit = useCallback(
     (rawValue: string, finishDarts?: number) => {
@@ -78,6 +69,7 @@ export default function PentathlonX01Play({
           return;
         }
         setPendingFinish(score);
+        setModal('finish-darts');
         return;
       }
 
@@ -85,6 +77,7 @@ export default function PentathlonX01Play({
         onTurn({ score, finishDarts });
         setEntry('');
         setPendingFinish(null);
+        setModal('none');
         onError(null);
       } catch (caught) {
         if (caught instanceof InvalidVisitError) onError(caught.message);
@@ -113,6 +106,7 @@ export default function PentathlonX01Play({
   // before they reach this listener, and drives its own buttons natively (Enter/Space on the
   // focused control), so there is no dialog-specific branch here to fall out of sync.
   useEffect(() => {
+    if (modal !== 'none') return;
     const handler = (event: KeyboardEvent) => {
       if (event.key >= '0' && event.key <= '9') {
         event.preventDefault();
@@ -133,7 +127,15 @@ export default function PentathlonX01Play({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [entry, onUndoRound, pressKey]);
+  }, [entry, modal, onUndoRound, pressKey]);
+
+  const rows = useMemo(() => buildRows(current.progress, active, solo), [current.progress, active, solo]);
+
+  // Keep the newest round in view, exactly as the 01 score sheet does.
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
+  }, [rows.length]);
 
   const finishCounts = pendingFinish !== null ? validFinishDartCounts(activeState.remaining) : [];
 
@@ -144,11 +146,17 @@ export default function PentathlonX01Play({
       return;
     }
     setPendingFinish(activeState.remaining);
+    setModal('finish-darts');
   };
+
+  const positionLabel = isSingleGameSession(session)
+    ? '個別練習'
+    : `種目 ${session.currentDisciplineIndex + 1} / ${disciplineCount(session)}`;
 
   return (
     <section className="n01-game-shell pent-x01-shell">
-      <header className={`n01-game-header ${session.playerCount === 1 ? 'solo' : ''}`}>
+      {/* Source order is load-bearing: the header is a 3-column grid (player | discipline | player). */}
+      <header className={`n01-game-header ${solo ? 'solo' : ''}`}>
         <div className={`n01-player-name ${active === 0 && !current.progress[0].finished ? 'active' : ''}`}>
           <span>{session.currentStarter === 0 ? '先攻' : '後攻'}</span>
           <strong>{session.names[0]}</strong>
@@ -159,10 +167,10 @@ export default function PentathlonX01Play({
           ) : null}
         </div>
         <div className="n01-leg-center">
-          <small>PENTATHLON</small>
+          <small>{positionLabel}</small>
           <strong>{engine.meta.name}</strong>
         </div>
-        {session.playerCount === 2 && (
+        {!solo && (
           <div className={`n01-player-name right ${active === 1 && !current.progress[1].finished ? 'active' : ''}`}>
             {current.progress[1].finished ? (
               <em>FINISHED</em>
@@ -188,25 +196,37 @@ export default function PentathlonX01Play({
           </p>
         )}
 
-        <div className="n01-score-scroll" tabIndex={0} aria-label="ペンタスロン進行状況">
-          <PentathlonProgress session={session} />
+        <div className="n01-score-scroll" ref={scrollRef} tabIndex={0} aria-label="全ラウンド履歴">
+          <table className="n01-score-table">
+            <thead>
+              <tr>
+                <th scope="col">得点</th>
+                <th scope="col">残り</th>
+                <th scope="col">Darts</th>
+                {!solo && <th scope="col">得点</th>}
+                {!solo && <th scope="col">残り</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.round}>
+                  <ScoreCell cell={row.cells[0]} isCurrent={active === 0 && row.isCurrentRow} entry={entry} />
+                  <td className="to-go">{toGo(row, 0, active, current.progress)}</td>
+                  <td className="darts">{row.darts}</td>
+                  {!solo && (
+                    <ScoreCell cell={row.cells[1]} isCurrent={active === 1 && row.isCurrentRow} entry={entry} />
+                  )}
+                  {!solo && <td className="to-go">{toGo(row, 1, active, current.progress)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+        <p className="n01-table-hint">得点表をスクロールすると1ラウンド目から確認できます。</p>
       </div>
 
-      {/* Only while something is actually being typed: floats clear of both the scoreboard above and
-          the keypad below, and disappears again the moment Enter commits or the entry is cleared. */}
-      {entry !== '' && (
-        <div className="pent-entry-popover" role="status">
-          <span>{session.names[active]} の得点</span>
-          <strong>{entry}</strong>
-        </div>
-      )}
-      <p className="sr-only" aria-live="polite">
-        {entry === '' ? '入力中の得点はありません' : `入力中の得点 ${entry}`}
-      </p>
-
       <footer className="n01-game-footer">
-        <div className={`n01-left-table ${session.playerCount === 1 ? 'solo' : ''}`}>
+        <div className={`n01-left-table ${solo ? 'solo' : ''}`}>
           {players.map((index) => {
             const progress = current.progress[index];
             const state = progress.state as X01SoloState;
@@ -215,36 +235,31 @@ export default function PentathlonX01Play({
               session.showRoute && !progress.finished ? suggestCheckoutRoute(state.remaining) : null;
             return (
               <div key={index} className={isActive ? 'active' : ''}>
-                <strong>{progress.finished ? state.darts : state.remaining}</strong>
-                {progress.finished ? (
-                  <span>{progress.result!.completed ? 'DARTS' : 'DNF'}</span>
-                ) : route ? (
+                <strong>{state.remaining}</strong>
+                {route ? (
                   <span className="checkout-route">{route.map(dartLabel).join(' - ')}</span>
                 ) : (
-                  <span className="pent-player-label">{session.names[index]}</span>
+                  <span>3DA {threeDartAverage(state).toFixed(1)}</span>
                 )}
               </div>
             );
           })}
         </div>
 
-        <nav className="n01-menu-table pent-x01-menu" aria-label="ゲームメニュー">
+        <nav className="n01-menu-table" aria-label="ゲームメニュー">
           <button type="button" onClick={onExit}>
             中断
           </button>
           <button type="button" onClick={openFinishModal}>
             Finish
           </button>
-          <button type="button" disabled={!canUndoRound} onClick={onUndoRound}>
-            前の確定ラウンドに戻す
+          <button type="button" onClick={() => setModal('stats')}>
+            Stats
           </button>
-          <PentathlonRulesButton {...DISCIPLINE_RULE_TEXT[disciplineId]} />
+          <button type="button" aria-label="メニュー" onClick={() => setModal('menu')}>
+            ☰
+          </button>
         </nav>
-
-        <p className="pent-key-hint">
-          <kbd>0</kbd>–<kbd>9</kbd> 得点入力・<kbd>Enter</kbd> 確定・<kbd>Backspace</kbd> 1文字削除・
-          <kbd>U</kbd> 前の確定ラウンドに戻す
-        </p>
 
         <div className="n01-key-table" aria-label="得点入力テンキー">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((key) => (
@@ -264,10 +279,13 @@ export default function PentathlonX01Play({
         </div>
       </footer>
 
-      {pendingFinish !== null && (
+      {modal === 'finish-darts' && pendingFinish !== null && (
         <PentathlonModal
           label="上がり本数を選択"
-          onClose={() => setPendingFinish(null)}
+          onClose={() => {
+            setModal('none');
+            setPendingFinish(null);
+          }}
           onKeyDown={(event) => {
             const digit = Number(event.key);
             if (finishCounts.includes(digit)) {
@@ -287,54 +305,231 @@ export default function PentathlonX01Play({
           <p>
             残り{activeState.remaining}は最短{finishCounts[0]}本で上がれます。
           </p>
-          <button type="button" onClick={() => setPendingFinish(null)}>
+          <button
+            type="button"
+            onClick={() => {
+              setModal('none');
+              setPendingFinish(null);
+            }}
+          >
             戻る
           </button>
         </PentathlonModal>
       )}
 
-      {/* Hidden while the DNF confirmation is up: only one dialog is ever open at a time. */}
-      {showCheckoutOverlay && !confirmingDnf && stillPlayingIndex !== null && (
-        <PentathlonModal label="種目の続行選択" onClose={continuePlaying}>
-          <h2>
-            {session.names[waitingFinishedIndex!]}{' '}
-            {current.progress[waitingFinishedIndex!].result!.completed ? 'チェックアウト' : 'DNF'}
-          </h2>
+      {modal === 'menu' && (
+        <PentathlonModal label="ゲームメニュー" onClose={() => setModal('none')}>
+          <h2>メニュー</h2>
+          <div className="menu-list">
+            <button
+              type="button"
+              disabled={!canUndoRound}
+              onClick={() => {
+                onUndoRound();
+                setModal('none');
+              }}
+            >
+              前の確定ラウンドに戻す
+            </button>
+            <button type="button" onClick={() => setModal('rules')}>
+              ルール説明
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setModal('none');
+                onExit();
+              }}
+            >
+              中断してメニューへ
+            </button>
+          </div>
           <p>
-            使用ダーツ {current.progress[waitingFinishedIndex!].result!.darts || '—'} 本。
-            {session.names[stillPlayingIndex]} はまだ投げ終えていません。
+            キーボード：<kbd>0</kbd>–<kbd>9</kbd> 得点入力・<kbd>Enter</kbd> 確定・
+            <kbd>Backspace</kbd> 1文字削除・<kbd>U</kbd> 前の確定ラウンドに戻す
           </p>
-          <button type="button" className="n01-modal-primary" onClick={continuePlaying}>
-            {session.names[stillPlayingIndex]} のプレイを続ける <kbd>Enter</kbd>
-          </button>
-          <button type="button" onClick={() => setConfirmingDnf(true)}>
-            {session.names[stillPlayingIndex]} をDNFとして次の種目へ進む
+          <button type="button" onClick={() => setModal('none')}>
+            戻る
           </button>
         </PentathlonModal>
       )}
 
-      {confirmingDnf && stillPlayingIndex !== null && (
-        <PentathlonModal label="DNFの確認" onClose={() => setConfirmingDnf(false)}>
-          <h2>DNFとして記録します</h2>
-          <p>
-            {session.names[stillPlayingIndex]} は投げ終えていないため、DNF（未完了）として記録され、
-            この種目は負け扱いになります。よろしいですか？
-          </p>
-          <button
-            type="button"
-            className="n01-modal-primary"
-            onClick={() => {
-              setConfirmingDnf(false);
-              onFinishDisciplineNow();
-            }}
-          >
-            {session.names[stillPlayingIndex]} をDNFにして進む
+      {modal === 'rules' && (
+        <PentathlonModal
+          label={`${DISCIPLINE_RULE_TEXT[disciplineId].title}のルール`}
+          onClose={() => setModal('menu')}
+        >
+          <h2>{DISCIPLINE_RULE_TEXT[disciplineId].title} のルール</h2>
+          <p className="pent-rules-body">{DISCIPLINE_RULE_TEXT[disciplineId].body}</p>
+          <button type="button" className="n01-modal-primary" onClick={() => setModal('menu')}>
+            閉じる
           </button>
-          <button type="button" onClick={() => setConfirmingDnf(false)}>
-            キャンセル
+        </PentathlonModal>
+      )}
+
+      {modal === 'stats' && (
+        <PentathlonModal label="この種目の成績" onClose={() => setModal('none')}>
+          <h2>{engine.meta.name} 成績</h2>
+          <div className={`n01-stats-table ${solo ? 'solo' : ''}`}>
+            <div className="n01-stats-head">
+              <strong>{session.names[0]}</strong>
+              <span>STATS</span>
+              {!solo && <strong>{session.names[1]}</strong>}
+            </div>
+            <StatsRow
+              label="残り"
+              solo={solo}
+              values={players.map((i) => String((current.progress[i].state as X01SoloState).remaining))}
+            />
+            <StatsRow
+              label="DARTS"
+              solo={solo}
+              values={players.map((i) => String((current.progress[i].state as X01SoloState).darts))}
+            />
+            <StatsRow
+              label="3DA"
+              solo={solo}
+              values={players.map((i) =>
+                threeDartAverage(current.progress[i].state as X01SoloState).toFixed(2),
+              )}
+            />
+            <StatsRow
+              label="100+"
+              solo={solo}
+              values={players.map((i) =>
+                String(countTons(current.progress[i].state as X01SoloState, 100, 140)),
+              )}
+            />
+            <StatsRow
+              label="140+"
+              solo={solo}
+              values={players.map((i) =>
+                String(countTons(current.progress[i].state as X01SoloState, 140, 180)),
+              )}
+            />
+            <StatsRow
+              label="180"
+              solo={solo}
+              values={players.map((i) =>
+                String(countTons(current.progress[i].state as X01SoloState, 180, Infinity)),
+              )}
+            />
+          </div>
+          <button type="button" className="n01-modal-primary" onClick={() => setModal('none')}>
+            閉じる
           </button>
         </PentathlonModal>
       )}
     </section>
+  );
+}
+
+function StatsRow({ label, values, solo }: { label: string; values: string[]; solo: boolean }) {
+  return (
+    <div className="n01-stats-row">
+      <strong>{values[0]}</strong>
+      <span>{label}</span>
+      {!solo && <strong>{values[1]}</strong>}
+    </div>
+  );
+}
+
+function threeDartAverage(state: X01SoloState): number {
+  return state.darts > 0 ? ((state.startScore - state.remaining) / state.darts) * 3 : 0;
+}
+
+/** Visits scoring at least `min` but under `max` - the 100+ / 140+ / 180 breakdown 通常01 shows. */
+function countTons(state: X01SoloState, min: number, max: number): number {
+  return state.visits.filter((visit) => !visit.bust && visit.score >= min && visit.score < max).length;
+}
+
+interface RowCell {
+  score: number;
+  after: number;
+  bust: boolean;
+}
+
+interface Row {
+  round: number;
+  cells: [RowCell | null, RowCell | null];
+  darts: number;
+  isCurrentRow: boolean;
+}
+
+type Progress = NonNullable<PentathlonSession['current']>['progress'];
+
+/**
+ * A played row shows what the visit left; the active player's upcoming row shows their live
+ * remaining, so the number they are throwing at is always on screen.
+ */
+function toGo(row: Row, player: PlayerIndex, active: PlayerIndex, progress: Progress): string {
+  const cell = row.cells[player];
+  if (cell) return String(cell.after);
+  if (row.isCurrentRow && active === player) {
+    return String((progress[player].state as X01SoloState).remaining);
+  }
+  return '—';
+}
+
+/**
+ * One row per round, with each player's visit either side. Remaining is replayed from the stored
+ * visits rather than stored per visit - a bust records a score of 0, so subtracting the recorded
+ * score reproduces the engine's own `after` for every visit, bust included.
+ */
+function buildRows(progress: Progress, active: PlayerIndex, solo: boolean): Row[] {
+  const perPlayer: [RowCell[], RowCell[]] = [[], []];
+  for (const index of [0, 1] as const) {
+    if (solo && index === 1) break;
+    const state = progress[index].state as X01SoloState;
+    let remaining = state.startScore;
+    for (const visit of state.visits) {
+      remaining -= visit.score;
+      perPlayer[index].push({ score: visit.score, after: remaining, bust: visit.bust });
+    }
+  }
+
+  const rowCount = Math.max(perPlayer[0].length, perPlayer[1].length) + 1;
+  const rows: Row[] = [];
+  for (let i = 0; i < rowCount; i++) {
+    rows.push({
+      round: i + 1,
+      cells: [perPlayer[0][i] ?? null, perPlayer[1][i] ?? null],
+      darts: (i + 1) * 3,
+      isCurrentRow: i === perPlayer[active].length,
+    });
+  }
+  return rows;
+}
+
+function ScoreCell({
+  cell,
+  isCurrent,
+  entry,
+}: {
+  cell: RowCell | null;
+  isCurrent: boolean;
+  entry: string;
+}) {
+  if (cell) {
+    const display = cell.bust ? 'BUST' : String(cell.score);
+    return (
+      <td className="scored">
+        <span className="value">
+          {cell.score >= 100 && !cell.bust ? <span className="ton-score">{display}</span> : display}
+        </span>
+      </td>
+    );
+  }
+  if (isCurrent) {
+    return (
+      <td className="scored current">
+        <input value={entry} readOnly aria-label="得点入力" />
+      </td>
+    );
+  }
+  return (
+    <td className="scored">
+      <span>—</span>
+    </td>
   );
 }

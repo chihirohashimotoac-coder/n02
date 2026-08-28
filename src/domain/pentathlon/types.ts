@@ -59,6 +59,14 @@ export interface DisciplineMeta {
    * else a partial turn would desync the engine's fixed per-round/per-inning bookkeeping.
    */
   allowEarlyCommit?: boolean;
+  /**
+   * Whether the FIRST player to complete the discipline (getResult().completed) wins it outright,
+   * ending it there and then. True for 301/501, which are a race to check out exactly like 通常01・
+   * チェックアウト練習 - the opponent does not get to keep throwing once someone has gone out.
+   * Only a genuine completion ends it: a player who merely runs out of rounds (301's round limit)
+   * finishes without completing, and the other player throws on and can still win.
+   */
+  endsOnFirstCompletion?: boolean;
 }
 
 /**

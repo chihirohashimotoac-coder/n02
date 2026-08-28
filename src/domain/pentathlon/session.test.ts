@@ -9,7 +9,6 @@ import {
   createPentathlonSession,
   currentDisciplineId,
   disciplineCount,
-  finishDisciplineNow,
   isDisciplineComplete,
   isSingleGameSession,
   sessionDisciplines,
@@ -44,18 +43,15 @@ function play501Finish(session: PentathlonSession): PentathlonSession {
 }
 
 /**
- * 2-player: the starter checks out in 9 darts while the opponent lags, then the opponent finishes
- * in 15. Turns interleave, so this also exercises the "finished player is skipped" path.
+ * 2-player: turns interleave until the starter checks out in 9 darts, which wins 501 outright -
+ * the opponent, still on 449, never throws again.
  */
 function play501TwoPlayers(session: PentathlonSession): PentathlonSession {
   let next = applyTurn(session, { score: 180 }); // starter -> 321
   next = applyTurn(next, { score: 26 }); // opponent -> 475
   next = applyTurn(next, { score: 180 }); // starter -> 141
   next = applyTurn(next, { score: 26 }); // opponent -> 449
-  next = applyTurn(next, { score: 141, finishDarts: 3 }); // starter OUT in 9
-  next = applyTurn(next, { score: 180 }); // opponent -> 269
-  next = applyTurn(next, { score: 180 }); // opponent -> 89
-  return applyTurn(next, { score: 89, finishDarts: 3 }); // opponent OUT in 15
+  return applyTurn(next, { score: 141, finishDarts: 3 }); // starter OUT in 9 -> discipline over
 }
 
 /**
@@ -114,51 +110,33 @@ describe('two-player progression', () => {
     expect(session.current!.active).toBe(1);
   });
 
-  it('does NOT end the discipline when one player finishes - the other plays on', () => {
-    let session = newSession({ initialStarter: 0 });
-    // P1 finishes in 9 darts while P2 scores poorly.
-    session = applyTurn(session, { score: 180 }); // P1 -> 321
-    session = applyTurn(session, { score: 26 }); // P2 -> 475
-    session = applyTurn(session, { score: 180 }); // P1 -> 141
-    session = applyTurn(session, { score: 26 }); // P2 -> 449
-    session = applyTurn(session, { score: 141, finishDarts: 3 }); // P1 OUT in 9
-    // P1's own result is now locked in and must not change while P2 plays on.
+  it('ends a NON-race discipline only once both players have their own final result', () => {
+    // RTC-on-doubles is a parallel attempt, not a race: P1 completing the clock must not stop P2.
+    let session = newSession({
+      mode: 'single',
+      disciplines: ['rtc-doubles'],
+      initialStarter: 0,
+    });
+    for (let offset = 0; offset < RTC_SEQUENCE.length; offset += 3) {
+      session = applyTurn(session, RTC_SEQUENCE.slice(offset, offset + 3)); // P1 advances
+      session = applyTurn(session, [MISS, MISS, MISS]); // P2 gets nowhere
+    }
 
     expect(session.current!.progress[0].finished).toBe(true);
-    expect(session.current!.progress[0].result!.label).toBe('9 DARTS');
     expect(isDisciplineComplete(session)).toBe(false);
     expect(session.status).toBe('playing');
     // Play must now stay with P2 for every subsequent turn.
     expect(session.current!.active).toBe(1);
-    session = applyTurn(session, { score: 100 });
+    session = applyTurn(session, [MISS, MISS, MISS]);
     expect(session.current!.active).toBe(1);
-  });
-
-  it('completes the discipline only once BOTH players have final results', () => {
-    const session = play501TwoPlayers(newSession({ initialStarter: 0 }));
-
-    expect(isDisciplineComplete(session)).toBe(true);
-    expect(session.status).toBe('between-disciplines');
-    const record = session.records[0];
-    expect(record.results[0]!.label).toBe('9 DARTS');
-    expect(record.results[1]!.label).toBe('15 DARTS');
-    expect(record.outcome).toBe('p0'); // fewer darts wins 501
   });
 });
 
-describe('finishDisciplineNow (the Pentathlon X01 "proceed without waiting" choice)', () => {
-  it('ends the discipline immediately, recording the still-playing opponent as DNF at their current progress', () => {
-    let session = newSession({ initialStarter: 0 });
-    // P1 finishes in 9 darts; P2 has only thrown two visits so far (301 remaining, not checked out).
-    session = applyTurn(session, { score: 180 }); // P1 -> 321
-    session = applyTurn(session, { score: 100 }); // P2 -> 401
-    session = applyTurn(session, { score: 180 }); // P1 -> 141
-    session = applyTurn(session, { score: 100 }); // P2 -> 301
-    session = applyTurn(session, { score: 141, finishDarts: 3 }); // P1 OUT in 9
-    expect(isDisciplineComplete(session)).toBe(false);
+describe('X01 as a race (first checkout wins)', () => {
+  it('ends 501 the moment a player checks out, with the opponent recorded where they stood', () => {
+    const session = play501TwoPlayers(newSession({ initialStarter: 0 }));
 
-    session = finishDisciplineNow(session);
-
+    expect(isDisciplineComplete(session)).toBe(true);
     expect(session.status).toBe('between-disciplines');
     const record = session.records[0];
     expect(record.results[0]!.label).toBe('9 DARTS');
@@ -167,26 +145,30 @@ describe('finishDisciplineNow (the Pentathlon X01 "proceed without waiting" choi
     expect(record.outcome).toBe('p0');
   });
 
-  it('is undoable, restoring the discipline to playing with the opponent still unfinished', () => {
-    let session = newSession({ initialStarter: 0 });
-    session = applyTurn(session, { score: 180 });
-    session = applyTurn(session, { score: 100 });
-    session = applyTurn(session, { score: 180 });
-    session = applyTurn(session, { score: 100 });
-    session = applyTurn(session, { score: 141, finishDarts: 3 });
-    session = finishDisciplineNow(session);
+  it('is undoable, putting the checked-out player back on the oche', () => {
+    let session = play501TwoPlayers(newSession({ initialStarter: 0 }));
     expect(session.status).toBe('between-disciplines');
 
     session = undoRound(session);
     expect(session.status).toBe('playing');
     expect(session.records).toHaveLength(0);
-    expect(session.current?.progress[1].finished).toBe(false);
+    expect(session.current!.progress[0].finished).toBe(false);
+    expect(session.current!.active).toBe(0);
   });
 
-  it('is a no-op once the discipline has already finished normally', () => {
-    const session = play501Finish(newSession({ playerCount: 1 }));
+  it('does NOT end on 301’s round limit - the opponent can still go out and win', () => {
+    // P1 burns all 13 rounds without checking out: finished, but not completed.
+    let session = newSession({ mode: 'single', disciplines: ['x01-301'], initialStarter: 0 });
+    for (let round = 0; round < 13; round++) {
+      session = applyTurn(session, { score: 0 }); // P1 scores nothing
+      session = applyTurn(session, { score: 0 }); // P2 keeps pace, also nothing
+    }
+
+    expect(session.current!.progress[0].finished).toBe(true);
+    expect(session.current!.progress[0].result!.completed).toBe(false);
+    expect(session.current!.progress[1].finished).toBe(true);
     expect(session.status).toBe('between-disciplines');
-    expect(finishDisciplineNow(session)).toBe(session);
+    expect(session.records[0].outcome).toBe('draw'); // neither checked out
   });
 });
 

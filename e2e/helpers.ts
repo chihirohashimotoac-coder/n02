@@ -28,23 +28,27 @@ export async function enterPentScore(page: Page, score: number | string) {
 }
 
 /**
- * Stages dart hits on the Pentathlon dart pad and commits the turn.
- * Hit notation: 'S20' | 'D16' | 'T19' | 'BULL' | '25' | 'MISS'.
+ * Enters a Cricket turn on the board (which is itself the keypad) and confirms it. Darts that
+ * scored nothing are simply not entered, so `hits` may be empty for a turn where nothing landed.
+ * Hit notation: 'S20' | 'D16' | 'T19' | 'BULL' (inner) | '25' (outer bull).
  */
 export async function enterPentHits(page: Page, hits: string[]) {
   for (const hit of hits) {
-    if (hit === 'MISS') {
-      await page.locator('.pent-number-grid button.wide', { hasText: 'MISS' }).click();
-    } else if (hit === 'BULL') {
-      await page.locator('.pent-ring-row button', { hasText: /^BULL$/ }).click();
-    } else if (hit === '25') {
-      await page.locator('.pent-ring-row button', { hasText: /^25$/ }).click();
-    } else {
-      await page.locator('.pent-ring-row button', { hasText: new RegExp(`^${hit[0]}$`) }).click();
-      await page.locator('.pent-number-grid button', { hasText: new RegExp(`^${hit.slice(1)}$`) }).first().click();
+    // A dart that scored nothing is simply not entered on this board.
+    if (hit === 'MISS') continue;
+    if (hit === 'BULL') await tapCricket(page, 'ダブルブル');
+    else if (hit === '25') await tapCricket(page, 'アウターブル');
+    else {
+      const ring = hit[0] === 'T' ? 'トリプル' : hit[0] === 'D' ? 'ダブル' : 'シングル';
+      await tapCricket(page, `${ring}${hit.slice(1)}`);
     }
   }
-  await page.locator('button', { hasText: 'この投球を確定' }).click();
+  await page.getByRole('button', { name: '確定' }).click();
+}
+
+/** Taps one button of the Cricket board by its accessible name, e.g. 'トリプル20' / 'ダブルブル'. */
+export async function tapCricket(page: Page, name: string) {
+  await page.getByRole('button', { name, exact: true }).click();
 }
 
 /**
@@ -99,20 +103,18 @@ export async function openSingleGame(page: Page, label: string) {
 }
 
 /**
- * On the Pentathlon X01 checkout hand-off choice (one player finished, the other hasn't): the
- * primary action - let the still-playing player carry on throwing.
+ * Opens the in-game ☰ menu, which is where every Pentathlon play screen keeps the controls that
+ * aren't needed to throw a dart (round undo, rules, quit) so the screen itself fits one viewport.
  */
-export async function continueOpponentPlay(page: Page) {
-  await page.getByRole('button', { name: /のプレイを続ける/ }).click();
+export async function openPentGameMenu(page: Page) {
+  await page.getByRole('button', { name: 'メニュー' }).click();
+  await page.waitForSelector('.pent-modal-card');
 }
 
-/**
- * On the Pentathlon X01 checkout hand-off choice: end the discipline now, marking the still-playing
- * opponent DNF. Goes through the explicit confirmation dialog, as the UI requires.
- */
-export async function proceedWithDnf(page: Page) {
-  await page.getByRole('button', { name: /をDNFとして次の種目へ進む/ }).click();
-  await page.getByRole('button', { name: /をDNFにして進む/ }).click();
+/** Opens the in-game rule explanation, which lives one level inside the ☰ menu. */
+export async function openPentRules(page: Page) {
+  await openPentGameMenu(page);
+  await page.getByRole('button', { name: 'ルール説明' }).click();
 }
 
 /** Taps one of Baseball's four per-dart outcome buttons ('シングル' | 'ダブル' | 'トリプル' | 'ミス'). */

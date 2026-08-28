@@ -103,7 +103,10 @@ export const cricketEngine: DisciplineEngine<CricketState, DartHit[]> = {
     const self: CricketPlayerView = {
       marks,
       points,
-      darts: state.self.darts + hits.length,
+      // A Cricket turn is always three darts. The input only records the darts that landed in a
+      // scoring area (a miss is simply not entered, as on n01's board), so `hits` undercounts the
+      // turn - the round itself is what costs three darts.
+      darts: state.self.darts + 3,
       round: state.self.round + 1,
     };
 

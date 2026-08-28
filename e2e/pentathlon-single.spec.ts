@@ -5,7 +5,9 @@ import {
   enterPentScore,
   openFreshApp,
   openPentathlon,
+  openPentGameMenu,
   openSingleGame,
+  tapCricket,
   tapBaseballOutcome,
   tapQuickTarget,
 } from './helpers';
@@ -24,9 +26,15 @@ const CATALOGUE: Array<{ label: string; screen: string }> = [
   { label: 'CRICKET', screen: '.pent-cricket-board' },
 ];
 
+/** The live entry cell of the X01 score sheet - where a score being typed appears. */
+function liveCell(page: Page) {
+  return page.locator('.n01-score-table td.scored.current input');
+}
+
 async function startSingleGame(page: Page, label: string, playerCount: 1 | 2 = 1) {
   await openSingleGame(page, label);
-  if (playerCount === 2) await page.locator('select').first().selectOption('2');
+  // Always explicit: the menu's own default is 2 players, so a 1-player test must say so.
+  await page.locator('select').first().selectOption(String(playerCount));
   await page.getByRole('button', { name: /を開始/ }).click();
 }
 
@@ -40,6 +48,14 @@ test.describe('ペンタスロン個別練習', () => {
     for (const { label } of CATALOGUE) {
       await expect(page.locator('.pent-single-card', { hasText: new RegExp(`^${label}`) })).toHaveCount(1);
     }
+  });
+
+  test('defaults to 2 players', async ({ page }) => {
+    await openFreshApp(page);
+    await openSingleGame(page, 'JDA 501');
+    await expect(page.locator('select').first()).toHaveValue('2');
+    // Both player-name fields are offered up front, without changing anything.
+    await expect(page.locator('.name-input input')).toHaveCount(2);
   });
 
   test('starts every one of the ten disciplines on its own', async ({ page }) => {
@@ -120,7 +136,7 @@ test.describe('ペンタスロン個別練習', () => {
     await page.goto('/');
     await page.locator('.mode-card[data-mode="pentathlon"]').click();
     await page.getByRole('button', { name: /中断したペンタスロンを再開/ }).click();
-    await expect(page.locator('.pent-progress')).toContainText('501');
+    await expect(page.locator('.n01-leg-center')).toContainText('501');
     const records = await page.evaluate(() => {
       const raw = localStorage.getItem('n02-pentathlon-v1');
       return raw ? (JSON.parse(raw).records as unknown[]).length : -1;
@@ -230,9 +246,10 @@ test.describe('Undo の役割分離', () => {
     await tapBaseballOutcome(page, 'シングル');
     await expect(page.locator('.pent-pending-chip').nth(1)).toHaveText('S2');
 
-    // With darts staged, the round undo is disabled - the staged turn must be cleared first.
-    const roundUndo = page.getByRole('button', { name: '前の確定ラウンドに戻す' });
-    await expect(roundUndo).toBeDisabled();
+    // With darts staged, the round undo (in the ☰ menu) is disabled - clear the staged turn first.
+    await openPentGameMenu(page);
+    await expect(page.getByRole('button', { name: '前の確定ラウンドに戻す' })).toBeDisabled();
+    await page.keyboard.press('Escape');
 
     // 1投戻す removes only the last staged dart; the committed inning is untouched.
     await page.getByRole('button', { name: '1投戻す' }).click();
@@ -241,10 +258,10 @@ test.describe('Undo の役割分離', () => {
     await expect(page.locator('.pent-aim-phase')).toContainText('第2イニング');
 
     await page.getByRole('button', { name: '1投戻す' }).click();
-    await expect(roundUndo).toBeEnabled();
 
     // Now the round undo takes back the committed inning itself.
-    await roundUndo.click();
+    await openPentGameMenu(page);
+    await page.getByRole('button', { name: '前の確定ラウンドに戻す' }).click();
     await expect(page.locator('.pent-player-value')).toHaveText('0');
     await expect(page.locator('.pent-aim-phase')).toContainText('第1イニング');
   });
@@ -309,13 +326,17 @@ test.describe('ペンタスロン用ルールモーダルのアクセシビリ�
     }
   });
 
-  test('the in-game RULES popup is equally accessible', async ({ page }) => {
+  test('the in-game ☰ menu is equally accessible', async ({ page }) => {
     await openFreshApp(page);
     await startSingleGame(page, 'CORK');
 
-    const trigger = page.getByRole('button', { name: 'ルール説明' });
+    const trigger = page.getByRole('button', { name: 'メニュー' });
     await trigger.click();
+    await page.getByRole('button', { name: 'ルール説明' }).click();
     await expect(page.getByRole('dialog')).toContainText('CORK');
+    // Rules are a second view of the same dialog, so Escape steps back to the menu, then out.
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toContainText('メニュー');
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(trigger).toBeFocused();
@@ -327,21 +348,25 @@ test.describe('ペンタスロン用ルールモーダルのアクセシビリ�
 });
 
 test.describe('モーダルは背後のゲームへキー入力を漏らさない', () => {
-  test('Enter on an open RULES dialog does not also commit the score behind it', async ({ page }) => {
+  test('Enter on an open dialog does not also commit the score behind it', async ({ page }) => {
     await openFreshApp(page);
     await startSingleGame(page, 'JDA 501');
 
-    // Type a score but do not confirm it, then open the rules popup.
+    // Type a score but do not confirm it, then open the in-game menu.
     await page.keyboard.type('180');
-    await expect(page.locator('.pent-entry-popover strong')).toHaveText('180');
-    await page.getByRole('button', { name: 'RULES' }).click();
+    await expect(liveCell(page)).toHaveValue('180');
+    await page.getByRole('button', { name: 'メニュー' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
 
-    // Enter activates the dialog's own focused button and nothing else.
+    // Enter activates the dialog's own focused button (here: opening the rules view) and nothing
+    // else - it must never also commit the score sitting behind the dialog.
     await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog')).toContainText('のルール');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('501');
-    await expect(page.locator('.pent-entry-popover strong')).toHaveText('180');
+    await expect(liveCell(page)).toHaveValue('180');
   });
 
   test('digits, Backspace and U on an open dialog do not edit or undo hidden gameplay', async ({
@@ -352,7 +377,7 @@ test.describe('モーダルは背後のゲームへキー入力を漏らさな�
 
     await enterPentScore(page, 100); // 501 -> 401, one committed round
     await page.keyboard.type('55');
-    await page.getByRole('button', { name: 'RULES' }).click();
+    await page.getByRole('button', { name: 'メニュー' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
 
     await page.keyboard.type('77');
@@ -363,7 +388,7 @@ test.describe('モーダルは背後のゲームへキー入力を漏らさな�
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     // The entry is exactly as it was left, and the committed round was not undone.
-    await expect(page.locator('.pent-entry-popover strong')).toHaveText('55');
+    await expect(liveCell(page)).toHaveValue('55');
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('401');
   });
 
@@ -413,5 +438,166 @@ test.describe('個別練習の中断と再開', () => {
 
     await expect(page.locator('.pent-single-card').first()).toBeVisible();
     await expect(page.getByRole('button', { name: /中断した個別練習を再開/ })).toHaveCount(0);
+  });
+});
+
+test.describe('PCキーボード操作（ダーツ入力系の種目）', () => {
+  test('a quick-target pad binds its buttons to the number keys in display order', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CORK');
+
+    // CORK's pad is アウターブル / インナーブル / ミス, so 1/2/3 stage exactly those.
+    await page.keyboard.press('1');
+    await page.keyboard.press('2');
+    await page.keyboard.press('3');
+    const chips = page.locator('.pent-pending-chip');
+    await expect(chips.nth(0)).toHaveText('OUTER BULL');
+    await expect(chips.nth(1)).toHaveText('BULL');
+    await expect(chips.nth(2)).toHaveText('MISS');
+
+    // Backspace takes the last dart back, Enter commits the turn.
+    await page.keyboard.press('Backspace');
+    await expect(chips.nth(2)).toContainText('3投目');
+    await page.keyboard.press('3');
+    await page.keyboard.press('Enter');
+    // 1 inner (2) + 1 outer (1) = 3 bulls counted.
+    await expect(page.locator('.pent-player-value').first()).toHaveText('3');
+  });
+
+  test('CRICKET takes darts notation, with the digits shown as they are typed', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET');
+
+    // "2" alone can only ever become 20 on a Cricket board, so the ring key resolves it.
+    await page.keyboard.press('2');
+    await expect(page.locator('.pent-play-title h2')).toContainText('入力中 2');
+    await page.keyboard.press('t');
+    // A triple is 3 marks, so the number closes immediately - shown as the closed mark, in red.
+    const mark = page.locator('.pent-cricket-mark.staged').first();
+    await expect(mark).toContainText('3');
+    await expect(mark.locator('.pent-cricket-sym.closed')).toBeVisible();
+
+    // B is the inner bull (2 marks), O the outer (1 mark).
+    await page.keyboard.press('b');
+    await page.keyboard.press('o');
+    await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(2);
+
+    // Enter confirms the turn: 20 and BULL are both closed, and nothing is provisional any more.
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(0);
+    await expect(page.locator('.pent-cricket-sym.closed')).toHaveCount(2);
+  });
+
+  test('a mark entered this turn can be corrected or deleted by tapping it', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET');
+
+    await tapCricket(page, 'トリプル20');
+    const mark = page.locator('.pent-cricket-mark.staged').first();
+    await expect(mark).toContainText('3');
+
+    // Tapping it offers ／ ✕ ⊗ and delete; picking ／ leaves a single mark.
+    await mark.click();
+    await page.getByRole('button', { name: '1マークにする' }).click();
+    await expect(page.locator('.pent-cricket-mark.staged').first()).toContainText('1');
+
+    // Deleting removes it from the turn entirely.
+    await page.locator('.pent-cricket-mark.staged').first().click();
+    await page.getByRole('button', { name: 'この入力を削除' }).click();
+    await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(0);
+  });
+
+  test('only the current, unconfirmed turn is editable - never a committed or opponent mark', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET', 2);
+
+    // P1 stages a mark: their own unconfirmed mark is the one thing that can be tapped to correct.
+    await tapCricket(page, 'トリプル20');
+    await expect(page.locator('.pent-cricket-mark.editable')).toHaveCount(1);
+
+    // Once confirmed it is history: nothing on the board can be tapped to correct any more.
+    await page.getByRole('button', { name: '確定' }).click();
+    await expect(page.locator('.pent-cricket-mark.editable')).toHaveCount(0);
+    await expect(page.locator('.pent-cricket-sym.closed')).toHaveCount(1);
+
+    // P2 stages their own mark: still exactly one editable cell, and P1's committed 20 is not it.
+    await tapCricket(page, 'トリプル19');
+    await expect(page.locator('.pent-cricket-mark.editable')).toHaveCount(1);
+    const row20 = page
+      .locator('.pent-cricket-row')
+      .filter({ has: page.getByRole('button', { name: 'シングル20', exact: true }) });
+    await expect(row20.locator('.pent-cricket-mark.editable')).toHaveCount(0);
+  });
+
+  test('a BULL correction that would not fit in the turn is offered as disabled, not truncated', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET', 2);
+
+    // Fill the turn: two darts elsewhere, the third an outer bull (1 mark on BULL).
+    await tapCricket(page, 'シングル20');
+    await tapCricket(page, 'シングル19');
+    await tapCricket(page, 'アウターブル');
+    await expect(page.locator('.pent-cricket-status')).toContainText('3 / 3');
+
+    // 3 marks on BULL needs an inner AND an outer (there is no triple bull), and this turn has no
+    // spare dart for the second one - so that choice must be refused outright, never half-applied.
+    const bullRow = page
+      .locator('.pent-cricket-row')
+      .filter({ has: page.getByRole('button', { name: 'アウターブル', exact: true }) });
+    await bullRow.locator('.pent-cricket-mark.editable').click();
+    await expect(page.getByRole('button', { name: '3マークにする' })).toBeDisabled();
+    await expect(page.getByRole('dialog')).toContainText('残りの投数が足りません');
+
+    // The choices that do fit still work: 2 marks replaces the outer bull with an inner.
+    await page.getByRole('button', { name: '2マークにする' }).click();
+    await expect(bullRow.locator('.pent-cricket-mark.staged')).toContainText('2');
+    await expect(page.locator('.pent-cricket-status')).toContainText('3 / 3');
+  });
+
+  test('the same BULL correction is allowed once the turn has room for it', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET', 2);
+
+    // Only one dart used, so inner + outer both fit.
+    await tapCricket(page, 'アウターブル');
+    const bullRow = page
+      .locator('.pent-cricket-row')
+      .filter({ has: page.getByRole('button', { name: 'アウターブル', exact: true }) });
+    await bullRow.locator('.pent-cricket-mark.editable').click();
+    await page.getByRole('button', { name: '3マークにする' }).click();
+
+    await expect(bullRow.locator('.pent-cricket-mark.staged')).toContainText('3');
+    await expect(bullRow.locator('.pent-cricket-sym.closed')).toBeVisible();
+    // Two darts of the three are now spoken for.
+    await expect(page.locator('.pent-cricket-status')).toContainText('2 / 3');
+  });
+
+  test('a turn where nothing landed is 確定 alone', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET', 1);
+
+    await expect(page.locator('.pent-cricket-status')).toContainText('0 / 3');
+    await page.getByRole('button', { name: '確定' }).click();
+    // The round advanced with nothing marked at all.
+    await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(0);
+    await expect(page.locator('.pent-cricket-sym')).toHaveCount(0);
+  });
+
+  test('lists the shortcuts for the pad the screen is actually showing', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CORK');
+    await openPentGameMenu(page);
+    await expect(page.getByRole('dialog')).toContainText('各ボタン');
+    await page.keyboard.press('Escape');
+
+    await page.goto('/');
+    await startSingleGame(page, 'CRICKET');
+    await openPentGameMenu(page);
+    await expect(page.getByRole('dialog')).toContainText('T20');
+    await expect(page.getByRole('dialog')).toContainText('確定');
   });
 });
