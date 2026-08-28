@@ -49,33 +49,31 @@ export default function PentathlonPlayMenu({
   }
 
   return (
-    <PentathlonModal label="ゲームメニュー" onClose={onClose}>
+    <PentathlonModal label="ゲームメニュー" onClose={onClose} variant="menu-list">
       <h2>メニュー</h2>
-      <div className="menu-list">
-        <button
-          type="button"
-          disabled={!canUndoRound}
-          title={canUndo && !canUndoRound ? '先に「1投戻す」で入力中の投球を取り消してください' : undefined}
-          onClick={() => {
-            onUndoRound();
-            onClose();
-          }}
-        >
-          前の確定ラウンドに戻す
-        </button>
-        <button type="button" onClick={() => setView('rules')}>
-          ルール説明
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onClose();
-            onExit();
-          }}
-        >
-          中断してメニューへ
-        </button>
-      </div>
+      <button
+        type="button"
+        disabled={!canUndoRound}
+        title={canUndo && !canUndoRound ? '先に「1投戻す」で入力中の投球を取り消してください' : undefined}
+        onClick={() => {
+          onUndoRound();
+          onClose();
+        }}
+      >
+        前の確定ラウンドに戻す
+      </button>
+      <button type="button" onClick={() => setView('rules')}>
+        ルール説明
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          onClose();
+          onExit();
+        }}
+      >
+        中断してメニューへ
+      </button>
       <p>
         キーボード：
         {padKind === 'quick' && (

@@ -1,4 +1,5 @@
-import { resolveVisit } from '../../x01Core';
+import { isReachableScore, MAX_VISIT_SCORE } from '../../darts';
+import { InvalidVisitError, resolveVisit } from '../../x01Core';
 import type { CompareOutcome, DisciplineEngine, DisciplineId, DisciplineResult } from '../types';
 
 export interface X01SoloState {
@@ -8,7 +9,20 @@ export interface X01SoloState {
   round: number;
   finished: boolean;
   checkedOut: boolean;
-  visits: Array<{ score: number; darts: number; bust: boolean; checkout: boolean }>;
+  visits: Array<{
+    score: number;
+    darts: number;
+    bust: boolean;
+    checkout: boolean;
+    /**
+     * What the player actually typed, which is what a replay has to work from. `score` is the
+     * scoring value (0 on a bust), so it alone cannot tell a genuine 0 from a bust - and after an
+     * edit, a visit that used to bust may well fit the corrected remaining. Optional because
+     * sessions saved before edit-a-past-score existed have no such field; those fall back to
+     * `score`, which is exact for every visit that did not bust.
+     */
+    entered?: number;
+  }>;
 }
 
 export interface X01SoloInput {
@@ -79,8 +93,73 @@ export function createX01SoloEngine(
             darts: resolution.darts,
             bust: resolution.bust,
             checkout: resolution.checkout,
+            entered: input.score,
           },
         ],
+      };
+      return next.finished ? next : finalizeIfRoundLimitReached(next, roundLimit);
+    },
+
+    /**
+     * Corrects an already-entered visit and replays the attempt from the start score - the same
+     * "修正して再計算" 通常01・チェックアウト練習 offer on their own score sheet, and deliberately the
+     * same arithmetic: a visit that no longer fits the corrected remaining becomes a bust, and a
+     * visit that lands exactly on zero checks out. Anything recorded after a checkout is dropped,
+     * because those darts could never have been thrown.
+     */
+    editVisit(state, visitIndex, newScore, newDarts) {
+      if (visitIndex < 0 || visitIndex >= state.visits.length) return state;
+      if (
+        !Number.isInteger(newScore) ||
+        newScore < 0 ||
+        newScore > MAX_VISIT_SCORE ||
+        !isReachableScore(newScore)
+      ) {
+        throw new InvalidVisitError(
+          `修正する得点は0～${MAX_VISIT_SCORE}の、3投で実際に出せる数字で入力してください。`,
+        );
+      }
+      if (!Number.isInteger(newDarts) || newDarts < 1 || newDarts > 3) {
+        throw new InvalidVisitError('使用ダーツは1～3本で指定してください。');
+      }
+
+      const entries = state.visits.map((visit, index) =>
+        index === visitIndex
+          ? { entered: newScore, darts: newDarts }
+          : { entered: visit.entered ?? visit.score, darts: visit.darts },
+      );
+
+      let remaining = state.startScore;
+      let darts = 0;
+      let checkedOut = false;
+      const visits: X01SoloState['visits'] = [];
+      for (const entry of entries) {
+        const bust = entry.entered > remaining;
+        const after = bust ? remaining : remaining - entry.entered;
+        const checkout = !bust && after === 0;
+        visits.push({
+          score: bust ? 0 : entry.entered,
+          darts: entry.darts,
+          bust,
+          checkout,
+          entered: entry.entered,
+        });
+        remaining = after;
+        darts += entry.darts;
+        if (checkout) {
+          checkedOut = true;
+          break;
+        }
+      }
+
+      const next: X01SoloState = {
+        ...state,
+        remaining,
+        darts,
+        round: visits.length + 1,
+        finished: checkedOut,
+        checkedOut,
+        visits,
       };
       return next.finished ? next : finalizeIfRoundLimitReached(next, roundLimit);
     },

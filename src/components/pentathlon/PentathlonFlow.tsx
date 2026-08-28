@@ -15,6 +15,7 @@ import {
   canUndo as canUndoSession,
   createPentathlonSession,
   currentDisciplineId,
+  editVisitScore,
   setPendingHits,
   stageHit,
   undoRound as undoRoundSession,
@@ -33,7 +34,7 @@ import {
 } from '../../storage/pentathlonStorage';
 import { InvalidVisitError } from '../../domain/x01Core';
 import type { DartHit } from '../../domain/darts';
-import type { PentathlonSession } from '../../domain/pentathlon/types';
+import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
 import type { ThemeName } from '../../storage/matchStorage';
 
 /** The menu label of the discipline a saved 個別練習 session was playing. */
@@ -123,6 +124,17 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
     setError(null);
   }, [session, update]);
 
+  // Deliberately not swallowing InvalidVisitError here: the edit dialog catches it and reports the
+  // reason next to the field being corrected, rather than behind the still-open dialog.
+  const handleEditVisit = useCallback(
+    (player: PlayerIndex, visitIndex: number, score: number, darts: number) => {
+      if (!session) return;
+      update(editVisitScore(session, player, visitIndex, score, darts));
+      setError(null);
+    },
+    [session, update],
+  );
+
   const handleUndoRound = useCallback(() => {
     if (!session) return;
     update(undoRoundSession(session));
@@ -186,6 +198,7 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
           session={session}
           onTurn={handleTurn}
           onUndoRound={handleUndoRound}
+          onEditVisit={handleEditVisit}
           canUndoRound={canUndoRoundSession(session)}
           onExit={handleExitToMenu}
           error={error}

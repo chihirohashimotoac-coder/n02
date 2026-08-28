@@ -193,6 +193,62 @@ export function applyTurn(session: PentathlonSession, input: unknown): Pentathlo
   return { ...partial, current: { progress, active: upcoming, pendingHits: [] } };
 }
 
+/**
+ * Corrects one already-entered visit of the given player and replays the rest of their attempt
+ * (301/501 only - engines without editVisit have no such operation and are left untouched). The
+ * correction goes on the undo stack like any other committed change, and can flip the discipline
+ * either way: a corrected score that now checks out ends a race discipline immediately, and one
+ * that no longer checks out puts the player back on the oche.
+ */
+export function editVisitScore(
+  session: PentathlonSession,
+  player: PlayerIndex,
+  visitIndex: number,
+  newScore: number,
+  newDarts: number,
+): PentathlonSession {
+  const current = session.current;
+  if (!current || session.status !== 'playing') return session;
+  const engine = getEngine(currentDisciplineId(session));
+  if (!engine.editVisit) return session;
+
+  const undo = pushUndo(session);
+  const progress = structuredClone(current.progress) as [PlayerProgress<unknown>, PlayerProgress<unknown>];
+  const nextState = engine.editVisit(progress[player].state as never, visitIndex, newScore, newDarts);
+  const finished = engine.isFinished(nextState as never);
+  progress[player] = {
+    state: nextState,
+    finished,
+    result: finished ? engine.getResult(nextState as never) : null,
+  };
+
+  const partial: PentathlonSession = {
+    ...session,
+    undo,
+    current: { progress, active: current.active, pendingHits: [] },
+  };
+
+  if (engine.meta.endsOnFirstCompletion && progress[player].result?.completed) {
+    const other: PlayerIndex = player === 0 ? 1 : 0;
+    if (session.playerCount === 2 && !progress[other].finished) {
+      progress[other] = {
+        ...progress[other],
+        finished: true,
+        result: engine.getResult(progress[other].state as never),
+      };
+    }
+    return finishDiscipline(partial);
+  }
+
+  // The correction may have finished (or un-finished) whoever was on the oche, so the turn order is
+  // recomputed rather than assumed.
+  const upcoming = progress[current.active].finished
+    ? nextActivePlayer(partial, current.active)
+    : current.active;
+  if (upcoming === null) return finishDiscipline(partial);
+  return { ...partial, current: { progress, active: upcoming, pendingHits: [] } };
+}
+
 /** Records the completed discipline and computes the next starter. */
 function finishDiscipline(session: PentathlonSession): PentathlonSession {
   const current = session.current;

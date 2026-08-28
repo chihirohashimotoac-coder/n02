@@ -925,6 +925,119 @@
   color: #2ee58a;
 }
 
+/* --- WINNER banner ------------------------------------------------------
+   The one thing a player looks for on a result screen, so it is deliberately the loudest element
+   there: a lit plate with a slow sheen sweeping across it, rather than one more bordered row the
+   same weight as the "next starter" note underneath. The plate is built from the theme's own accent
+   (--green, which each theme redefines), so it belongs to whichever palette is in use; only the
+   halo needs a literal fallback for browsers without color-mix(). */
+.pent-winner-banner {
+  --pent-glow-soft: #14855e59;
+  --pent-glow-strong: #1cb37f8a;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--green-dark);
+  border-radius: 14px;
+  padding: 16px 14px;
+  background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
+  box-shadow:
+    0 0 0 1px #ffffff1a inset,
+    0 0 26px var(--pent-glow-soft),
+    0 12px 32px #0000002e;
+  animation: pent-winner-glow 2.8s ease-in-out infinite;
+}
+
+@supports (color: color-mix(in srgb, red 50%, transparent)) {
+  .pent-winner-banner {
+    --pent-glow-soft: color-mix(in srgb, var(--green) 45%, transparent);
+    --pent-glow-strong: color-mix(in srgb, var(--green) 78%, transparent);
+  }
+}
+
+.pent-winner-banner span {
+  color: #ffffffb8;
+  letter-spacing: 0.28em;
+  font-size: 10px;
+}
+
+.pent-winner-banner strong,
+[data-theme='neon'] .pent-winner-banner strong {
+  color: #fff;
+  font-size: 25px;
+  font-weight: 900;
+  line-height: 1.25;
+  text-shadow:
+    0 0 14px #ffffff8a,
+    0 0 34px #ffffff45;
+}
+
+/* The sheen. Purely decorative, above the text so it reads as light passing over the plate. */
+.pent-winner-banner::after {
+  content: '';
+  position: absolute;
+  inset: -80% -35%;
+  background: linear-gradient(
+    105deg,
+    #fff0 42%,
+    #ffffff3d 49%,
+    #ffffff5c 51%,
+    #fff0 58%
+  );
+  transform: translateX(-115%);
+  animation: pent-winner-sheen 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* A draw has no winner to celebrate, so the plate keeps the shape but drops the glow entirely. */
+.pent-winner-banner.draw {
+  background: linear-gradient(135deg, #47514b 0%, #333b36 100%);
+  border-color: #2b322e;
+  box-shadow: 0 8px 22px #00000024;
+  animation: none;
+}
+
+.pent-winner-banner.draw::after {
+  display: none;
+}
+
+.pent-winner-banner.draw strong,
+[data-theme='neon'] .pent-winner-banner.draw strong {
+  text-shadow: none;
+}
+
+@keyframes pent-winner-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px #ffffff1a inset,
+      0 0 22px var(--pent-glow-soft),
+      0 12px 32px #0000002e;
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px #ffffff2e inset,
+      0 0 40px var(--pent-glow-strong),
+      0 12px 32px #0000002e;
+  }
+}
+
+@keyframes pent-winner-sheen {
+  0% {
+    transform: translateX(-115%);
+  }
+  55%,
+  100% {
+    transform: translateX(115%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pent-winner-banner,
+  .pent-winner-banner::after {
+    animation: none;
+  }
+}
+
 .pent-note {
   color: var(--muted);
   font-size: 11px;
@@ -1058,6 +1171,52 @@
   margin-bottom: 14px;
 }
 
+/*
+ * Dialogs opened with variant="menu-list" render 通常01・チェックアウト練習's own menu card verbatim
+ * (.n01-modal-card.menu-list in app.css): full-width rows, each ruled off from the next and set in
+ * the accent colour. Only the two things that stylesheet leaves to :hover are added here, because a
+ * touch screen has no hover and the rows would otherwise look inert.
+ */
+.pent-modal-card.menu-list > button:focus-visible,
+.pent-modal-card.menu-list > button:not(:disabled):active {
+  background: var(--green-soft);
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--green);
+}
+
+.pent-modal-card.menu-list > h2 + button {
+  border-top-width: 2px;
+}
+
+/* The dialog's own name for what is being corrected, above the score field. */
+.pent-edit-target {
+  text-align: center;
+  color: var(--muted);
+  margin: -8px 0 14px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Which round the player on the oche is throwing, pinned beside the ☰ button. */
+.pent-round-chip {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 11px;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-theme='neon'] .pent-round-chip,
+[data-theme='navy'] .pent-round-chip {
+  color: inherit;
+}
+
 /* --- Pentathlon X01 (301/501) ------------------------------------------- */
 
 .pent-x01-result .secondary-button {
@@ -1107,15 +1266,13 @@
   font-size: 56px;
 }
 
-/* Score cells are display-only here (no edit-a-past-score flow), so they are spans rather than
-   01's buttons - but they must read exactly the same on the sheet. */
-.pent-x01-shell .n01-score-table td.scored > span.value {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
+/* Score cells are 01's own tap-to-edit buttons; only the colour needs restating, because the shared
+   rule leaves it to inherit and Pentathlon's shell sets a different one further up the tree. */
+.pent-x01-shell .n01-score-table td.scored > button {
   color: var(--ink);
-  font-size: clamp(38px, 5vw, 74px);
+}
+.pent-x01-shell .n01-score-table td.scored > button:hover {
+  color: var(--green-dark);
 }
 
 /* 1-player: no opponent column in the stats table. */

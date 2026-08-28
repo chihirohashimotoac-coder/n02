@@ -157,6 +157,112 @@ test.describe('ペンタスロン個別練習', () => {
     await expect(page.getByText('種目勝利数')).toHaveCount(0);
     await expect(page.getByText('WINNER')).toHaveCount(0);
   });
+
+  test('a two-player result puts the winner in the highlighted WINNER banner', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501', 2);
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 60);
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 60);
+    await enterPentScore(page, 141);
+    await confirmFinish(page);
+
+    const banner = page.locator('.pent-winner-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).not.toHaveClass(/draw/);
+    await expect(banner).toContainText('WINNER');
+    await expect(banner.locator('strong')).toHaveText('プレイヤー1');
+  });
+});
+
+test.describe('ラウンド数の表示', () => {
+  test('CORK counts its five rounds on the play screen', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CORK');
+
+    const chip = page.locator('.pent-round-chip');
+    await expect(chip).toHaveText('ROUND 1 / 5');
+    for (let dart = 0; dart < 3; dart += 1) await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+    await expect(chip).toHaveText('ROUND 2 / 5');
+  });
+
+  test('Round-the-Clock ON DOUBLES counts its (open-ended) rounds on the play screen', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'Round-the-Clock ON DOUBLES');
+
+    const chip = page.locator('.pent-round-chip');
+    await expect(chip).toHaveText('ROUND 1');
+    for (let dart = 0; dart < 3; dart += 1) await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+    await expect(chip).toHaveText('ROUND 2');
+  });
+
+  test('Round-the-Clock ON DOUBLES ends the moment one player hits the BULL', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'Round-the-Clock ON DOUBLES', 2);
+
+    // P1 walks the whole clock; P2 only ever gets the turns in between and never finishes.
+    for (let target = 1; target <= 21; target += 1) {
+      const hit = page.locator('.pent-quick-btn.hit').first();
+      await hit.click();
+      if (target % 3 === 0) {
+        await commitPentTurn(page);
+        // P2's turn - three misses, except after the turn that wins it outright.
+        if (await page.locator('.pent-quick-btn').first().isVisible()) {
+          for (let dart = 0; dart < 3; dart += 1) await tapQuickTarget(page, 'ミス');
+          await commitPentTurn(page);
+        }
+      }
+    }
+
+    // 21 targets is exactly 7 turns, so P1's last dart is a BULL that ends it there and then.
+    const row = page.locator('.pent-result-table .pent-result-row').nth(1);
+    await expect(row).toContainText('COMPLETE');
+    await expect(row.locator('.pent-result-stat b')).toHaveText('7');
+    await expect(page.locator('.pent-result-table .pent-result-row').nth(2)).toContainText('DNF');
+    await expect(page.locator('.pent-winner-banner strong')).toHaveText('プレイヤー1');
+  });
+});
+
+test.describe('X01の過去スコア修正', () => {
+  test('tapping a committed score opens the editor and recomputes every later remaining', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501');
+    await enterPentScore(page, 100); // 401
+    await enterPentScore(page, 100); // 301
+
+    await page.locator('.n01-score-table td.scored button').first().click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('過去得点を修正');
+    await dialog.locator('input[type="number"]').fill('140');
+    await dialog.getByRole('button', { name: '修正して再計算' }).click();
+
+    await expect(page.locator('.n01-left-table strong')).toHaveText('261');
+    const cells = page.locator('.n01-score-table td.scored button');
+    await expect(cells.nth(0)).toHaveText('140');
+    await expect(cells.nth(1)).toHaveText('100');
+  });
+
+  test('rejects an impossible correction without closing the editor', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501');
+    await enterPentScore(page, 100);
+
+    await page.locator('.n01-score-table td.scored button').first().click();
+    const dialog = page.getByRole('dialog');
+    await dialog.locator('input[type="number"]').fill('179');
+    await dialog.getByRole('button', { name: '修正して再計算' }).click();
+
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.n01-notice.warning')).toContainText('修正する得点');
+    await expect(page.locator('.n01-left-table strong')).toHaveText('401');
+  });
 });
 
 test.describe('BASEBALL の4択入力', () => {

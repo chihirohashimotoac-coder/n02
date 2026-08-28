@@ -27,6 +27,16 @@ export function rtcAdvances(targetIndex: number, hit: DartHit): boolean {
   return hit.kind === 'number' && hit.ring === 'double' && hit.value === targetIndex + 1;
 }
 
+/** Rounds are three darts each, so the round a player is on follows straight from their dart count. */
+export function rtcCurrentRound(darts: number): number {
+  return Math.floor(darts / 3) + 1;
+}
+
+/** Rounds actually thrown - a part-thrown round still counts as started. */
+export function rtcRoundsThrown(darts: number): number {
+  return Math.ceil(darts / 3);
+}
+
 export interface RtcDoublesOptions {
   /** Abandon the attempt after this many darts; 0 = unlimited. */
   dartLimit: number;
@@ -41,9 +51,12 @@ export function createRtcDoublesEngine(
     meta: {
       id: 'rtc-doubles',
       name: 'Round-the-Clock ON DOUBLES',
-      description: 'D1→D20→BULL の順に攻略',
+      description: 'D1→D20→BULL の順に攻略・先にブルへ入れた方の勝ち',
       inputMode: 'dart-hits',
       unit: 'darts',
+      // A race, per the user's rule: the first player to finish the clock by hitting the BULL wins
+      // the discipline there and then, and the opponent stops throwing.
+      endsOnFirstCompletion: true,
     },
 
     createState: (): RtcDoublesState => ({
@@ -76,12 +89,23 @@ export function createRtcDoublesEngine(
 
     getResult(state): DisciplineResult {
       const completed = state.targetIndex >= RTC_TARGET_COUNT;
+      const rounds = rtcRoundsThrown(state.darts);
       return {
         value: completed ? state.darts : Number.POSITIVE_INFINITY,
         unit: 'darts',
         completed,
         darts: state.darts,
-        label: completed ? `${state.darts} DARTS` : `${state.targetIndex} / ${RTC_TARGET_COUNT}`,
+        // compareResults parses the leading number back out of an unfinished label - keep it first.
+        label: completed
+          ? `${state.darts} DARTS・${rounds}R`
+          : `${state.targetIndex} / ${RTC_TARGET_COUNT}`,
+        // How many rounds it took is the figure this discipline is followed by while playing, so
+        // the result table reports it too rather than the dart count alone.
+        stat: {
+          label: 'ROUNDS',
+          primary: String(rounds),
+          secondary: `${state.darts} DARTS`,
+        },
       };
     },
 
@@ -103,6 +127,10 @@ export function createRtcDoublesEngine(
     },
 
     describeTarget: (state) => rtcTargetLabel(state.targetIndex),
+
+    // Open-ended: there is no round limit to count towards, so only the current round is shown.
+    roundLabel: (state) =>
+      `ROUND ${state.finished ? Math.max(1, rtcRoundsThrown(state.darts)) : rtcCurrentRound(state.darts)}`,
 
     dartsRemainingThisTurn: () => 3,
   };

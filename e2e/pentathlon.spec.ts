@@ -346,11 +346,13 @@ test.describe('Pentathlon full session', () => {
     await tapQuickTarget(page, '成功（D20）');
     await tapQuickTarget(page, 'インナーブル');
     await commitPentTurn(page);
-    // Measured in darts: the count belongs to the DARTS column alone, never repeated in SCORE.
+    // RTC reports the round count it was played by, with the dart count underneath it; SCORE stays
+    // empty, because for a discipline measured in darts it would only repeat the same number.
     const rtcRow = page.locator('.pent-result-table .pent-result-row').nth(1);
     await expect(rtcRow).toContainText('COMPLETE');
-    await expect(rtcRow).toContainText('21');
-    await expect(page.locator('.pent-result-table')).not.toContainText('21 DARTS');
+    await expect(page.locator('.pent-result-table .pent-result-row.head')).toContainText('ROUNDS');
+    await expect(rtcRow.locator('.pent-result-stat b')).toHaveText('7');
+    await expect(rtcRow.locator('.pent-result-stat em')).toHaveText('21 DARTS');
     await next();
 
     // 4. Golf: 9 holes, a double each for 1 stroke -> best possible round (9 strokes), stopping

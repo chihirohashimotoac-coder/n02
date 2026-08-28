@@ -13,6 +13,7 @@ import {
   cricketMpr,
 } from './cricket';
 import { createX01SoloEngine } from './x01Solo';
+import { InvalidVisitError } from '../../x01Core';
 
 const S = (value: number): DartHit => ({ kind: 'number', value, ring: 'single' });
 const D = (value: number): DartHit => ({ kind: 'number', value, ring: 'double' });
@@ -538,5 +539,83 @@ describe('X01 solo attempts', () => {
     expect(engine501.compareResults(dnf, nine)).toBe('p1');
     expect(engine501.compareResults(dnf, dnf)).toBe('draw');
     expect(engine501.compareResults(nine, nine)).toBe('draw');
+  });
+
+  describe('editVisit (tap a past score to correct it)', () => {
+    it('recomputes every remaining score after the corrected visit', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 100 }); // 401
+      state = engine501.applyInput(state, { score: 100 }); // 301
+      state = engine501.editVisit!(state, 0, 140, 3);
+      expect(state.visits[0].score).toBe(140);
+      expect(state.remaining).toBe(261);
+      expect(state.darts).toBe(6);
+    });
+
+    it('turns a visit that no longer fits into a bust, leaving remaining untouched', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 0 }); // 501 (a missed double-in, say)
+      state = engine501.applyInput(state, { score: 180 }); // 321
+      state = engine501.applyInput(state, { score: 180 }); // 141
+      expect(state.remaining).toBe(141);
+      // That first 0 was really a 180: everything after it now starts 180 lower, so the last visit
+      // no longer fits and busts instead.
+      state = engine501.editVisit!(state, 0, 180, 3);
+      expect(state.visits[2].bust).toBe(true);
+      expect(state.visits[2].score).toBe(0);
+      expect(state.remaining).toBe(141);
+      expect(state.darts).toBe(9);
+    });
+
+    it('re-busts nothing: a visit that used to bust is replayed from what was actually entered', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 180 }); // 321
+      state = engine501.applyInput(state, { score: 180 }); // 141
+      state = engine501.applyInput(state, { score: 150 }); // bust, recorded as a score of 0
+      expect(state.visits[2].bust).toBe(true);
+      // Correcting the first visit up to 180 was already the case; correct the SECOND down so the
+      // busted 150 now fits.
+      state = engine501.editVisit!(state, 1, 100, 3); // 501 -> 321 -> 221, then 150 fits
+      expect(state.visits[2].bust).toBe(false);
+      expect(state.visits[2].score).toBe(150);
+      expect(state.remaining).toBe(71);
+    });
+
+    it('checks the attempt out when the correction lands exactly on zero, dropping later visits', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 180 }); // 321
+      state = engine501.applyInput(state, { score: 180 }); // 141
+      state = engine501.applyInput(state, { score: 100 }); // 41
+      state = engine501.editVisit!(state, 2, 141, 3);
+      expect(state.checkedOut).toBe(true);
+      expect(engine501.isFinished(state)).toBe(true);
+      expect(state.visits).toHaveLength(3);
+      expect(engine501.getResult(state).label).toBe('9 DARTS');
+    });
+
+    it('un-finishes an attempt whose checkout is corrected away', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 180 });
+      state = engine501.applyInput(state, { score: 180 });
+      state = engine501.applyInput(state, { score: 141, finishDarts: 3 });
+      expect(state.checkedOut).toBe(true);
+      state = engine501.editVisit!(state, 2, 100, 3);
+      expect(state.checkedOut).toBe(false);
+      expect(engine501.isFinished(state)).toBe(false);
+      expect(state.remaining).toBe(41);
+    });
+
+    it('rejects a score that cannot be thrown with three darts', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 100 });
+      expect(() => engine501.editVisit!(state, 0, 179, 3)).toThrow(InvalidVisitError);
+      expect(() => engine501.editVisit!(state, 0, 60, 0)).toThrow(InvalidVisitError);
+      expect(() => engine501.editVisit!(state, 0, -1, 3)).toThrow(InvalidVisitError);
+    });
+
+    it('is a no-op for a visit index that does not exist', () => {
+      const state = engine501.applyInput(engine501.createState(), { score: 100 });
+      expect(engine501.editVisit!(state, 5, 60, 3)).toBe(state);
+    });
   });
 });
