@@ -5,7 +5,13 @@ import { createRtcDoublesEngine, RTC_TARGET_COUNT, rtcAdvances, rtcTargetLabel }
 import { GOLF_HOLES, golfEngine, golfStrokes } from './golf';
 import { CORK_DARTS, corkDartValue, corkEngine } from './cork';
 import { BASEBALL_INNINGS, baseballEngine, baseballRuns } from './baseball';
-import { CRICKET_ROUND_LIMIT, allCricketClosed, cricketEngine, cricketMarks } from './cricket';
+import {
+  CRICKET_ROUND_LIMIT,
+  allCricketClosed,
+  cricketEngine,
+  cricketMarks,
+  cricketMpr,
+} from './cricket';
 import { createX01SoloEngine } from './x01Solo';
 
 const S = (value: number): DartHit => ({ kind: 'number', value, ring: 'single' });
@@ -310,6 +316,80 @@ describe('Cricket (head-to-head, same rules as soft-tip machines)', () => {
     for (let i = 0; i <= CRICKET_ROUND_LIMIT; i++) state = cricketEngine.applyInput(state, [MISS, MISS, MISS]);
     expect(cricketEngine.isFinished(state)).toBe(true);
     expect(cricketEngine.getResult(state).completed).toBe(false);
+  });
+
+  it('counts a turn as three darts however few of them are entered', () => {
+    // Misses are never entered on the board, so the round - not the input - is what costs darts.
+    let state = cricketEngine.applyInput(cricketEngine.createState(), [T(20)]);
+    expect(state.self.darts).toBe(3);
+    state = cricketEngine.applyInput(state, []);
+    expect(state.self.darts).toBe(6);
+  });
+
+  describe('MPR', () => {
+    it('counts opening marks and scoring marks, and ignores marks on a dead number', () => {
+      // Round 1: T20 opens 20 (3 effective). Round 2: T20 again scores 60 (3 effective).
+      let state = cricketEngine.applyInput(cricketEngine.createState(), [T(20)]);
+      state = cricketEngine.applyInput(state, [T(20)]);
+      expect(cricketMpr(state.self, '100')).toBeCloseTo(3, 5);
+
+      // With the opponent also closed on 20, further marks there neither open nor score.
+      const denied = {
+        ...state,
+        opponent: { ...state.opponent, marks: { ...state.opponent.marks, '20': 3 } },
+      };
+      const after = cricketEngine.applyInput(denied, [T(20)]);
+      // 6 effective marks over 3 rounds: the third round's three marks were all dead.
+      expect(cricketMpr(after.self, '100')).toBeCloseTo(2, 5);
+    });
+
+    it('freezes the 80% window at the round either player reaches six closed targets', () => {
+      let state = cricketEngine.createState();
+      // Rounds 1-5 open 20,19,18,17,16 - five targets, so the window is still open.
+      for (const n of [20, 19, 18, 17, 16]) state = cricketEngine.applyInput(state, [T(n)]);
+      expect(state.self.rounds80).toBeNull();
+      expect(cricketMpr(state.self, '80')).toBeCloseTo(3, 5);
+
+      // Round 6 opens the sixth target and shuts the window at 18 marks over 6 rounds.
+      state = cricketEngine.applyInput(state, [T(15)]);
+      expect(state.self.rounds80).toBe(6);
+      expect(cricketMpr(state.self, '80')).toBeCloseTo(3, 5);
+
+      // Round 7 scores nothing, so only the 100% figure moves.
+      state = cricketEngine.applyInput(state, []);
+      expect(cricketMpr(state.self, '80')).toBeCloseTo(3, 5);
+      expect(cricketMpr(state.self, '100')).toBeCloseTo(18 / 7, 5);
+    });
+
+    it("shuts the window on the opponent's sixth close too", () => {
+      const opponentAlmostOut = {
+        ...cricketEngine.createState(),
+        opponent: {
+          ...cricketEngine.createState().opponent,
+          marks: { '20': 3, '19': 3, '18': 3, '17': 3, '16': 3, '15': 3, BULL: 0 },
+        },
+      };
+      const state = cricketEngine.applyInput(opponentAlmostOut, [T(20)]);
+      expect(state.self.rounds80).toBe(1);
+    });
+
+    it('falls back to every round played when the window never shuts', () => {
+      let state = cricketEngine.createState();
+      state = cricketEngine.applyInput(state, [T(20)]);
+      state = cricketEngine.applyInput(state, []);
+      expect(state.self.rounds80).toBeNull();
+      expect(cricketMpr(state.self, '80')).toBeCloseTo(1.5, 5);
+      expect(cricketMpr(state.self, '100')).toBeCloseTo(1.5, 5);
+    });
+
+    it('reports both figures on the result', () => {
+      let state = cricketEngine.createState();
+      for (const n of [20, 19, 18, 17, 16, 15]) state = cricketEngine.applyInput(state, [T(n)]);
+      const stat = cricketEngine.getResult(state).stat!;
+      expect(stat.label).toBe('STATS');
+      expect(stat.primary).toBe('3.00');
+      expect(stat.secondary).toBe('3.00 (100%)');
+    });
   });
 
   it('compareResults: closing all outranks points', () => {

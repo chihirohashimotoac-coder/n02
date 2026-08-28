@@ -30,6 +30,18 @@ export interface DisciplineResult {
   darts: number;
   /** Short human-readable summary, e.g. "24 DARTS", "128 POINTS", "DNF". */
   label: string;
+  /**
+   * Replaces the result table's DARTS column for a discipline whose own measure is not the dart
+   * count (Cricket reports MPR). Omitted everywhere else, which keeps that column reading DARTS.
+   */
+  stat?: {
+    /** Column heading, e.g. "STATS". */
+    label: string;
+    primary: string;
+    /** Small caption under the heading's value, naming what `primary` is. */
+    primaryNote?: string;
+    secondary?: string;
+  };
 }
 
 export type CompareOutcome = 'p0' | 'p1' | 'draw';

@@ -7,6 +7,12 @@ export const CRICKET_NUMBERS = [20, 19, 18, 17, 16, 15] as const;
  * realistically-played game on its own. */
 export const CRICKET_ROUND_LIMIT = 30;
 const MARKS_TO_CLOSE = 3;
+/**
+ * How many of the seven targets either side must have closed for the "80%" stat window to shut.
+ * Six of seven is roughly 80% of the board, which is the point DARTSLIVE freezes cricket stats at
+ * (per the user's specification: whichever player gets there first closes the window for both).
+ */
+const STAT_80_TARGETS = 6;
 
 export type CricketTarget = (typeof CRICKET_NUMBERS)[number] | 'BULL';
 export const CRICKET_TARGETS: readonly CricketTarget[] = [...CRICKET_NUMBERS, 'BULL'];
@@ -17,6 +23,15 @@ export interface CricketPlayerView {
   points: number;
   darts: number;
   round: number;
+  /**
+   * Marks that did something: the ones that opened a number, plus the ones that scored. A mark on a
+   * number this player has already opened AND the opponent has already closed is dead - it neither
+   * opens nor scores - and is the only kind left out. Drives MPR.
+   */
+  effectiveMarks?: number;
+  /** effectiveMarks / rounds frozen at the 80% window, or null while the window is still open. */
+  marks80?: number | null;
+  rounds80?: number | null;
 }
 
 /**
@@ -39,7 +54,29 @@ function emptyView(): CricketPlayerView {
     points: 0,
     darts: 0,
     round: 1,
+    effectiveMarks: 0,
+    marks80: null,
+    rounds80: null,
   };
+}
+
+/** How many of the seven targets this view has closed. */
+export function cricketClosedCount(view: CricketPlayerView): number {
+  return CRICKET_TARGETS.filter((target) => isCricketClosed(view, target)).length;
+}
+
+/**
+ * Marks per round. The 80% window covers the rounds up to and including the one in which either
+ * player reached six closed targets; the 100% figure covers every round the player threw. A player
+ * whose game ended before the window ever shut reports the same rounds for both.
+ */
+export function cricketMpr(view: CricketPlayerView, window: '80' | '100'): number | null {
+  const roundsPlayed = view.round - 1;
+  if (window === '80' && view.rounds80 != null && view.marks80 != null) {
+    return view.rounds80 > 0 ? view.marks80 / view.rounds80 : null;
+  }
+  if (roundsPlayed <= 0) return null;
+  return (view.effectiveMarks ?? 0) / roundsPlayed;
 }
 
 /** Marks contributed by one dart (Single=1, Double=2, Triple=3), or null if it hits nothing relevant. */
@@ -83,6 +120,7 @@ export const cricketEngine: DisciplineEngine<CricketState, DartHit[]> = {
     if (state.finished) return state;
     const marks = { ...state.self.marks };
     let points = state.self.points;
+    let effective = state.self.effectiveMarks ?? 0;
 
     for (const hit of hits) {
       const scored = cricketMarks(hit);
@@ -95,11 +133,14 @@ export const cricketEngine: DisciplineEngine<CricketState, DartHit[]> = {
       marks[key] = current + closingMarks;
       // Territory denial: only pays out while the opponent hasn't also closed this number.
       const opponentMarks = state.opponent.marks[key] ?? 0;
-      if (scoringMarks > 0 && opponentMarks < MARKS_TO_CLOSE) {
-        points += scoringMarks * cricketTargetValue(scored.target);
-      }
+      const paid = scoringMarks > 0 && opponentMarks < MARKS_TO_CLOSE;
+      if (paid) points += scoringMarks * cricketTargetValue(scored.target);
+      // Opening marks always count; surplus marks count only where they actually scored.
+      effective += closingMarks + (paid ? scoringMarks : 0);
     }
 
+    // The round just thrown, before `round` advances to the next one.
+    const roundsPlayed = state.self.round;
     const self: CricketPlayerView = {
       marks,
       points,
@@ -108,7 +149,19 @@ export const cricketEngine: DisciplineEngine<CricketState, DartHit[]> = {
       // turn - the round itself is what costs three darts.
       darts: state.self.darts + 3,
       round: state.self.round + 1,
+      effectiveMarks: effective,
+      marks80: state.self.marks80 ?? null,
+      rounds80: state.self.rounds80 ?? null,
     };
+
+    // Shut the 80% window at the end of the round in which either side reached six closed targets.
+    if (
+      self.rounds80 == null &&
+      (cricketClosedCount(self) >= STAT_80_TARGETS || cricketClosedCount(state.opponent) >= STAT_80_TARGETS)
+    ) {
+      self.marks80 = effective;
+      self.rounds80 = roundsPlayed;
+    }
 
     let finished = false;
     let winner: 'self' | 'opponent' | null = null;
@@ -135,12 +188,22 @@ export const cricketEngine: DisciplineEngine<CricketState, DartHit[]> = {
 
   getResult(state): DisciplineResult {
     const closed = allCricketClosed(state.self);
+    const mpr80 = cricketMpr(state.self, '80');
+    const mpr100 = cricketMpr(state.self, '100');
     return {
       value: state.self.points,
       unit: 'points',
       completed: closed,
       darts: state.self.darts,
       label: closed ? `${state.self.points} POINTS` : `${state.self.points} PTS (未クローズ)`,
+      // Cricket is judged on marks, not darts, so the result table shows MPR in place of the
+      // dart count: the 80% figure headline, the full-game figure underneath.
+      stat: {
+        label: 'STATS',
+        primary: mpr80 === null ? '—' : mpr80.toFixed(2),
+        primaryNote: 'MPR 80%',
+        secondary: mpr100 === null ? '—' : `${mpr100.toFixed(2)} (100%)`,
+      },
     };
   },
 
