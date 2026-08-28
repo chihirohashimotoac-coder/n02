@@ -253,7 +253,7 @@ test.describe('Pentathlon full session', () => {
     await expect(page.locator('.pent-cricket-board')).toBeVisible();
     await enterPentHits(page, ['T20', 'T19', 'T18']);
     await enterPentHits(page, ['T17', 'T16', 'T15']);
-    await expect(page.locator('.pent-cricket-mark.m3')).toHaveCount(6); // 20-15 closed, bull still open
+    await expect(page.locator('.pent-cricket-sym.closed')).toHaveCount(6); // 20-15 closed, bull still open
     // Closing BULL closes all seven targets, which finishes Cricket immediately (solo, 0-0 on
     // points) and hands off straight to the discipline result screen - so no further grid assertion
     // after this commit.

@@ -301,6 +301,19 @@ export function stageHit(session: PentathlonSession, hit: DartHit): PentathlonSe
   };
 }
 
+/**
+ * Replaces the whole staged turn at once, for input UIs that correct a turn in place rather than
+ * only appending to it (Cricket: tapping an already-entered mark to change or clear it). Like
+ * stageHit, this never touches the undo stack - nothing has been committed yet.
+ */
+export function setPendingHits(session: PentathlonSession, hits: DartHit[]): PentathlonSession {
+  const current = session.current;
+  if (!current || session.status !== 'playing') return session;
+  const engine = getEngine(currentDisciplineId(session));
+  const maxDarts = engine.dartsRemainingThisTurn?.(current.progress[current.active].state as never) ?? 3;
+  return { ...session, current: { ...current, pendingHits: hits.slice(0, maxDarts) } };
+}
+
 /** Commits the staged dart hits as the active player's turn. */
 export function commitHits(session: PentathlonSession): PentathlonSession {
   const current = session.current;

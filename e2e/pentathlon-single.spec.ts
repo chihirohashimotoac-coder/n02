@@ -7,6 +7,7 @@ import {
   openPentathlon,
   openPentGameMenu,
   openSingleGame,
+  tapCricket,
   tapBaseballOutcome,
   tapQuickTarget,
 } from './helpers';
@@ -463,42 +464,58 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     await expect(page.locator('.pent-player-value').first()).toHaveText('3');
   });
 
-  test('the full number grid takes darts notation, with the digits shown as they are typed', async ({
-    page,
-  }) => {
+  test('CRICKET takes darts notation, with the digits shown as they are typed', async ({ page }) => {
     await openFreshApp(page);
     await startSingleGame(page, 'CRICKET');
 
-    // "2" alone can only ever become 20 on a Cricket pad, so the ring key resolves it.
+    // "2" alone can only ever become 20 on a Cricket board, so the ring key resolves it.
     await page.keyboard.press('2');
-    await expect(page.locator('.pent-typing')).toContainText('2');
+    await expect(page.locator('.pent-play-title h2')).toContainText('入力中 2');
     await page.keyboard.press('t');
-    await expect(page.locator('.pent-pending-chip').nth(0)).toHaveText('T20');
-    await expect(page.locator('.pent-typing')).toHaveCount(0);
+    // A triple is 3 marks, so the number closes immediately - shown as the closed mark, in red.
+    const mark = page.locator('.pent-cricket-mark.staged').first();
+    await expect(mark).toContainText('3');
+    await expect(mark.locator('.pent-cricket-sym.closed')).toBeVisible();
 
-    // A number that is unambiguous the moment it is complete stages without any terminator.
-    await page.keyboard.press('1');
-    await page.keyboard.press('9');
-    await expect(page.locator('.pent-pending-chip').nth(1)).toHaveText('S19');
-
-    // B is the inner bull, and M is a miss.
+    // B is the inner bull (2 marks), O the outer (1 mark).
     await page.keyboard.press('b');
-    await expect(page.locator('.pent-pending-chip').nth(2)).toHaveText('BULL');
-    await page.keyboard.press('Enter');
+    await page.keyboard.press('o');
+    await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(2);
 
-    await page.keyboard.press('m');
-    await expect(page.locator('.pent-pending-chip').nth(0)).toHaveText('MISS');
+    // Enter confirms the turn: 20 and BULL are both closed, and nothing is provisional any more.
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(0);
+    await expect(page.locator('.pent-cricket-sym.closed')).toHaveCount(2);
   });
 
-  test('S/D/T change the selected ring while no number is part-typed', async ({ page }) => {
+  test('a mark entered this turn can be corrected or deleted by tapping it', async ({ page }) => {
     await openFreshApp(page);
     await startSingleGame(page, 'CRICKET');
 
-    await page.keyboard.press('d');
-    await expect(page.locator('.pent-ring-row button.selected')).toHaveText('D');
-    await page.keyboard.press('1');
-    await page.keyboard.press('5');
-    await expect(page.locator('.pent-pending-chip').nth(0)).toHaveText('D15');
+    await tapCricket(page, 'トリプル20');
+    const mark = page.locator('.pent-cricket-mark.staged').first();
+    await expect(mark).toContainText('3');
+
+    // Tapping it offers ／ ✕ ⊗ and delete; picking ／ leaves a single mark.
+    await mark.click();
+    await page.getByRole('button', { name: '1マークにする' }).click();
+    await expect(page.locator('.pent-cricket-mark.staged').first()).toContainText('1');
+
+    // Deleting removes it from the turn entirely.
+    await page.locator('.pent-cricket-mark.staged').first().click();
+    await page.getByRole('button', { name: 'この入力を削除' }).click();
+    await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(0);
+  });
+
+  test('a turn where nothing landed is 確定 alone', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET', 1);
+
+    await expect(page.locator('.pent-cricket-status')).toContainText('0 / 3');
+    await page.getByRole('button', { name: '確定' }).click();
+    // The round advanced with nothing marked at all.
+    await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(0);
+    await expect(page.locator('.pent-cricket-sym')).toHaveCount(0);
   });
 
   test('lists the shortcuts for the pad the screen is actually showing', async ({ page }) => {
@@ -512,5 +529,6 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     await startSingleGame(page, 'CRICKET');
     await openPentGameMenu(page);
     await expect(page.getByRole('dialog')).toContainText('T20');
+    await expect(page.getByRole('dialog')).toContainText('確定');
   });
 });

@@ -93,8 +93,7 @@ test.describe('no console errors', () => {
     await page.goto('/');
     await openSingleGame(page, 'CRICKET');
     await page.getByRole('button', { name: /を開始/ }).click();
-    await page.locator('.pent-ring-row button', { hasText: /^T$/ }).click();
-    await page.locator('.pent-number-grid button', { hasText: /^20$/ }).first().click();
+    await page.getByRole('button', { name: 'トリプル20', exact: true }).click();
     await page.getByRole('button', { name: '1投戻す' }).click();
 
     await page.goto('/');

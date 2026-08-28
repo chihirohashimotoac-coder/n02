@@ -28,23 +28,27 @@ export async function enterPentScore(page: Page, score: number | string) {
 }
 
 /**
- * Stages dart hits on the Pentathlon dart pad and commits the turn.
- * Hit notation: 'S20' | 'D16' | 'T19' | 'BULL' | '25' | 'MISS'.
+ * Enters a Cricket turn on the board (which is itself the keypad) and confirms it. Darts that
+ * scored nothing are simply not entered, so `hits` may be empty for a turn where nothing landed.
+ * Hit notation: 'S20' | 'D16' | 'T19' | 'BULL' (inner) | '25' (outer bull).
  */
 export async function enterPentHits(page: Page, hits: string[]) {
   for (const hit of hits) {
-    if (hit === 'MISS') {
-      await page.locator('.pent-number-grid button.wide', { hasText: 'MISS' }).click();
-    } else if (hit === 'BULL') {
-      await page.locator('.pent-ring-row button', { hasText: /^BULL$/ }).click();
-    } else if (hit === '25') {
-      await page.locator('.pent-ring-row button', { hasText: /^25$/ }).click();
-    } else {
-      await page.locator('.pent-ring-row button', { hasText: new RegExp(`^${hit[0]}$`) }).click();
-      await page.locator('.pent-number-grid button', { hasText: new RegExp(`^${hit.slice(1)}$`) }).first().click();
+    // A dart that scored nothing is simply not entered on this board.
+    if (hit === 'MISS') continue;
+    if (hit === 'BULL') await tapCricket(page, 'ダブルブル');
+    else if (hit === '25') await tapCricket(page, 'アウターブル');
+    else {
+      const ring = hit[0] === 'T' ? 'トリプル' : hit[0] === 'D' ? 'ダブル' : 'シングル';
+      await tapCricket(page, `${ring}${hit.slice(1)}`);
     }
   }
-  await page.locator('button', { hasText: 'この投球を確定' }).click();
+  await page.getByRole('button', { name: '確定' }).click();
+}
+
+/** Taps one button of the Cricket board by its accessible name, e.g. 'トリプル20' / 'ダブルブル'. */
+export async function tapCricket(page: Page, name: string) {
+  await page.getByRole('button', { name, exact: true }).click();
 }
 
 /**

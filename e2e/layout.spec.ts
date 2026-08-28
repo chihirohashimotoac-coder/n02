@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { commitPentTurn, openFreshApp, openPentathlon, openSingleGame, tapQuickTarget } from './helpers';
+import { openFreshApp, openPentathlon, openSingleGame, tapQuickTarget } from './helpers';
 
 /**
  * Layout guarantees that must hold at every supported viewport size (see playwright.config.ts's
@@ -186,7 +186,9 @@ test.describe('layout: gameplay fits one screen', () => {
       const commit =
         label === 'JDA 501'
           ? page.locator('.n01-key-table button.enter')
-          : page.locator('button', { hasText: 'この投球を確定' });
+          : label === 'CRICKET'
+            ? page.getByRole('button', { name: '確定' })
+            : page.locator('button', { hasText: 'この投球を確定' });
       await expect(commit).toBeInViewport();
       await expect(page.getByRole('button', { name: 'メニュー' })).toBeInViewport();
     });
@@ -198,15 +200,14 @@ test.describe('layout: gameplay fits one screen', () => {
     await page.locator('select').first().selectOption('2');
     await page.getByRole('button', { name: /を開始/ }).click();
 
-    await page.locator('.pent-ring-row button', { hasText: /^T$/ }).click();
-    for (const value of ['20', '19', '18']) {
-      await page.locator('.pent-number-grid button', { hasText: new RegExp(`^${value}$`) }).first().click();
+    for (const name of ['トリプル20', 'トリプル19', 'トリプル18']) {
+      await page.getByRole('button', { name, exact: true }).click();
     }
-    await commitPentTurn(page);
+    await page.getByRole('button', { name: '確定' }).click();
 
     expect(await hasVerticalScroll(page)).toBe(false);
-    expect(await isUnobstructed(page, '.pent-ring-row button')).toBe(true);
-    await expect(page.locator('.pent-keypad')).toBeInViewport();
+    expect(await isUnobstructed(page, '.pent-cricket-key')).toBe(true);
+    await expect(page.getByRole('button', { name: '確定' })).toBeInViewport();
   });
 
   test('Cork still fits with a dart staged', async ({ page }) => {
