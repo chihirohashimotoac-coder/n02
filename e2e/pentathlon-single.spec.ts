@@ -531,6 +531,51 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     await expect(row20.locator('.pent-cricket-mark.editable')).toHaveCount(0);
   });
 
+  test('a BULL correction that would not fit in the turn is offered as disabled, not truncated', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET', 2);
+
+    // Fill the turn: two darts elsewhere, the third an outer bull (1 mark on BULL).
+    await tapCricket(page, 'シングル20');
+    await tapCricket(page, 'シングル19');
+    await tapCricket(page, 'アウターブル');
+    await expect(page.locator('.pent-cricket-status')).toContainText('3 / 3');
+
+    // 3 marks on BULL needs an inner AND an outer (there is no triple bull), and this turn has no
+    // spare dart for the second one - so that choice must be refused outright, never half-applied.
+    const bullRow = page
+      .locator('.pent-cricket-row')
+      .filter({ has: page.getByRole('button', { name: 'アウターブル', exact: true }) });
+    await bullRow.locator('.pent-cricket-mark.editable').click();
+    await expect(page.getByRole('button', { name: '3マークにする' })).toBeDisabled();
+    await expect(page.getByRole('dialog')).toContainText('残りの投数が足りません');
+
+    // The choices that do fit still work: 2 marks replaces the outer bull with an inner.
+    await page.getByRole('button', { name: '2マークにする' }).click();
+    await expect(bullRow.locator('.pent-cricket-mark.staged')).toContainText('2');
+    await expect(page.locator('.pent-cricket-status')).toContainText('3 / 3');
+  });
+
+  test('the same BULL correction is allowed once the turn has room for it', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET', 2);
+
+    // Only one dart used, so inner + outer both fit.
+    await tapCricket(page, 'アウターブル');
+    const bullRow = page
+      .locator('.pent-cricket-row')
+      .filter({ has: page.getByRole('button', { name: 'アウターブル', exact: true }) });
+    await bullRow.locator('.pent-cricket-mark.editable').click();
+    await page.getByRole('button', { name: '3マークにする' }).click();
+
+    await expect(bullRow.locator('.pent-cricket-mark.staged')).toContainText('3');
+    await expect(bullRow.locator('.pent-cricket-sym.closed')).toBeVisible();
+    // Two darts of the three are now spoken for.
+    await expect(page.locator('.pent-cricket-status')).toContainText('2 / 3');
+  });
+
   test('a turn where nothing landed is 確定 alone', async ({ page }) => {
     await openFreshApp(page);
     await startSingleGame(page, 'CRICKET', 1);

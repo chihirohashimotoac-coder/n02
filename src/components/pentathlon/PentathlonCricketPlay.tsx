@@ -279,6 +279,9 @@ export default function PentathlonCricketPlay({
       {editing !== null && (
         <MarkEditor
           target={editing}
+          // Darts this turn still has free once this number's own darts are taken back out. BULL
+          // needs two of them for 3 marks (it has no triple), so that choice can genuinely not fit.
+          slotsFree={3 - pending.filter((hit) => cricketMarks(hit)?.target !== editing).length}
           onClose={() => setEditing(null)}
           onApply={(marks) => {
             onSetPendingHits(withMarksOn(pending, editing, marks));
@@ -302,34 +305,46 @@ export default function PentathlonCricketPlay({
   );
 }
 
-/** The ／ ✕ ⊗ 🗑 popover: sets this turn's marks on one number, or clears them. */
+/**
+ * The ／ ✕ ⊗ 🗑 popover: sets this turn's marks on one number, or clears them. A choice that would
+ * need more darts than the turn has left is offered as disabled rather than silently truncated -
+ * only BULL can hit that, since 3 marks there is an inner plus an outer (there is no triple bull).
+ */
 function MarkEditor({
   target,
+  slotsFree,
   onApply,
   onClose,
 }: {
   target: CricketTarget;
+  slotsFree: number;
   onApply: (marks: 0 | 1 | 2 | 3) => void;
   onClose: () => void;
 }) {
+  const dartsNeeded = (marks: 1 | 2 | 3) => (target === 'BULL' && marks === 3 ? 2 : 1);
+  const fits = (marks: 1 | 2 | 3) => dartsNeeded(marks) <= slotsFree;
+
   return (
     <PentathlonModal label={`${target} の入力を修正`} onClose={onClose}>
       <h2>{target} の入力を修正</h2>
       <div className="pent-mark-choices">
-        <button type="button" aria-label="1マークにする" onClick={() => onApply(1)}>
+        <button type="button" aria-label="1マークにする" disabled={!fits(1)} onClick={() => onApply(1)}>
           ╱
         </button>
-        <button type="button" aria-label="2マークにする" onClick={() => onApply(2)}>
+        <button type="button" aria-label="2マークにする" disabled={!fits(2)} onClick={() => onApply(2)}>
           ✕
         </button>
-        <button type="button" aria-label="3マークにする" onClick={() => onApply(3)}>
+        <button type="button" aria-label="3マークにする" disabled={!fits(3)} onClick={() => onApply(3)}>
           <span className="pent-cricket-sym closed">✕</span>
         </button>
         <button type="button" className="delete" aria-label="この入力を削除" onClick={() => onApply(0)}>
           🗑
         </button>
       </div>
-      <p>この投球で入力した {target} のマークだけを変更します。</p>
+      <p>
+        この投球で入力した {target} のマークだけを変更します。
+        {!fits(3) && 'ブルの3マークはインナー＋アウターの2投が必要なため、残りの投数が足りません。'}
+      </p>
       <button type="button" className="n01-modal-cancel" onClick={onClose}>
         キャンセル
       </button>

@@ -653,8 +653,13 @@
   font-size: 22px;
 }
 
-.pent-mark-choices button:hover {
+.pent-mark-choices button:hover:not(:disabled) {
   background: var(--green-soft);
+}
+
+.pent-mark-choices button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .pent-cricket-actions {
