@@ -27,6 +27,11 @@ export interface CricketPlayerView {
    * Marks that did something: the ones that opened a number, plus the ones that scored. A mark on a
    * number this player has already opened AND the opponent has already closed is dead - it neither
    * opens nor scores - and is the only kind left out. Drives MPR.
+   *
+   * `undefined` means "not tracked": a game saved before MPR existed carries marks and points but
+   * no running total, and `points` alone cannot be decomposed back into which marks scored. Such a
+   * game keeps playing normally and simply reports no MPR, rather than a total that silently omits
+   * every round played before the upgrade.
    */
   effectiveMarks?: number;
   /** effectiveMarks / rounds frozen at the 80% window, or null while the window is still open. */
@@ -71,6 +76,9 @@ export function cricketClosedCount(view: CricketPlayerView): number {
  * whose game ended before the window ever shut reports the same rounds for both.
  */
 export function cricketMpr(view: CricketPlayerView, window: '80' | '100'): number | null {
+  // Resumed from a save that predates MPR: the earlier rounds' marks are unrecoverable, so there is
+  // no honest figure to give.
+  if (view.effectiveMarks === undefined) return null;
   const roundsPlayed = view.round - 1;
   if (window === '80' && view.rounds80 != null && view.marks80 != null) {
     return view.rounds80 > 0 ? view.marks80 / view.rounds80 : null;
@@ -120,6 +128,9 @@ export const cricketEngine: DisciplineEngine<CricketState, DartHit[]> = {
     if (state.finished) return state;
     const marks = { ...state.self.marks };
     let points = state.self.points;
+    // Absent on a pre-MPR save; stays absent so the stat reads as unavailable rather than as a
+    // total that starts counting only from the resume point.
+    const tracksMarks = state.self.effectiveMarks !== undefined;
     let effective = state.self.effectiveMarks ?? 0;
 
     for (const hit of hits) {
@@ -149,13 +160,14 @@ export const cricketEngine: DisciplineEngine<CricketState, DartHit[]> = {
       // turn - the round itself is what costs three darts.
       darts: state.self.darts + 3,
       round: state.self.round + 1,
-      effectiveMarks: effective,
+      effectiveMarks: tracksMarks ? effective : undefined,
       marks80: state.self.marks80 ?? null,
       rounds80: state.self.rounds80 ?? null,
     };
 
     // Shut the 80% window at the end of the round in which either side reached six closed targets.
     if (
+      tracksMarks &&
       self.rounds80 == null &&
       (cricketClosedCount(self) >= STAT_80_TARGETS || cricketClosedCount(state.opponent) >= STAT_80_TARGETS)
     ) {

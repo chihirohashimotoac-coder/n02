@@ -382,6 +382,34 @@ describe('Cricket (head-to-head, same rules as soft-tip machines)', () => {
       expect(cricketMpr(state.self, '100')).toBeCloseTo(1.5, 5);
     });
 
+    it('reports no figure at all for a game resumed from a pre-MPR save', () => {
+      // A version-1 save written before MPR existed carries marks and points but no running total,
+      // and points alone cannot be decomposed back into which marks scored.
+      const fresh = cricketEngine.createState();
+      const legacy = {
+        ...fresh,
+        self: {
+          marks: { ...fresh.self.marks, '20': 3 },
+          points: 60,
+          darts: 6,
+          round: 3,
+        } as typeof fresh.self,
+        opponent: { marks: { ...fresh.opponent.marks }, points: 0, darts: 0, round: 3 } as typeof fresh.opponent,
+      };
+
+      expect(cricketMpr(legacy.self, '100')).toBeNull();
+      expect(cricketEngine.getResult(legacy).stat!.primary).toBe('—');
+
+      // Playing on keeps it unavailable rather than counting from the resume point, and the 80%
+      // window never claims to have closed.
+      let state = cricketEngine.applyInput(legacy, [T(19)]);
+      for (const n of [18, 17, 16, 15]) state = cricketEngine.applyInput(state, [T(n)]);
+      expect(state.self.effectiveMarks).toBeUndefined();
+      expect(state.self.rounds80).toBeNull();
+      expect(cricketMpr(state.self, '80')).toBeNull();
+      expect(cricketEngine.getResult(state).stat!.secondary).toBe('—');
+    });
+
     it('reports both figures on the result', () => {
       let state = cricketEngine.createState();
       for (const n of [20, 19, 18, 17, 16, 15]) state = cricketEngine.applyInput(state, [T(n)]);
