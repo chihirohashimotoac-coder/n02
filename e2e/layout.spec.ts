@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openFreshApp, openPentathlon, openSingleGame } from './helpers';
+import { commitPentTurn, openFreshApp, openPentathlon, openSingleGame, tapQuickTarget } from './helpers';
 
 /**
  * Layout guarantees that must hold at every supported viewport size (see playwright.config.ts's
@@ -8,6 +8,14 @@ import { openFreshApp, openPentathlon, openSingleGame } from './helpers';
  */
 
 const LONG_NAME = 'あいうえおかきくけこさしすせそたちつ'; // exactly the 18-character input limit
+
+/** Does anything on the page require the user to scroll to reach it? */
+async function hasVerticalScroll(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const doc = document.documentElement;
+    return doc.scrollHeight > doc.clientHeight + 1 || document.body.scrollHeight > doc.clientHeight + 1;
+  });
+}
 
 async function hasHorizontalScroll(page: Page): Promise<boolean> {
   return page.evaluate(() => {
@@ -79,6 +87,7 @@ test.describe('layout: no horizontal scrolling', () => {
   test('the discipline result table with 18-character player names', async ({ page }) => {
     await openFreshApp(page);
     await openSingleGame(page, 'JDA 501');
+    await page.locator('select').first().selectOption('1');
     await fillLongNames(page);
     await page.getByRole('button', { name: /を開始/ }).click();
 
@@ -96,23 +105,15 @@ test.describe('layout: no horizontal scrolling', () => {
 });
 
 test.describe('layout: Pentathlon X01 input', () => {
-  test('the entry preview covers neither the remaining scores nor any keypad button', async ({ page }) => {
+  test('the score being typed appears in the sheet, with the keypad clear of it', async ({ page }) => {
     await startSinglePentathlonX01(page);
 
     await page.keyboard.type('45');
-    const preview = page.locator('.pent-entry-popover');
-    await expect(preview).toBeVisible();
-    await expect(preview).toBeInViewport();
+    const cell = page.locator('.n01-score-table td.scored.current input');
+    await expect(cell).toHaveValue('45');
+    await expect(cell).toBeInViewport();
 
-    const previewBox = (await preview.boundingBox())!;
-    const keypadBox = (await page.locator('.n01-key-table').boundingBox())!;
-    const scoresBox = (await page.locator('.n01-left-table').boundingBox())!;
-
-    // Entirely above the footer, so it overlaps neither the scores nor the keys.
-    expect(previewBox.y + previewBox.height).toBeLessThanOrEqual(scoresBox.y + 1);
-    expect(previewBox.y + previewBox.height).toBeLessThanOrEqual(keypadBox.y + 1);
-
-    // Every keypad button stays clickable while the preview is up.
+    // Every keypad button stays clickable while a score is part-entered.
     for (const label of ['1', '0', 'Enter']) {
       const button = page.locator('.n01-key-table button', { hasText: new RegExp(`^${label}$`) }).first();
       await expect(button).toBeInViewport();
@@ -141,63 +142,81 @@ test.describe('layout: Pentathlon X01 input', () => {
 
     const key = (label: string) =>
       page.locator('.n01-key-table button', { hasText: new RegExp(`^${label}$`) }).first();
+    const cell = () => page.locator('.n01-score-table td.scored.current input');
 
     await key('1').click();
     await key('8').click();
     await key('0').click();
-    await expect(page.locator('.pent-entry-popover strong')).toHaveText('180');
+    await expect(cell()).toHaveValue('180');
 
     // Correcting the entry, then confirming it - all without touching the keyboard.
     await page.locator('.n01-key-table button[aria-label="1文字削除"]').click();
-    await expect(page.locator('.pent-entry-popover strong')).toHaveText('18');
+    await expect(cell()).toHaveValue('18');
     await key('0').click();
     await page.locator('.n01-key-table button.enter').click();
 
-    await expect(page.locator('.pent-entry-popover')).toHaveCount(0);
+    await expect(cell()).toHaveValue('');
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('321');
   });
 
-  test('shows the keyboard shortcuts next to the input', async ({ page }) => {
+  test('the keyboard shortcuts are listed in the ☰ menu', async ({ page }) => {
     await startSinglePentathlonX01(page);
-    const hint = page.locator('.pent-key-hint');
-    await expect(hint).toBeVisible();
-    await expect(hint).toContainText('Enter');
-    await expect(hint).toContainText('Backspace');
+    await page.getByRole('button', { name: 'メニュー' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('Enter');
+    await expect(dialog).toContainText('Backspace');
   });
 });
 
-test.describe('layout: Cricket', () => {
-  test('the input pad is reachable and unobstructed in the first viewport', async ({ page }) => {
+test.describe('layout: gameplay fits one screen', () => {
+  /** Every discipline, at every layout viewport, must be playable without scrolling the page. */
+  const DISCIPLINES = ['CORK', 'JDA 501', 'BASEBALL', 'HALF-IT', 'GOLF', 'CRICKET'] as const;
+
+  for (const label of DISCIPLINES) {
+    test(`${label} needs no scrolling to play`, async ({ page }) => {
+      await openFreshApp(page);
+      await openSingleGame(page, label);
+      await page.locator('select').first().selectOption('2');
+      await page.getByRole('button', { name: /を開始/ }).click();
+
+      expect(await hasVerticalScroll(page)).toBe(false);
+      expect(await hasHorizontalScroll(page)).toBe(false);
+
+      // The controls that commit a throw are on screen and genuinely clickable, unscrolled.
+      const commit =
+        label === 'JDA 501'
+          ? page.locator('.n01-key-table button.enter')
+          : page.locator('button', { hasText: 'この投球を確定' });
+      await expect(commit).toBeInViewport();
+      await expect(page.getByRole('button', { name: 'メニュー' })).toBeInViewport();
+    });
+  }
+
+  test('Cricket still fits once a turn has been entered', async ({ page }) => {
     await openFreshApp(page);
     await openSingleGame(page, 'CRICKET');
+    await page.locator('select').first().selectOption('2');
     await page.getByRole('button', { name: /を開始/ }).click();
-    await expect(page.locator('.pent-cricket-board')).toBeVisible();
 
-    // Without scrolling: the pad's commit button and the ring row must already be on screen.
-    await expect(page.locator('.pent-ring-row')).toBeInViewport();
-    await expect(page.locator('.pent-keypad')).toBeInViewport();
+    await page.locator('.pent-ring-row button', { hasText: /^T$/ }).click();
+    for (const value of ['20', '19', '18']) {
+      await page.locator('.pent-number-grid button', { hasText: new RegExp(`^${value}$`) }).first().click();
+    }
+    await commitPentTurn(page);
+
+    expect(await hasVerticalScroll(page)).toBe(false);
     expect(await isUnobstructed(page, '.pent-ring-row button')).toBe(true);
-
-    // The sticky pad must not sit on top of the menu row that travels with it.
-    const padBox = (await page.locator('.pent-keypad').boundingBox())!;
-    const actionsBox = (await page.locator('.pent-sticky-pad .pent-actions-3').boundingBox())!;
-    expect(padBox.y + padBox.height).toBeLessThanOrEqual(actionsBox.y + 1);
-    expect(await isUnobstructed(page, '.pent-sticky-pad .pent-actions-3 button')).toBe(true);
+    await expect(page.locator('.pent-keypad')).toBeInViewport();
   });
 
-  test('the progress list is collapsed so the board and pad fit', async ({ page }) => {
+  test('Cork still fits with a dart staged', async ({ page }) => {
     await openFreshApp(page);
-    await openPentathlon(page);
-    await page.locator('.pent-preset-card', { hasText: 'i-Pentathlon' }).click();
-    await page.locator('select').first().selectOption('1');
-    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
-
-    // Skip Cork/301/Baseball/501 by jumping straight to a single Cricket game instead: this test
-    // only cares that the full-pentathlon Cricket screen collapses its progress list.
-    await page.goto('/');
-    await openSingleGame(page, 'CRICKET');
+    await openSingleGame(page, 'CORK');
+    await page.locator('select').first().selectOption('2');
     await page.getByRole('button', { name: /を開始/ }).click();
-    await expect(page.locator('.pent-cricket-board')).toBeVisible();
-    await expect(page.locator('.pent-keypad')).toBeInViewport();
+
+    await tapQuickTarget(page, 'インナーブル');
+    expect(await hasVerticalScroll(page)).toBe(false);
+    await expect(page.locator('button', { hasText: 'この投球を確定' })).toBeInViewport();
   });
 });

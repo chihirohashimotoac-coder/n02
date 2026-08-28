@@ -93,13 +93,21 @@ export function saveTheme(theme: ThemeName): void {
   else document.documentElement.setAttribute('data-theme', theme);
 }
 
+/**
+ * Default 勝利条件 per mode. 通常01 is a match, so it defaults to a best-of; チェックアウト練習 is a
+ * drill you keep repeating, so it defaults to no Leg target (「なし（Legを継続）」).
+ */
+export function defaultTargetLegs(mode: X01Settings['mode']): number {
+  return mode === 'checkout' ? 0 : 2;
+}
+
 export function defaultSettings(): X01Settings {
   return {
     mode: '01',
     startScore: 501,
     checkoutMin: 41,
     checkoutMax: 170,
-    targetLegs: 2,
+    targetLegs: defaultTargetLegs('01'),
     showRoute: false,
     names: ['プレイヤー1', 'プレイヤー2'],
     roundLimit: true,

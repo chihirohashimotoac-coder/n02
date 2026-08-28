@@ -130,8 +130,10 @@ export function isDisciplineComplete(session: PentathlonSession): boolean {
 }
 
 /**
- * Applies one turn's input for the active player. Crucially, a player finishing does NOT end the
- * discipline - the other player keeps throwing until their own result is final.
+ * Applies one turn's input for the active player. By default a player finishing does NOT end the
+ * discipline - the other player keeps throwing until their own result is final. Disciplines that are
+ * a race rather than parallel attempts (301/501, via meta.endsOnFirstCompletion) are the exception:
+ * the first completed result ends the discipline immediately.
  */
 export function applyTurn(session: PentathlonSession, input: unknown): PentathlonSession {
   const current = session.current;
@@ -167,6 +169,22 @@ export function applyTurn(session: PentathlonSession, input: unknown): Pentathlo
     undo,
     current: { progress, active, pendingHits: [] },
   };
+
+  // A race discipline is over the moment someone actually completes it - the opponent has lost and
+  // does not throw again, so their attempt is closed off exactly where it stands. Merely being
+  // `finished` is not enough: 301's round limit finishes a player without a checkout, and the other
+  // player must still get to go out and win.
+  if (engine.meta.endsOnFirstCompletion && progress[active].result?.completed) {
+    const other: PlayerIndex = active === 0 ? 1 : 0;
+    if (session.playerCount === 2 && !progress[other].finished) {
+      progress[other] = {
+        ...progress[other],
+        finished: true,
+        result: engine.getResult(progress[other].state as never),
+      };
+    }
+    return finishDiscipline({ ...partial, current: { progress, active, pendingHits: [] } });
+  }
 
   const upcoming = nextActivePlayer(partial, active);
   if (upcoming === null) {
@@ -222,18 +240,6 @@ function finishDiscipline(session: PentathlonSession): PentathlonSession {
     current: { ...current, pendingHits: [] },
     status: 'between-disciplines',
   };
-}
-
-/**
- * Ends the current discipline immediately even though the non-active player hasn't reached
- * isFinished() yet - their in-progress attempt is recorded exactly as it stands (DNF if they hadn't
- * checked out). finishDiscipline() already falls back to engine.getResult() on the raw state for
- * anyone without a committed result, so this needs no extra bookkeeping. Used only by the Pentathlon
- * X01 "proceed to the next discipline without waiting for the opponent's checkout" choice.
- */
-export function finishDisciplineNow(session: PentathlonSession): PentathlonSession {
-  if (!session.current || session.status !== 'playing') return session;
-  return finishDiscipline({ ...session, undo: pushUndo(session) });
 }
 
 /**

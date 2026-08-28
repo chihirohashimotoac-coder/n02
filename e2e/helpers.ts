@@ -99,20 +99,18 @@ export async function openSingleGame(page: Page, label: string) {
 }
 
 /**
- * On the Pentathlon X01 checkout hand-off choice (one player finished, the other hasn't): the
- * primary action - let the still-playing player carry on throwing.
+ * Opens the in-game ☰ menu, which is where every Pentathlon play screen keeps the controls that
+ * aren't needed to throw a dart (round undo, rules, quit) so the screen itself fits one viewport.
  */
-export async function continueOpponentPlay(page: Page) {
-  await page.getByRole('button', { name: /のプレイを続ける/ }).click();
+export async function openPentGameMenu(page: Page) {
+  await page.getByRole('button', { name: 'メニュー' }).click();
+  await page.waitForSelector('.pent-modal-card');
 }
 
-/**
- * On the Pentathlon X01 checkout hand-off choice: end the discipline now, marking the still-playing
- * opponent DNF. Goes through the explicit confirmation dialog, as the UI requires.
- */
-export async function proceedWithDnf(page: Page) {
-  await page.getByRole('button', { name: /をDNFとして次の種目へ進む/ }).click();
-  await page.getByRole('button', { name: /をDNFにして進む/ }).click();
+/** Opens the in-game rule explanation, which lives one level inside the ☰ menu. */
+export async function openPentRules(page: Page) {
+  await openPentGameMenu(page);
+  await page.getByRole('button', { name: 'ルール説明' }).click();
 }
 
 /** Taps one of Baseball's four per-dart outcome buttons ('シングル' | 'ダブル' | 'トリプル' | 'ミス'). */

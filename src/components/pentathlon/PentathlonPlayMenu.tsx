@@ -1,0 +1,78 @@
+import { useState } from 'react';
+import PentathlonModal from './PentathlonModal';
+import { DISCIPLINE_RULE_TEXT } from '../../domain/pentathlon/ruleText';
+import type { DisciplineId } from '../../domain/pentathlon/types';
+
+interface Props {
+  disciplineId: DisciplineId;
+  /** True while darts are staged - the round undo is blocked until they are taken back first. */
+  canUndo: boolean;
+  canUndoRound: boolean;
+  onUndoRound: () => void;
+  onExit: () => void;
+  onClose: () => void;
+}
+
+/**
+ * The ☰ menu shared by the dart-hit play screens. Everything in here is deliberately NOT on the play
+ * screen itself: none of it is needed to throw a dart, and the play screen has to fit one viewport
+ * without scrolling. Rules open as a second view of this same dialog rather than a nested modal, so
+ * only ever one dialog owns the keyboard.
+ */
+export default function PentathlonPlayMenu({
+  disciplineId,
+  canUndo,
+  canUndoRound,
+  onUndoRound,
+  onExit,
+  onClose,
+}: Props) {
+  const [view, setView] = useState<'menu' | 'rules'>('menu');
+  const rules = DISCIPLINE_RULE_TEXT[disciplineId];
+
+  if (view === 'rules') {
+    return (
+      <PentathlonModal label={`${rules.title}のルール`} onClose={() => setView('menu')}>
+        <h2>{rules.title} のルール</h2>
+        <p className="pent-rules-body">{rules.body}</p>
+        <button type="button" className="n01-modal-primary" onClick={() => setView('menu')}>
+          閉じる
+        </button>
+      </PentathlonModal>
+    );
+  }
+
+  return (
+    <PentathlonModal label="ゲームメニュー" onClose={onClose}>
+      <h2>メニュー</h2>
+      <div className="menu-list">
+        <button
+          type="button"
+          disabled={!canUndoRound}
+          title={canUndo && !canUndoRound ? '先に「1投戻す」で入力中の投球を取り消してください' : undefined}
+          onClick={() => {
+            onUndoRound();
+            onClose();
+          }}
+        >
+          前の確定ラウンドに戻す
+        </button>
+        <button type="button" onClick={() => setView('rules')}>
+          ルール説明
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            onExit();
+          }}
+        >
+          中断してメニューへ
+        </button>
+      </div>
+      <button type="button" onClick={onClose}>
+        戻る
+      </button>
+    </PentathlonModal>
+  );
+}

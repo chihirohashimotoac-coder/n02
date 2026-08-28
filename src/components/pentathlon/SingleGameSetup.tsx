@@ -30,7 +30,7 @@ export default function SingleGameSetup({
   savedLabel,
 }: Props) {
   const [selectedKey, setSelectedKey] = useState<string>(initialKey ?? SINGLE_GAME_OPTIONS[0].key);
-  const [playerCount, setPlayerCount] = useState<1 | 2>(1);
+  const [playerCount, setPlayerCount] = useState<1 | 2>(2);
   const [names, setNames] = useState<[string, string]>(['プレイヤー1', 'プレイヤー2']);
   const [showRoute, setShowRoute] = useState(false);
 

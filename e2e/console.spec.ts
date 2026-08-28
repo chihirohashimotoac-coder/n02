@@ -64,7 +64,9 @@ test.describe('no console errors', () => {
     await page.locator('select').first().selectOption('1');
     await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
 
-    await page.getByRole('button', { name: 'RULES' }).click();
+    await page.getByRole('button', { name: 'メニュー' }).click();
+    await page.getByRole('button', { name: 'ルール説明' }).click();
+    await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
     await enterPentScore(page, 180);
     await enterPentScore(page, 180);
@@ -85,6 +87,7 @@ test.describe('no console errors', () => {
     await tapBaseballOutcome(page, 'ミス');
     await tapBaseballOutcome(page, 'ミス');
     await commitPentTurn(page);
+    await page.getByRole('button', { name: 'メニュー' }).click();
     await page.getByRole('button', { name: '前の確定ラウンドに戻す' }).click();
 
     await page.goto('/');

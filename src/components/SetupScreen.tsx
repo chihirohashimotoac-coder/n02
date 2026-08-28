@@ -3,7 +3,12 @@ import TopBar from './TopBar';
 import ThemeSelect from './ThemeSelect';
 import StatsPanel from './StatsPanel';
 import { computeDefaultMaxRounds, type X01MatchState, type X01Settings } from '../domain/x01Engine';
-import { loadHistory, type HistoryEntry, type ThemeName } from '../storage/matchStorage';
+import {
+  defaultTargetLegs,
+  loadHistory,
+  type HistoryEntry,
+  type ThemeName,
+} from '../storage/matchStorage';
 
 interface Props {
   settings: X01Settings;
@@ -43,10 +48,26 @@ export default function SetupScreen({
 }: Props) {
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
   const [error, setError] = useState<string | null>(null);
+  // 勝利条件 differs by mode (see defaultTargetLegs), so switching mode restores that mode's own
+  // value rather than carrying the other mode's over. A value the user picked here is remembered
+  // for the rest of the session, so switching back and forth never discards their choice.
+  const [legsByMode, setLegsByMode] = useState<Record<X01Settings['mode'], number>>(() => ({
+    '01': settings.mode === '01' ? settings.targetLegs : defaultTargetLegs('01'),
+    checkout: settings.mode === 'checkout' ? settings.targetLegs : defaultTargetLegs('checkout'),
+  }));
 
   const update = (patch: Partial<X01Settings>) => {
     onChangeSettings({ ...settings, ...patch });
     setError(null);
+  };
+
+  const changeMode = (mode: X01Settings['mode']) => {
+    update({ mode, targetLegs: legsByMode[mode] });
+  };
+
+  const changeTargetLegs = (targetLegs: number) => {
+    setLegsByMode((current) => ({ ...current, [settings.mode]: targetLegs }));
+    update({ targetLegs });
   };
 
   const validate = (): string | null => {
@@ -103,7 +124,7 @@ export default function SetupScreen({
                 type="button"
                 className={`mode-card ${settings.mode === '01' ? 'selected' : ''}`}
                 aria-pressed={settings.mode === '01'}
-                onClick={() => update({ mode: '01' })}
+                onClick={() => changeMode('01')}
               >
                 <span className="mode-icon" aria-hidden="true">
                   01
@@ -120,7 +141,7 @@ export default function SetupScreen({
                 type="button"
                 className={`mode-card ${settings.mode === 'checkout' ? 'selected' : ''}`}
                 aria-pressed={settings.mode === 'checkout'}
-                onClick={() => update({ mode: 'checkout' })}
+                onClick={() => changeMode('checkout')}
               >
                 <span className="mode-icon" aria-hidden="true">
                   ◎
@@ -219,7 +240,7 @@ export default function SetupScreen({
                 <span>勝利条件</span>
                 <select
                   value={settings.targetLegs}
-                  onChange={(event) => update({ targetLegs: Number(event.target.value) })}
+                  onChange={(event) => changeTargetLegs(Number(event.target.value))}
                 >
                   {TARGET_LEGS.map((option) => (
                     <option key={option.value} value={option.value}>

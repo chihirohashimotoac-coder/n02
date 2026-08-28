@@ -26,9 +26,10 @@ export interface X01SoloOptions {
 }
 
 /**
- * A single player's independent X01 attempt. Unlike the head-to-head match engine, finishing here
- * never ends the other player's attempt - each player plays on until their own result is final,
- * which is what Pentathlon requires.
+ * One player's X01 attempt. Each player keeps their own independent state (remaining, darts, visit
+ * history), but the discipline itself is a race: per meta.endsOnFirstCompletion, whoever checks out
+ * first wins it outright and the opponent stops throwing - the same "first one out takes the leg"
+ * rule 通常01・チェックアウト練習 already play by.
  */
 export function createX01SoloEngine(
   options: X01SoloOptions,
@@ -44,6 +45,7 @@ export function createX01SoloEngine(
         : 'オープンイン / ダブルアウト',
       inputMode: 'visit-score',
       unit: 'darts',
+      endsOnFirstCompletion: true,
     },
 
     createState: (): X01SoloState => ({

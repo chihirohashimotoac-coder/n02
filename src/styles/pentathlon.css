@@ -29,13 +29,6 @@
   margin: 0;
 }
 
-/* PentathlonX01Play's footer nav has 4 buttons (中断 / Finish / Undo / RULES), not the 5 of
-   01/Checkout's New / Finish / Stats / RULES / ☰, so it needs its own column count on the shared
-   .n01-menu-table grid. */
-.n01-menu-table.pent-x01-menu {
-  grid-template-columns: repeat(4, 1fr);
-}
-
 /* 1-player Pentathlon X01: no opponent, so the header/footer collapse to a single side instead of
    the usual two-player split. */
 .n01-game-header.solo {
@@ -885,86 +878,12 @@
   font-size: 9px;
 }
 
-/*
- * Entry preview: shown only while a score is actually being typed, floating clear of the scoreboard
- * above and the keypad below rather than permanently occupying a row of either. Sits above the
- * footer, so it covers neither the remaining scores nor any keypad button.
- */
-.pent-entry-popover {
-  position: absolute;
-  bottom: calc(var(--pent-footer-h) + 12px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 6;
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  min-width: 148px;
-  padding: 8px 18px;
-  border: 1px solid var(--green-dark);
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 6px 22px #19241e2e;
-  pointer-events: none;
-}
-.pent-entry-popover span {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  max-width: 12ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pent-entry-popover strong {
-  color: var(--green-dark);
-  font-variant-numeric: tabular-nums;
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-[data-theme="neon"] .pent-entry-popover,
-[data-theme="navy"] .pent-entry-popover {
-  background: var(--surface);
-}
-[data-theme="neon"] .pent-entry-popover strong {
-  color: #2ee58a;
-}
-
-.pent-key-hint {
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  text-align: center;
-  background: #fbfbf8;
-  margin: 0;
-  padding: 5px 10px;
-  font-size: 10px;
-  line-height: 1.5;
-}
-.pent-key-hint kbd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  margin: 0 2px;
-  padding: 1px 5px;
-  font-size: 9px;
-}
-[data-theme="neon"] .pent-key-hint,
-[data-theme="navy"] .pent-key-hint {
-  background: var(--surface);
-}
-[data-theme="neon"] .pent-key-hint kbd,
-[data-theme="navy"] .pent-key-hint kbd {
-  background: #ffffff1f;
-}
-
-/* The X01 footer's own height, referenced by the entry popover so the two can never disagree. The
+/* The X01 footer's own height, kept in one place so the score area above it can never disagree. The
    footer lays its rows out as a column and lets the keypad take whatever is left, so the keys can
-   never overflow past the bottom edge however the rows above happen to measure. */
+   never overflow past the bottom edge however the rows above happen to measure. Taller than 通常01's
+   252px because Pentathlon keeps the on-screen keypad on desktop too (see below). */
 .pent-x01-shell {
-  --pent-footer-h: 404px;
+  --pent-footer-h: 378px;
 }
 .pent-x01-shell .n01-game-footer {
   height: var(--pent-footer-h);
@@ -972,8 +891,7 @@
   flex-direction: column;
 }
 .pent-x01-shell .n01-left-table,
-.pent-x01-shell .n01-menu-table,
-.pent-x01-shell .pent-key-hint {
+.pent-x01-shell .n01-menu-table {
   flex: 0 0 auto;
 }
 .pent-x01-shell .n01-key-table {
@@ -989,13 +907,22 @@
 .pent-x01-shell .n01-left-table strong {
   font-size: 56px;
 }
-.pent-x01-shell .n01-menu-table {
-  grid-template-columns: repeat(4, 1fr);
+
+/* Score cells are display-only here (no edit-a-past-score flow), so they are spans rather than
+   01's buttons - but they must read exactly the same on the sheet. */
+.pent-x01-shell .n01-score-table td.scored > span.value {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--ink);
+  font-size: clamp(38px, 5vw, 74px);
 }
-.pent-x01-shell .n01-menu-table button {
-  padding: 0 4px;
-  font-size: 10px;
-  line-height: 1.25;
+
+/* 1-player: no opponent column in the stats table. */
+.n01-stats-table.solo .n01-stats-head,
+.n01-stats-table.solo .n01-stats-row {
+  grid-template-columns: minmax(0, 1fr) 130px;
 }
 
 /*
@@ -1044,7 +971,7 @@
  */
 @media (width <= 720px) {
   .pent-x01-shell {
-    --pent-footer-h: calc(400px + env(safe-area-inset-bottom, 0px) + 20px);
+    --pent-footer-h: calc(374px + env(safe-area-inset-bottom, 0px) + 20px);
   }
   .pent-x01-shell .n01-key-table {
     height: auto;
@@ -1171,28 +1098,128 @@
   white-space: nowrap;
 }
 .pent-cricket-shell .pent-cricket-board {
-  margin-bottom: 8px;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  margin-bottom: 0;
+  min-height: 0;
+}
+.pent-cricket-shell .pent-cricket-row {
+  flex: 1 1 auto;
 }
 .pent-target.compact {
   margin: 0 0 8px;
   padding: 6px 12px;
 }
+.pent-target.compact strong {
+  font-size: clamp(14px, 4vw, 18px);
+}
+
+/* --- one-screen play layout (dart-hit disciplines) ----------------------- */
 
 /*
- * The input pad sticks to the bottom of the scrolling column so it stays reachable whatever the
- * scoreboard above costs in height, while still scrolling with (not floating over) the page - so it
- * covers neither the menu buttons nor the undo row, which travel with it.
+ * Playing must never require scrolling: the shell is exactly one viewport tall and does not scroll
+ * at all. Inside it, the heading and the input pad are pinned, and only the middle band (standings,
+ * player cards, aim panel) can scroll - and only when a viewport is genuinely too short for it.
+ * Everything that isn't needed to throw a dart lives in the ☰ menu instead of on the screen.
  */
-.pent-sticky-pad {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
-  background: var(--canvas);
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
-  margin: 0 -4px;
-  padding-left: 4px;
-  padding-right: 4px;
-  box-shadow: 0 -10px 18px -12px #19241e40;
+.pent-game-shell.pent-play-shell {
+  align-items: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+.pent-play-shell > .pent-play {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(640px, 100%);
+  height: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  padding: 10px 14px calc(env(safe-area-inset-bottom, 0px) + 12px);
+}
+
+.pent-play-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+.pent-play-title {
+  flex: 1;
+  min-width: 0;
+}
+.pent-play-title h2 {
+  margin: 1px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pent-menu-button {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 18px;
+  cursor: pointer;
+}
+.pent-menu-button:hover {
+  background: var(--green-soft);
+}
+
+.pent-play-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.pent-play-pad {
+  flex: 0 0 auto;
+}
+
+/*
+ * The aim panel (or the Cricket board) absorbs whatever height is left over, so the screen is
+ * filled by the one thing the thrower is actually reading rather than by empty canvas - and the
+ * TARGET grows with it, staying legible from the oche.
+ */
+.pent-play-shell .pent-aim,
+.pent-play-shell .pent-target:not(.compact) {
+  flex: 1 1 auto;
+  align-content: center;
+  min-height: 0;
+}
+.pent-play-shell .pent-aim-target {
+  font-size: clamp(34px, 8vh, 76px);
+}
+
+/* Compact enough that the cards plus the aim panel plus the pad all fit one viewport. */
+.pent-play-shell .pent-player {
+  padding: 8px 10px;
+  gap: 2px;
+}
+.pent-play-shell .pent-player-value {
+  font-size: clamp(26px, 7vw, 36px);
+}
+.pent-play-shell .pent-aim {
+  margin: 0;
+  padding: 8px 12px;
+}
+.pent-play-shell .pent-aim-hint {
+  font-size: 11px;
+  line-height: 1.4;
+}
+.pent-play-shell .pent-pending {
+  min-height: 32px;
 }
 
 /* --- 個別練習 (single-game) menu ---------------------------------------- */
