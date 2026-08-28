@@ -5,6 +5,7 @@ import {
   enterPentScore,
   openFreshApp,
   openPentathlon,
+  enterPentHits,
   openPentGameMenu,
   openSingleGame,
   tapCricket,
@@ -475,7 +476,7 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     // A triple is 3 marks, so the number closes immediately - shown as the closed mark, in red.
     const mark = page.locator('.pent-cricket-mark.staged').first();
     await expect(mark).toContainText('3');
-    await expect(mark.locator('.pent-cricket-sym.closed')).toBeVisible();
+    await expect(mark.locator('.pent-cricket-glyph[data-marks="3"]')).toBeVisible();
 
     // B is the inner bull (2 marks), O the outer (1 mark).
     await page.keyboard.press('b');
@@ -485,7 +486,7 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     // Enter confirms the turn: 20 and BULL are both closed, and nothing is provisional any more.
     await page.keyboard.press('Enter');
     await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(0);
-    await expect(page.locator('.pent-cricket-sym.closed')).toHaveCount(2);
+    await expect(page.locator('.pent-cricket-glyph[data-marks="3"]')).toHaveCount(2);
   });
 
   test('a mark entered this turn can be corrected or deleted by tapping it', async ({ page }) => {
@@ -520,7 +521,7 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     // Once confirmed it is history: nothing on the board can be tapped to correct any more.
     await page.getByRole('button', { name: '確定' }).click();
     await expect(page.locator('.pent-cricket-mark.editable')).toHaveCount(0);
-    await expect(page.locator('.pent-cricket-sym.closed')).toHaveCount(1);
+    await expect(page.locator('.pent-cricket-glyph[data-marks="3"]')).toHaveCount(1);
 
     // P2 stages their own mark: still exactly one editable cell, and P1's committed 20 is not it.
     await tapCricket(page, 'トリプル19');
@@ -571,9 +572,30 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     await page.getByRole('button', { name: '3マークにする' }).click();
 
     await expect(bullRow.locator('.pent-cricket-mark.staged')).toContainText('3');
-    await expect(bullRow.locator('.pent-cricket-sym.closed')).toBeVisible();
+    await expect(bullRow.locator('.pent-cricket-glyph[data-marks="3"]')).toBeVisible();
     // Two darts of the three are now spoken for.
     await expect(page.locator('.pent-cricket-status')).toContainText('2 / 3');
+  });
+
+  test('the result reports MPR under a STATS column instead of a dart count', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET', 1);
+
+    // Six triples close 20-15 in six rounds (18 effective marks), shutting the 80% window; the
+    // seventh round closes BULL and ends the game.
+    for (const n of [20, 19, 18, 17, 16, 15]) await enterPentHits(page, [`T${n}`]);
+    await enterPentHits(page, ['BULL', '25']);
+
+    await expect(page.getByText('GAME COMPLETE')).toBeVisible();
+    const head = page.locator('.pent-result-row.head');
+    await expect(head).toContainText('STATS');
+    await expect(head).not.toContainText('DARTS');
+
+    const stat = page.locator('.pent-result-stat').first();
+    await expect(stat.locator('b')).toHaveText('3.00');
+    await expect(stat).toContainText('MPR 80%');
+    // 21 effective marks over 7 rounds for the full game.
+    await expect(stat).toContainText('3.00 (100%)');
   });
 
   test('a turn where nothing landed is 確定 alone', async ({ page }) => {
@@ -584,7 +606,7 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     await page.getByRole('button', { name: '確定' }).click();
     // The round advanced with nothing marked at all.
     await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(0);
-    await expect(page.locator('.pent-cricket-sym')).toHaveCount(0);
+    await expect(page.locator('.pent-cricket-glyph')).toHaveCount(0);
   });
 
   test('lists the shortcuts for the pad the screen is actually showing', async ({ page }) => {

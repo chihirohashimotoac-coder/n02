@@ -528,14 +528,14 @@
 /* The middle column is the keypad (D | number | T), so it is wider than a display-only board. */
 .pent-cricket-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 168px minmax(0, 1fr);
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) var(--cricket-keys-w, 168px) minmax(0, 1fr);
+  align-items: stretch;
   border-top: 1px solid var(--line);
   min-height: 44px;
 }
 
 .pent-cricket-board.solo .pent-cricket-row {
-  grid-template-columns: minmax(0, 1fr) 168px;
+  grid-template-columns: minmax(0, 1fr) var(--cricket-keys-w, 168px);
 }
 
 /* --- the board's own keypad (n01's operation method, n02's design) ------- */
@@ -579,13 +579,10 @@
   place-items: center;
 }
 
-.pent-bull-dot {
+.pent-bull-glyph {
   display: block;
-  width: 20px;
-  height: 20px;
-  border: 3px solid #b32020;
-  border-radius: 50%;
-  background: #111;
+  width: var(--cricket-bull, 26px);
+  height: var(--cricket-bull, 26px);
 }
 
 .pent-cricket-commit {
@@ -692,20 +689,44 @@
 }
 
 .pent-cricket-name {
-  text-align: center;
-  padding: 0 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 8px;
 }
 
+.pent-cricket-name b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+/* The player throwing right now: the same lime call-out 通常01 puts on its header, carried down
+   the whole of that player's column so which side is live is never in doubt. */
 .pent-cricket-name.active {
-  text-decoration: underline;
-  text-decoration-color: currentcolor;
-  text-underline-offset: 3px;
+  background: #dff36d;
+  color: #083c2c;
+  box-shadow: inset 0 -4px #a8cc1d;
+}
+
+.pent-cricket-name em {
+  flex: none;
+  border-radius: 999px;
+  background: var(--green-dark);
+  color: #fff;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.1em;
 }
 
 .pent-cricket-num {
+  align-self: center;
   text-align: center;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -722,24 +743,32 @@
 }
 
 .pent-cricket-row.total {
-  background: var(--surface-soft);
+  background: var(--green-dark);
+  border-top: 2px solid var(--green-dark);
+  min-height: 58px;
 }
 
 .pent-cricket-row.total .pent-cricket-num {
+  color: #ffffffab;
   font-size: 10px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.16em;
 }
 
 .pent-cricket-row.total strong {
-  text-align: center;
-  font-size: 22px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: clamp(28px, 5vw, 40px);
   font-variant-numeric: tabular-nums;
-  color: var(--green-dark);
+  letter-spacing: -0.03em;
+  line-height: 1;
 }
 
-[data-theme='neon'] .pent-cricket-row.total strong {
-  color: #2ee58a;
+.pent-cricket-row.total strong.side-active {
+  background: #dff36d;
+  color: #083c2c;
 }
+
 
 .pent-cricket-mark {
   display: flex;
@@ -747,48 +776,43 @@
   justify-content: center;
   gap: 8px;
   width: 100%;
-  height: 38px;
+  min-height: 44px;
   color: var(--ink);
   font-size: 19px;
   font-weight: 900;
 }
 
-/* Standard cricket notation, and the same progression DARTSLIVE shows: blank, ╱, ✕, circled ✕. */
-.pent-cricket-sym {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  line-height: 1;
-}
-
-.pent-cricket-sym.closed {
-  border: 2px solid currentcolor;
-  border-radius: 50%;
-  color: var(--green-dark);
-}
-
-[data-theme='neon'] .pent-cricket-sym.closed {
-  color: #2ee58a;
+/* The supplied mark artwork: a leaning bar, a ring, and the struck-through ring. */
+.pent-cricket-glyph {
+  width: var(--cricket-glyph, 26px);
+  height: var(--cricket-glyph, 26px);
+  fill: currentColor;
+  flex: none;
 }
 
 /* Marks entered this turn but not yet confirmed: red, with how many were added, and tappable to
    correct. Deliberately unmistakable against the committed marks beside them. */
-.pent-cricket-mark.staged,
-.pent-cricket-mark.staged .pent-cricket-sym.closed {
+.pent-cricket-mark.staged {
   color: #b32020;
 }
 
 .pent-cricket-mark.editable {
   border: 0;
-  background: 0 0;
+  background: none;
   cursor: pointer;
   font: inherit;
   font-weight: 900;
 }
 
+/* Every row of the throwing player's column is washed, so the live side reads as one block. Declared
+   after .editable, whose background reset would otherwise punch a hole in that column. */
+.pent-cricket-mark.side-active {
+  background: color-mix(in srgb, #dff36d 34%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #a8cc1d 42%, transparent);
+}
+
 .pent-cricket-mark.editable:hover {
-  background: #b3202014;
+  background: color-mix(in srgb, #b32020 12%, transparent);
 }
 
 .pent-cricket-staged-count {
@@ -1054,10 +1078,11 @@
 
 /* The X01 footer's own height, kept in one place so the score area above it can never disagree. The
    footer lays its rows out as a column and lets the keypad take whatever is left, so the keys can
-   never overflow past the bottom edge however the rows above happen to measure. Taller than 通常01's
-   252px because Pentathlon keeps the on-screen keypad on desktop too (see below). */
+   never overflow past the bottom edge however the rows above happen to measure. On desktop the
+   keypad is hidden (the shared .n01-key-table rule in app.css), exactly as in 通常01・チェックアウト
+   練習, so the footer is only the remaining two rows: 120px scores + 62px menu. */
 .pent-x01-shell {
-  --pent-footer-h: 378px;
+  --pent-footer-h: 182px;
 }
 .pent-x01-shell .n01-game-footer {
   height: var(--pent-footer-h);
@@ -1100,50 +1125,17 @@
 }
 
 /*
- * PC keeps a compact on-screen keypad: 通常01 hides it (desktop players type), but Pentathlon X01
- * must be fully playable with a mouse alone. Scoped to .pent-x01-shell so 通常01 is untouched.
- */
-@media (width > 720px) {
-  .pent-x01-shell .n01-key-table {
-    background: #354239;
-    grid-template-rows: repeat(4, 1fr);
-    grid-template-columns: repeat(3, 1fr);
-    height: auto;
-    padding-bottom: 14px;
-    display: grid;
-  }
-  .pent-x01-shell .n01-key-table button {
-    color: #fff;
-    cursor: pointer;
-    touch-action: manipulation;
-    background: 0 0;
-    border-top: 1px solid #ffffff24;
-    border-bottom: 0;
-    border-left: 0;
-    border-right: 1px solid #ffffff24;
-    font-size: 20px;
-    font-weight: 650;
-    min-height: 44px;
-  }
-  .pent-x01-shell .n01-key-table button:hover {
-    background: #ffffff1a;
-  }
-  .pent-x01-shell .n01-key-table button:active {
-    background: var(--green);
-  }
-  .pent-x01-shell .n01-key-table button.enter {
-    background: var(--green);
-    font-size: 13px;
-    font-weight: 800;
-  }
-}
-
-/*
  * Mobile: keep the bottom row of keys clear of the home indicator. The shared rule already adds
  * max(12px, safe-area), which on an iPhone lands the keys right on the indicator - Pentathlon adds
  * a further 20px on top of the inset so repeated taps never reach the system gesture area.
  */
 @media (width <= 720px) {
+  .pent-cricket-name em {
+    display: none;
+  }
+  .pent-cricket-name b {
+    font-size: 12px;
+  }
   .pent-x01-shell {
     --pent-footer-h: calc(374px + env(safe-area-inset-bottom, 0px) + 20px);
   }
@@ -1156,9 +1148,6 @@
   }
   .pent-x01-shell .n01-left-table strong {
     font-size: 46px;
-  }
-  .pent-entry-popover strong {
-    font-size: 22px;
   }
 }
 
@@ -1313,16 +1302,57 @@
   min-height: 30px;
 }
 .pent-cricket-shell .pent-cricket-num {
-  font-size: 14px;
+  font-size: 15px;
 }
-.pent-cricket-shell .pent-cricket-mark {
-  font-size: 17px;
-}
-.pent-cricket-shell .pent-cricket-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+
+/*
+ * Desktop gets a wider board and bigger everything: the play column is capped at 640px for the
+ * thumb-sized pads of the other disciplines, but Cricket's board is a table and simply reads
+ * better with the width. Paddings shrink at the same time so the extra room goes to the board.
+ */
+@media (width > 720px) {
+  .pent-play-shell.pent-cricket-shell > .pent-play {
+    width: min(960px, 100%);
+    gap: 6px;
+    padding: 8px 16px 12px;
+  }
+  .pent-cricket-shell {
+    --cricket-keys-w: 260px;
+    --cricket-glyph: 40px;
+    --cricket-bull: 40px;
+  }
+  .pent-cricket-shell .pent-cricket-num {
+    font-size: 22px;
+  }
+  .pent-cricket-shell .pent-cricket-row.head .pent-cricket-num {
+    font-size: 11px;
+  }
+  .pent-cricket-shell .pent-cricket-name b {
+    font-size: 15px;
+  }
+  .pent-cricket-shell .pent-cricket-keys {
+    grid-template-columns: 52px minmax(0, 1fr) 68px;
+    gap: 6px;
+    padding: 4px 10px;
+  }
+  .pent-cricket-shell .pent-cricket-ring {
+    min-height: 46px;
+    font-size: 16px;
+  }
+  .pent-cricket-shell .pent-cricket-key {
+    min-height: 46px;
+    font-size: 26px;
+  }
+  .pent-cricket-shell .pent-cricket-commit {
+    min-height: 46px;
+    font-size: 14px;
+  }
+  .pent-cricket-shell .pent-cricket-row.total {
+    min-height: 72px;
+  }
+  .pent-cricket-shell .pent-play-head {
+    gap: 8px;
+  }
 }
 .pent-cricket-shell .pent-cricket-board {
   display: flex;
@@ -1501,6 +1531,27 @@
 .pent-result-row > span.name {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Cricket reports MPR here instead of a dart count: the 80% figure large, the full-game one under
+   it, so the column still reads at a glance but says which window each number covers. */
+.pent-result-stat {
+  display: grid;
+  gap: 1px;
+  justify-items: center;
+  line-height: 1.25;
+}
+.pent-result-stat b {
+  font-size: 1.15em;
+  font-variant-numeric: tabular-nums;
+}
+.pent-result-stat em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 .pent-result-row > span.value {
   min-width: 0;

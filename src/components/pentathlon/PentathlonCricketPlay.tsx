@@ -179,10 +179,16 @@ export default function PentathlonCricketPlay({
 
           <div className={`pent-cricket-board ${solo ? 'solo' : ''}`}>
             <div className="pent-cricket-row head">
-              <span className={`pent-cricket-name ${active === 0 ? 'active' : ''}`}>{session.names[0]}</span>
+              <span className={`pent-cricket-name ${active === 0 ? 'active' : ''}`}>
+                <b>{session.names[0]}</b>
+                {active === 0 && <em aria-label="現在のスロー">THROW</em>}
+              </span>
               <span className="pent-cricket-num">NUMBER</span>
               {!solo && (
-                <span className={`pent-cricket-name ${active === 1 ? 'active' : ''}`}>{session.names[1]}</span>
+                <span className={`pent-cricket-name ${active === 1 ? 'active' : ''}`}>
+                  {active === 1 && <em aria-label="現在のスロー">THROW</em>}
+                  <b>{session.names[1]}</b>
+                </span>
               )}
             </div>
 
@@ -198,6 +204,7 @@ export default function PentathlonCricketPlay({
                   <CricketMark
                     marks={committed[0]}
                     staged={staged[0]}
+                    isActiveSide={active === 0}
                     onEdit={active === 0 && staged[0] > 0 ? () => setEditing(target) : undefined}
                   />
                   <div className="pent-cricket-keys">
@@ -217,7 +224,7 @@ export default function PentathlonCricketPlay({
                       aria-label={isBull ? 'アウターブル' : `シングル${target}`}
                       onClick={stageFromClick(hitFor(target, 'single'))}
                     >
-                      {isBull ? <span className="pent-bull-dot" aria-hidden="true" /> : target}
+                      {isBull ? <BullGlyph /> : target}
                     </button>
                     {isBull ? (
                       <button
@@ -244,6 +251,7 @@ export default function PentathlonCricketPlay({
                     <CricketMark
                       marks={committed[1]}
                       staged={staged[1]}
+                      isActiveSide={active === 1}
                       onEdit={active === 1 && staged[1] > 0 ? () => setEditing(target) : undefined}
                     />
                   )}
@@ -252,9 +260,11 @@ export default function PentathlonCricketPlay({
             })}
 
             <div className="pent-cricket-row total">
-              <strong>{views[0].points}</strong>
+              <strong className={active === 0 ? 'side-active' : ''}>{views[0].points}</strong>
               <span className="pent-cricket-num">POINTS</span>
-              {!solo && <strong>{views[1]?.points ?? 0}</strong>}
+              {!solo && (
+                <strong className={active === 1 ? 'side-active' : ''}>{views[1]?.points ?? 0}</strong>
+              )}
             </div>
           </div>
         </div>
@@ -329,13 +339,13 @@ function MarkEditor({
       <h2>{target} の入力を修正</h2>
       <div className="pent-mark-choices">
         <button type="button" aria-label="1マークにする" disabled={!fits(1)} onClick={() => onApply(1)}>
-          ╱
+          <MarkGlyph marks={1} />
         </button>
         <button type="button" aria-label="2マークにする" disabled={!fits(2)} onClick={() => onApply(2)}>
-          ✕
+          <MarkGlyph marks={2} />
         </button>
         <button type="button" aria-label="3マークにする" disabled={!fits(3)} onClick={() => onApply(3)}>
-          <span className="pent-cricket-sym closed">✕</span>
+          <MarkGlyph marks={3} />
         </button>
         <button type="button" className="delete" aria-label="この入力を削除" onClick={() => onApply(0)}>
           🗑
@@ -360,10 +370,12 @@ function MarkEditor({
 function CricketMark({
   marks,
   staged,
+  isActiveSide,
   onEdit,
 }: {
   marks: number;
   staged: number;
+  isActiveSide: boolean;
   onEdit?: () => void;
 }) {
   const total = marks + staged;
@@ -373,14 +385,10 @@ function CricketMark({
   const body = (
     <>
       {staged > 0 && <em className="pent-cricket-staged-count">{staged}</em>}
-      {total > 0 && (
-        <span className={`pent-cricket-sym ${total >= 3 ? 'closed' : ''}`} aria-hidden="true">
-          {total === 1 ? '╱' : '✕'}
-        </span>
-      )}
+      {total > 0 && <MarkGlyph marks={Math.min(total, 3) as 1 | 2 | 3} />}
     </>
   );
-  const className = `pent-cricket-mark ${staged > 0 ? 'staged' : ''}`;
+  const className = `pent-cricket-mark ${isActiveSide ? 'side-active' : ''} ${staged > 0 ? 'staged' : ''}`;
 
   if (onEdit) {
     return (
@@ -393,6 +401,90 @@ function CricketMark({
     <span className={className} aria-label={label}>
       {body}
     </span>
+  );
+}
+
+/**
+ * The three mark states, drawn to match the supplied artwork: a leaning bar for one mark, a ring
+ * for two, the ring struck through for three (closed). Filled with `currentColor` so the pending
+ * (red) state and every theme tint them without a second set of assets, with a soft top-left
+ * highlight standing in for the bevel of the original renders.
+ */
+function MarkGlyph({ marks }: { marks: 1 | 2 | 3 }) {
+  return (
+    <svg
+      className="pent-cricket-glyph"
+      data-marks={marks}
+      viewBox="0 0 100 100"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <linearGradient id="pentMarkBevel" x1="0" y1="0" x2="0.4" y2="1">
+          <stop offset="0" stopColor="#fff" stopOpacity="0.34" />
+          <stop offset="0.5" stopColor="#fff" stopOpacity="0.06" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {marks === 1 ? (
+        <g>
+          <rect x="41" y="6" width="18" height="88" rx="3" transform="rotate(20 50 50)" />
+          <rect
+            x="41"
+            y="6"
+            width="18"
+            height="88"
+            rx="3"
+            transform="rotate(20 50 50)"
+            fill="url(#pentMarkBevel)"
+          />
+        </g>
+      ) : (
+        <g>
+          <circle cx="50" cy="50" r="33" fill="none" stroke="currentColor" strokeWidth="15" />
+          <circle cx="50" cy="50" r="33" fill="none" stroke="url(#pentMarkBevel)" strokeWidth="15" />
+          {marks === 3 && (
+            <g>
+              <rect x="41.5" y="-2" width="17" height="104" rx="3" transform="rotate(45 50 50)" />
+              <rect x="41.5" y="-2" width="17" height="104" rx="3" transform="rotate(-45 50 50)" />
+              <rect
+                x="41.5"
+                y="-2"
+                width="17"
+                height="104"
+                rx="3"
+                transform="rotate(45 50 50)"
+                fill="url(#pentMarkBevel)"
+              />
+              <rect
+                x="41.5"
+                y="-2"
+                width="17"
+                height="104"
+                rx="3"
+                transform="rotate(-45 50 50)"
+                fill="url(#pentMarkBevel)"
+              />
+            </g>
+          )}
+        </g>
+      )}
+    </svg>
+  );
+}
+
+/** The BULL row's target button, drawn as the concentric bull badge from the supplied artwork. */
+function BullGlyph() {
+  return (
+    <svg className="pent-bull-glyph" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+      <circle cx="50" cy="50" r="48" fill="#15181a" />
+      <circle cx="50" cy="50" r="43" fill="none" stroke="#8d949a" strokeWidth="2.5" />
+      <circle cx="50" cy="50" r="36" fill="#22262a" />
+      <circle cx="50" cy="50" r="30" fill="#c1121f" />
+      <circle cx="50" cy="50" r="30" fill="none" stroke="#8d949a" strokeWidth="2" />
+      <circle cx="50" cy="50" r="16" fill="#1b1f22" />
+      <circle cx="50" cy="50" r="16" fill="none" stroke="#a7aeb4" strokeWidth="2.5" />
+    </svg>
   );
 }
 

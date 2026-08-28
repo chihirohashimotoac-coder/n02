@@ -32,16 +32,18 @@ function scoreText(result: DisciplineResult | null): string {
 }
 
 /**
- * One discipline's results, with the same column meanings everywhere: SCORE is the discipline's own
- * measure, DARTS is always the dart count, RESULT is always completion state.
+ * One discipline's results. SCORE is the discipline's own measure and RESULT is completion state.
+ * The third column is the dart count everywhere except in disciplines that report a stat of their
+ * own instead (Cricket: MPR), which supply `result.stat` and rename the column with it.
  */
 export default function DisciplineResultTable({ session, results, winner }: Props) {
+  const stat = results.find((result) => result?.stat)?.stat;
   return (
     <div className="pent-result-table pent-result-table-4">
       <div className="pent-result-row head">
         <span className="name">PLAYER</span>
         <span>SCORE</span>
-        <span>DARTS</span>
+        <span>{stat ? stat.label : 'DARTS'}</span>
         <span>RESULT</span>
       </div>
       {(session.playerCount === 1 ? [0] : [0, 1]).map((index) => {
@@ -59,7 +61,17 @@ export default function DisciplineResultTable({ session, results, winner }: Prop
               {isWinner && <span className="sr-only">（この種目の勝者）</span>}
             </span>
             <span className={`value ${isWinner ? 'win' : ''}`}>{scoreText(result)}</span>
-            <span className="value">{result ? result.darts : '—'}</span>
+            <span className="value">
+              {result?.stat ? (
+                <span className="pent-result-stat">
+                  <b>{result.stat.primary}</b>
+                  {result.stat.primaryNote && <em>{result.stat.primaryNote}</em>}
+                  {result.stat.secondary && <em>{result.stat.secondary}</em>}
+                </span>
+              ) : (
+                (result?.darts ?? '—')
+              )}
+            </span>
             <span className="value">{result ? (result.completed ? 'COMPLETE' : 'DNF') : '—'}</span>
           </div>
         );
