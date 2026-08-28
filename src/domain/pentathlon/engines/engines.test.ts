@@ -613,6 +613,53 @@ describe('X01 solo attempts', () => {
       expect(() => engine501.editVisit!(state, 0, -1, 3)).toThrow(InvalidVisitError);
     });
 
+    it('refuses a correction that reaches zero from a number that cannot be gone out on', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 180 }); // 321
+      state = engine501.applyInput(state, { score: 141 }); // 180
+      state = engine501.applyInput(state, { score: 60 }); // 120
+      // 180 left is above the 170 maximum checkout: scoring exactly 180 is not going out.
+      expect(() => engine501.editVisit!(state, 2, 180, 3)).toThrow(InvalidVisitError);
+      expect(state.checkedOut).toBe(false);
+    });
+
+    it('refuses a checkout declared in a number of darts that cannot finish it', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 180 }); // 321
+      state = engine501.applyInput(state, { score: 180 }); // 141
+      state = engine501.applyInput(state, { score: 60 }); // 81
+      // 141 needs all three darts (T20 T19 D12); one dart cannot score more than 60.
+      expect(() => engine501.editVisit!(state, 2, 141, 1)).toThrow(InvalidVisitError);
+      // The same correction with the darts it really takes is accepted.
+      const finished = engine501.editVisit!(state, 2, 141, 3);
+      expect(finished.checkedOut).toBe(true);
+      expect(finished.darts).toBe(9);
+    });
+
+    it('busts an untouched later visit the correction has made impossible to go out on', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 100 }); // 401
+      state = engine501.applyInput(state, { score: 141 }); // 260
+      state = engine501.applyInput(state, { score: 180 }); // 80
+
+      // Raising the first visit to 180 leaves exactly 180 in front of that last 180. Reaching zero
+      // from 180 is not a checkout - it is above the 170 maximum - so it busts rather than winning.
+      const edited = engine501.editVisit!(state, 0, 180, 3);
+      expect(edited.visits[2].bust).toBe(true);
+      expect(edited.checkedOut).toBe(false);
+      expect(edited.remaining).toBe(180);
+      expect(edited.darts).toBe(9);
+    });
+
+    it('leaves a non-finishing visit at three darts, whatever count the correction picked', () => {
+      let state = engine501.createState();
+      state = engine501.applyInput(state, { score: 100 });
+      state = engine501.applyInput(state, { score: 100 });
+      const edited = engine501.editVisit!(state, 0, 140, 1);
+      expect(edited.visits[0].darts).toBe(3);
+      expect(edited.darts).toBe(6);
+    });
+
     it('is a no-op for a visit index that does not exist', () => {
       const state = engine501.applyInput(engine501.createState(), { score: 100 });
       expect(engine501.editVisit!(state, 5, 60, 3)).toBe(state);

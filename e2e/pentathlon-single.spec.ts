@@ -249,6 +249,52 @@ test.describe('X01の過去スコア修正', () => {
     await expect(cells.nth(1)).toHaveText('100');
   });
 
+  test('never lets a correction reach zero from a number that cannot be gone out on', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501');
+    await enterPentScore(page, 180); // 321
+    await enterPentScore(page, 141); // 180
+    await enterPentScore(page, 60); // 120
+
+    await page.locator('.n01-score-table td.scored button').nth(2).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.locator('input[type="number"]').fill('180');
+    // 180 left is above the 170 maximum checkout, so no 上がり本数 row is offered at all - and the
+    // correction is refused rather than silently recorded as a win.
+    await expect(dialog.locator('.n01-darts-inline')).toHaveCount(0);
+    await expect(dialog.locator('.pent-edit-note')).toContainText('上がれない数字');
+    await dialog.getByRole('button', { name: '修正して再計算' }).click();
+
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.n01-notice.warning')).toContainText('上がれない数字');
+    await expect(page.locator('.n01-left-table strong')).toHaveText('120');
+  });
+
+  test('only offers the dart counts that can actually finish a corrected checkout', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'JDA 501');
+    await enterPentScore(page, 180); // 321
+    await enterPentScore(page, 180); // 141
+    await enterPentScore(page, 60); // 81
+
+    await page.locator('.n01-score-table td.scored button').nth(2).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.locator('input[type="number"]').fill('141');
+    // 141 takes all three darts (T20 T19 D12), so 1本 and 2本 are offered but not selectable.
+    const counts = dialog.locator('.n01-darts-inline button');
+    await expect(counts.nth(0)).toBeDisabled();
+    await expect(counts.nth(1)).toBeDisabled();
+    await expect(counts.nth(2)).toBeEnabled();
+    await dialog.getByRole('button', { name: '修正して再計算' }).click();
+
+    await expect(page.locator('.pent-result-table')).toContainText('COMPLETE');
+    await expect(page.locator('.pent-result-table')).toContainText('9');
+  });
+
   test('rejects an impossible correction without closing the editor', async ({ page }) => {
     await openFreshApp(page);
     await startSingleGame(page, 'JDA 501');

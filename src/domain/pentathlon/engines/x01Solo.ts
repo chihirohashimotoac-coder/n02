@@ -1,5 +1,5 @@
-import { isReachableScore, MAX_VISIT_SCORE } from '../../darts';
-import { InvalidVisitError, resolveVisit } from '../../x01Core';
+import { isReachableScore, MAX_VISIT_SCORE, validFinishDartCounts } from '../../darts';
+import { InvalidVisitError, resolveVisit, type VisitResolution } from '../../x01Core';
 import type { CompareOutcome, DisciplineEngine, DisciplineId, DisciplineResult } from '../types';
 
 export interface X01SoloState {
@@ -102,10 +102,16 @@ export function createX01SoloEngine(
 
     /**
      * Corrects an already-entered visit and replays the attempt from the start score - the same
-     * "修正して再計算" 通常01・チェックアウト練習 offer on their own score sheet, and deliberately the
-     * same arithmetic: a visit that no longer fits the corrected remaining becomes a bust, and a
-     * visit that lands exactly on zero checks out. Anything recorded after a checkout is dropped,
-     * because those darts could never have been thrown.
+     * "修正して再計算" 通常01・チェックアウト練習 offer on their own score sheet. The replay goes back
+     * through resolveVisit rather than doing the arithmetic itself, so a corrected visit is held to
+     * exactly the rules a live one is: landing on zero only checks out from a remaining that can
+     * actually be gone out on, in a number of darts that can actually do it. Reaching zero is not
+     * enough on its own - a remaining of 1 or of 171-180 cannot be finished at all, and here a
+     * wrongly accepted checkout would not just misreport a stat, it would end the discipline on the
+     * spot and hand someone the win.
+     *
+     * A visit that no longer fits the corrected remaining becomes a bust, and anything recorded
+     * after a checkout is dropped, because those darts could never have been thrown.
      */
     editVisit(state, visitIndex, newScore, newDarts) {
       if (visitIndex < 0 || visitIndex >= state.visits.length) return state;
@@ -133,20 +139,31 @@ export function createX01SoloEngine(
       let darts = 0;
       let checkedOut = false;
       const visits: X01SoloState['visits'] = [];
-      for (const entry of entries) {
-        const bust = entry.entered > remaining;
-        const after = bust ? remaining : remaining - entry.entered;
-        const checkout = !bust && after === 0;
+      for (const [index, entry] of entries.entries()) {
+        let resolution: VisitResolution;
+        try {
+          resolution = resolveVisit(remaining, entry.entered, entry.darts);
+        } catch (caught) {
+          if (!(caught instanceof InvalidVisitError)) throw caught;
+          // The correction itself is the throw that cannot be made: reject it and change nothing,
+          // so the dialog can say why rather than quietly recording something impossible.
+          if (index === visitIndex) throw impossibleEditError(caught, remaining, entry);
+          // An untouched later visit that the correction has made impossible - its score now lands
+          // exactly on a remaining that cannot be gone out on. On the board that is a bust.
+          resolution = { after: remaining, bust: true, checkout: false, darts: 3 };
+        }
         visits.push({
-          score: bust ? 0 : entry.entered,
-          darts: entry.darts,
-          bust,
-          checkout,
+          // Only a checkout gets to say how many darts it took; every other visit is three, which
+          // is the only count applyInput itself can produce.
+          score: resolution.bust ? 0 : entry.entered,
+          darts: resolution.checkout ? resolution.darts : 3,
+          bust: resolution.bust,
+          checkout: resolution.checkout,
           entered: entry.entered,
         });
-        remaining = after;
-        darts += entry.darts;
-        if (checkout) {
+        remaining = resolution.after;
+        darts += resolution.checkout ? resolution.darts : 3;
+        if (resolution.checkout) {
           checkedOut = true;
           break;
         }
@@ -191,6 +208,24 @@ export function createX01SoloEngine(
       return `残り ${state.remaining}`;
     },
   };
+}
+
+/**
+ * resolveVisit's own message for a rejected finish is "上がり本数を選択してください" - written for the
+ * live input, where the count has not been chosen yet. On a correction the count HAS been chosen and
+ * simply cannot finish this number, so say that instead and name the counts that can.
+ */
+function impossibleEditError(
+  caught: InvalidVisitError,
+  remaining: number,
+  entry: { entered: number; darts: number },
+): InvalidVisitError {
+  if (entry.entered !== remaining) return caught;
+  const counts = validFinishDartCounts(remaining);
+  if (counts.length === 0 || counts.includes(entry.darts)) return caught;
+  return new InvalidVisitError(
+    `残り${remaining}を${entry.darts}投で上がることはできません。${counts.join('・')}投のいずれかを選んでください。`,
+  );
 }
 
 function finalizeIfRoundLimitReached(state: X01SoloState, roundLimit: number): X01SoloState {

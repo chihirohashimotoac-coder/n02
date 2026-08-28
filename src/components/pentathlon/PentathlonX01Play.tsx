@@ -50,7 +50,12 @@ export default function PentathlonX01Play({
   const [entry, setEntry] = useState('');
   const [modal, setModal] = useState<Modal>('none');
   const [pendingFinish, setPendingFinish] = useState<number | null>(null);
-  const [edit, setEdit] = useState<{ player: PlayerIndex; visitIndex: number } | null>(null);
+  const [edit, setEdit] = useState<{
+    player: PlayerIndex;
+    visitIndex: number;
+    /** What the player was on before this visit - what decides whether a correction can go out. */
+    remainingBefore: number;
+  } | null>(null);
   const [editScore, setEditScore] = useState('');
   const [editDarts, setEditDarts] = useState(3);
   // Shown inside the edit dialog: the play screen's own error banner sits behind it, where a
@@ -148,6 +153,12 @@ export default function PentathlonX01Play({
 
   const finishCounts = pendingFinish !== null ? validFinishDartCounts(activeState.remaining) : [];
 
+  // A correction that lands exactly on what the player was sitting on is a finish declaration, and
+  // has to be held to the same double-out rules as one entered live.
+  const isEditFinish = edit !== null && Number(editScore) === edit.remainingBefore && edit.remainingBefore > 0;
+  const editFinishCounts = isEditFinish ? validFinishDartCounts(edit.remainingBefore) : [];
+  const editEffectiveDarts = editFinishCounts.includes(editDarts) ? editDarts : (editFinishCounts[0] ?? 3);
+
   const openFinishModal = () => {
     const counts = validFinishDartCounts(activeState.remaining);
     if (counts.length === 0) {
@@ -159,9 +170,14 @@ export default function PentathlonX01Play({
   };
 
   const openEditor = (player: PlayerIndex, visitIndex: number) => {
-    const visit = (current.progress[player].state as X01SoloState).visits[visitIndex];
+    const state = current.progress[player].state as X01SoloState;
+    const visit = state.visits[visitIndex];
     if (!visit) return;
-    setEdit({ player, visitIndex });
+    // Everything before the edited visit is untouched, so the score it was thrown at is exact.
+    const remainingBefore = state.visits
+      .slice(0, visitIndex)
+      .reduce((left, earlier) => left - earlier.score, state.startScore);
+    setEdit({ player, visitIndex, remainingBefore });
     setEditScore(String(visit.entered ?? visit.score));
     setEditDarts(visit.darts);
     setEditError(null);
@@ -416,19 +432,34 @@ export default function PentathlonX01Play({
               onChange={(event) => setEditScore(event.target.value)}
             />
           </label>
-          <div className="n01-darts-inline">
-            <span>使用ダーツ</span>
-            {[1, 2, 3].map((count) => (
-              <button
-                key={count}
-                type="button"
-                className={editDarts === count ? 'selected' : ''}
-                onClick={() => setEditDarts(count)}
-              >
-                {count}本
-              </button>
-            ))}
-          </div>
+          {/*
+            * The dart count only ever means anything on the visit that goes out - every other visit
+            * is three darts. So it is offered only when the correction actually finishes, and then
+            * only in the counts that can finish this number, rather than letting a 1-dart 170
+            * through for the engine to reject.
+            */}
+          {editFinishCounts.length > 0 ? (
+            <div className="n01-darts-inline">
+              <span>上がり本数</span>
+              {[1, 2, 3].map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  disabled={!editFinishCounts.includes(count)}
+                  className={editEffectiveDarts === count ? 'selected' : ''}
+                  onClick={() => setEditDarts(count)}
+                >
+                  {count}本
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="pent-edit-note">
+              {isEditFinish
+                ? `残り${edit.remainingBefore}は上がれない数字のため、この得点では確定できません。バストだった投球は0を入力してください。`
+                : `残り${edit.remainingBefore}に対する得点として再計算します（上がり以外は3ダーツ）。`}
+            </p>
+          )}
           {editError && (
             <p className="n01-notice warning" role="alert">
               {editError}
@@ -439,7 +470,7 @@ export default function PentathlonX01Play({
             className="n01-modal-primary"
             onClick={() => {
               try {
-                onEditVisit(edit.player, edit.visitIndex, Number(editScore), editDarts);
+                onEditVisit(edit.player, edit.visitIndex, Number(editScore), editEffectiveDarts);
                 setModal('none');
                 setEdit(null);
                 setEditError(null);

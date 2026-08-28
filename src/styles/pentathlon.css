@@ -1197,6 +1197,14 @@
   font-weight: 700;
 }
 
+/* What the correction will do, shown in place of the 上がり本数 row when it is not a finish. */
+.pent-edit-note {
+  color: var(--muted);
+  margin: 12px 0 0;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
 /* Which round the player on the oche is throwing, pinned beside the ☰ button. */
 .pent-round-chip {
   flex: none;
