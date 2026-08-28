@@ -507,6 +507,30 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     await expect(page.locator('.pent-cricket-mark.staged')).toHaveCount(0);
   });
 
+  test('only the current, unconfirmed turn is editable - never a committed or opponent mark', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'CRICKET', 2);
+
+    // P1 stages a mark: their own unconfirmed mark is the one thing that can be tapped to correct.
+    await tapCricket(page, 'トリプル20');
+    await expect(page.locator('.pent-cricket-mark.editable')).toHaveCount(1);
+
+    // Once confirmed it is history: nothing on the board can be tapped to correct any more.
+    await page.getByRole('button', { name: '確定' }).click();
+    await expect(page.locator('.pent-cricket-mark.editable')).toHaveCount(0);
+    await expect(page.locator('.pent-cricket-sym.closed')).toHaveCount(1);
+
+    // P2 stages their own mark: still exactly one editable cell, and P1's committed 20 is not it.
+    await tapCricket(page, 'トリプル19');
+    await expect(page.locator('.pent-cricket-mark.editable')).toHaveCount(1);
+    const row20 = page
+      .locator('.pent-cricket-row')
+      .filter({ has: page.getByRole('button', { name: 'シングル20', exact: true }) });
+    await expect(row20.locator('.pent-cricket-mark.editable')).toHaveCount(0);
+  });
+
   test('a turn where nothing landed is 確定 alone', async ({ page }) => {
     await openFreshApp(page);
     await startSingleGame(page, 'CRICKET', 1);

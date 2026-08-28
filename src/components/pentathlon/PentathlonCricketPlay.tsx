@@ -41,7 +41,10 @@ const RING_MARKS = { single: 1, double: 2, triple: 3 } as const;
  * from n01's assets, CSS or JavaScript was used.
  *
  * Marks entered this turn are shown in red and are not committed until 確定, so a mistake can be
- * fixed either with 1投戻す or by tapping the mark itself, which offers ／ ✕ ⊗ and delete.
+ * fixed either with 1投戻す or by tapping the mark itself, which offers ／ ✕ ⊗ and delete. That
+ * correction is deliberately scoped to the turn being entered right now: a confirmed turn - the
+ * player's own earlier rounds included - and the opponent's marks are never editable in place, and
+ * are corrected by undoing back to that point instead.
  */
 export default function PentathlonCricketPlay({
   session,
