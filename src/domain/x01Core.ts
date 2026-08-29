@@ -23,7 +23,10 @@ export function resolveVisit(remaining: number, enteredScore: number, finishDart
     throw new InvalidVisitError(`${enteredScore}は3投では出せない得点です。`);
   }
 
-  if (enteredScore > remaining) {
+  // Double-out X01 busts the whole visit when the subtraction would leave 1: there is no
+  // possible double that can finish it on a later dart. Keep this in the shared resolver so
+  // normal 01, checkout practice and both Pentathlon X01 disciplines cannot drift apart.
+  if (enteredScore > remaining || remaining - enteredScore === 1) {
     return { after: remaining, bust: true, checkout: false, darts: 3 };
   }
 

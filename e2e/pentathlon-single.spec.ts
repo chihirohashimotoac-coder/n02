@@ -209,7 +209,7 @@ test.describe('ラウンド数の表示', () => {
     for (let target = 1; target <= 21; target += 1) {
       const hit = page.locator('.pent-quick-btn.hit').first();
       await hit.click();
-      if (target % 3 === 0) {
+      if (target % 3 === 0 && target < 21) {
         await commitPentTurn(page);
         // P2's turn - three misses, except after the turn that wins it outright.
         if (await page.locator('.pent-quick-btn').first().isVisible()) {
@@ -225,6 +225,64 @@ test.describe('ラウンド数の表示', () => {
     await expect(row.locator('.pent-result-stat b')).toHaveText('7');
     await expect(page.locator('.pent-result-table .pent-result-row').nth(2)).toContainText('DNF');
     await expect(page.locator('.pent-winner-banner strong')).toHaveText('プレイヤー1');
+  });
+
+  test('a Bull on dart 1 completes immediately and Undo restores the pre-Bull state', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'Round-the-Clock ON DOUBLES', 1);
+
+    // Six perfect turns reach D19. Finish D19/D20, spend the third dart as a miss, then start the
+    // next round on BULL so its first real dart can end the attempt.
+    for (let target = 1; target <= 20; target += 1) {
+      await page.locator('.pent-quick-btn.hit').first().click();
+      if (target % 3 === 0) await commitPentTurn(page);
+    }
+    await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+    await expect(page.locator('.pent-round-chip')).toHaveText('ROUND 8');
+
+    // Dispatch twice in the same task to exercise the pre-render double-tap guard.
+    await page.locator('.pent-quick-btn.hit').first().evaluate((button) => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await expect(page.getByText('GAME COMPLETE')).toBeVisible();
+    await expect(page.locator('.pent-result-table .pent-result-row').nth(1)).toContainText(
+      '22 DARTS・8R',
+    );
+    const savedRecords = await page.evaluate(() => {
+      const raw = localStorage.getItem('n02-pentathlon-single-v1');
+      return raw ? (JSON.parse(raw) as { records: unknown[] }).records.length : 0;
+    });
+    expect(savedRecords).toBe(1);
+
+    await page.getByRole('button', { name: '完走直前へ戻す' }).click();
+    await expect(page.locator('.pent-aim-target')).toContainText('BULL');
+    await expect(page.locator('.pent-round-chip')).toHaveText('ROUND 8');
+  });
+
+  test('a Bull on dart 2 completes immediately with exactly two darts charged', async ({ page }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'Round-the-Clock ON DOUBLES', 1);
+
+    for (let target = 1; target <= 18; target += 1) {
+      await page.locator('.pent-quick-btn.hit').first().click();
+      if (target % 3 === 0) await commitPentTurn(page);
+    }
+    // Round 7: D19 then two misses. Round 8 starts at D20; D20 + BULL must auto-commit at dart 2.
+    await page.locator('.pent-quick-btn.hit').first().click();
+    await tapQuickTarget(page, 'ミス');
+    await tapQuickTarget(page, 'ミス');
+    await commitPentTurn(page);
+    await page.locator('.pent-quick-btn.hit').first().click();
+    await page.locator('.pent-quick-btn.hit').first().click();
+
+    await expect(page.getByText('GAME COMPLETE')).toBeVisible();
+    await expect(page.locator('.pent-result-table .pent-result-row').nth(1)).toContainText(
+      '23 DARTS・8R',
+    );
   });
 });
 
@@ -569,6 +627,7 @@ test.describe('個別練習の中断と再開', () => {
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('321');
 
     await page.getByRole('button', { name: '中断' }).click();
+    await page.reload();
     await page.locator('.mode-card[data-mode="pentathlon-single"]').click();
 
     const resume = page.getByRole('button', { name: /中断した個別練習を再開/ });
@@ -578,6 +637,20 @@ test.describe('個別練習の中断と再開', () => {
 
     await expect(page.locator('.pent-x01-shell')).toBeVisible();
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('321');
+
+    await enterPentScore(page, 180);
+    await enterPentScore(page, 141);
+    await confirmFinish(page);
+    await expect(page.getByText('GAME COMPLETE')).toBeVisible();
+
+    await page.getByRole('button', { name: 'もう一度プレイ' }).click();
+    await expect(page.locator('.pent-x01-shell')).toBeVisible();
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('501');
+    const fresh = await page.evaluate(() => {
+      const raw = localStorage.getItem('n02-pentathlon-single-v1');
+      return raw ? (JSON.parse(raw) as { records: unknown[]; undo: unknown[] }).records.length : -1;
+    });
+    expect(fresh).toBe(0);
   });
 
   test('finishing a game clears its saved session', async ({ page }) => {

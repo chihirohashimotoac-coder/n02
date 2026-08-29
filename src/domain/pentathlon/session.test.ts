@@ -12,6 +12,7 @@ import {
   editVisitScore,
   isDisciplineComplete,
   isSingleGameSession,
+  replayOptionsFromSession,
   sessionDisciplines,
   stageHit,
   undoRound,
@@ -20,6 +21,7 @@ import {
 } from './session';
 import type { DartHit } from '../darts';
 import type { PentathlonSession } from './types';
+import { SINGLE_GAME_OPTIONS } from './presets';
 
 const D = (value: number): DartHit => ({ kind: 'number', value, ring: 'double' });
 const MISS: DartHit = { kind: 'miss' };
@@ -101,6 +103,37 @@ describe('createPentathlonSession', () => {
   it('forces player 0 as starter in 1-player mode', () => {
     const session = newSession({ playerCount: 1, initialStarter: 1 });
     expect(session.current!.active).toBe(0);
+  });
+});
+
+describe('replayOptionsFromSession', () => {
+  it('recreates a clean attempt with the saved setup for all ten single-game entries', () => {
+    for (const option of SINGLE_GAME_OPTIONS) {
+      for (const playerCount of [1, 2] as const) {
+        const saved = createPentathlonSession({
+          preset: option.preset,
+          mode: 'single',
+          disciplines: [option.disciplineId],
+          playerCount,
+          names: ['Alice', 'Bob'],
+          starterMode: 'alternate',
+          initialStarter: 1,
+          showRoute: true,
+        });
+
+        const replayed = createPentathlonSession(replayOptionsFromSession(saved));
+        expect(replayed.preset).toBe(option.preset);
+        expect(replayed.mode).toBe('single');
+        expect(replayed.disciplines).toEqual([option.disciplineId]);
+        expect(replayed.playerCount).toBe(playerCount);
+        expect(replayed.names).toEqual(['Alice', 'Bob']);
+        expect(replayed.showRoute).toBe(true);
+        expect(replayed.records).toEqual([]);
+        expect(replayed.undo).toEqual([]);
+        expect(replayed.status).toBe('playing');
+        expect(currentDisciplineId(replayed)).toBe(option.disciplineId);
+      }
+    }
   });
 });
 
@@ -589,6 +622,52 @@ describe('Cricket territory denial through the session controller (regression)',
     session = applyTurn(session, [T(20)]);
     expect((session.current?.progress[0].state as { self: { points: number } }).self.points).toBe(120);
   });
+});
+
+describe('Cricket long-game fairness', () => {
+  const dartsFor = (session: PentathlonSession, player: 0 | 1) =>
+    (session.current!.progress[player].state as { self: { darts: number } }).self.darts;
+
+  it.each([0, 1] as const)(
+    'lets both players finish round 30 and continues under the standard rules (starter P%i)',
+    (starter) => {
+      let session = newSession({
+        preset: 'n01',
+        mode: 'single',
+        disciplines: ['cricket'],
+        initialStarter: starter,
+      });
+      const second = starter === 0 ? 1 : 0;
+
+      for (let round = 0; round < 29; round += 1) {
+        session = applyTurn(session, []);
+        session = applyTurn(session, []);
+      }
+      expect(dartsFor(session, 0)).toBe(87);
+      expect(dartsFor(session, 1)).toBe(87);
+      expect(session.current!.active).toBe(starter);
+
+      session = applyTurn(session, []);
+      expect(session.status).toBe('playing');
+      expect(dartsFor(session, starter)).toBe(90);
+      expect(dartsFor(session, second)).toBe(87);
+      expect(session.current!.active).toBe(second);
+
+      // JSON round-trip is the LocalStorage resume boundary: the later thrower still gets the same
+      // 30th round, and there is no cap-specific winner after it.
+      session = JSON.parse(JSON.stringify(session)) as PentathlonSession;
+      session = applyTurn(session, []);
+      expect(session.status).toBe('playing');
+      expect(dartsFor(session, 0)).toBe(90);
+      expect(dartsFor(session, 1)).toBe(90);
+
+      session = undoRound(session);
+      expect(session.status).toBe('playing');
+      expect(dartsFor(session, starter)).toBe(90);
+      expect(dartsFor(session, second)).toBe(87);
+      expect(session.current!.active).toBe(second);
+    },
+  );
 });
 
 describe('個別練習 (single-game sessions)', () => {

@@ -16,6 +16,7 @@ import {
   createPentathlonSession,
   currentDisciplineId,
   editVisitScore,
+  replayOptionsFromSession,
   setPendingHits,
   stageHit,
   undoRound as undoRoundSession,
@@ -83,6 +84,7 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
   const resume = useCallback(() => {
     const stored = load();
     if (stored) {
+      setLastOptions(replayOptionsFromSession(stored));
       setSession(stored);
       setError(null);
     }
@@ -250,6 +252,8 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
             setSavedSession(null);
             setError(null);
           }}
+          onUndo={handleUndoRound}
+          canUndo={canUndoRoundSession(session)}
           onExit={handleFinish}
         />
       );

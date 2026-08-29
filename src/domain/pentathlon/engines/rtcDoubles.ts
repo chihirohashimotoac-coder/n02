@@ -27,6 +27,16 @@ export function rtcAdvances(targetIndex: number, hit: DartHit): boolean {
   return hit.kind === 'number' && hit.ring === 'double' && hit.value === targetIndex + 1;
 }
 
+/** True when these not-yet-committed darts reach the final Bull from the current target. */
+export function rtcTurnCompletes(targetIndex: number, hits: readonly DartHit[]): boolean {
+  let nextTarget = targetIndex;
+  for (const hit of hits) {
+    if (nextTarget >= RTC_TARGET_COUNT) return true;
+    if (rtcAdvances(nextTarget, hit)) nextTarget += 1;
+  }
+  return nextTarget >= RTC_TARGET_COUNT;
+}
+
 /** Rounds are three darts each, so the round a player is on follows straight from their dart count. */
 export function rtcCurrentRound(darts: number): number {
   return Math.floor(darts / 3) + 1;

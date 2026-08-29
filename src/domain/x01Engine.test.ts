@@ -11,7 +11,7 @@ import {
   undoLastAction,
   type X01Settings,
 } from './x01Engine';
-import { InvalidVisitError } from './x01Core';
+import { InvalidVisitError, resolveVisit } from './x01Core';
 
 function baseSettings(overrides: Partial<X01Settings> = {}): X01Settings {
   return {
@@ -156,6 +156,46 @@ describe('applyVisit - bust', () => {
     expect(state.players[0].totalScored).toBe(360); // bust contributes 0
     expect(state.active).toBe(1); // turn still advances
   });
+
+  it.each([
+    [32, 31],
+    [2, 1],
+  ])('busts a visit from %i when %i would leave exactly 1', (remaining, score) => {
+    let state = createX01Match(baseSettings({ startScore: remaining }));
+    state = applyVisit(state, score);
+    expect(state.players[0].remaining).toBe(remaining);
+    expect(state.visits[0]).toMatchObject({ before: remaining, after: remaining, bust: true, darts: 3 });
+    expect(state.active).toBe(1);
+  });
+
+  it('uses the same leave-1 bust rule in checkout practice', () => {
+    let state = createX01Match(
+      baseSettings({ mode: 'checkout', checkoutMin: 32, checkoutMax: 32 }),
+    );
+    state = applyVisit(state, 31);
+    expect(state.players[0].remaining).toBe(32);
+    expect(state.visits[0].bust).toBe(true);
+  });
+});
+
+describe('resolveVisit - shared X01 boundaries', () => {
+  it('keeps the visit start on an overscore and accepts an exact checkout', () => {
+    expect(resolveVisit(20, 25)).toEqual({ after: 20, bust: true, checkout: false, darts: 3 });
+    expect(resolveVisit(40, 40, 1)).toEqual({ after: 0, bust: false, checkout: true, darts: 1 });
+  });
+
+  it.each([0, 25, 50, 60, 170])('accepts reachable non-finishing score %i', (score) => {
+    expect(resolveVisit(501, score)).toEqual({
+      after: 501 - score,
+      bust: false,
+      checkout: false,
+      darts: 3,
+    });
+  });
+
+  it('rejects unreachable 179', () => {
+    expect(() => resolveVisit(501, 179)).toThrow(InvalidVisitError);
+  });
 });
 
 describe('applyVisit - checkout and leg/match completion', () => {
@@ -255,6 +295,24 @@ describe('editVisit', () => {
     expect(state.visits[0].score).toBe(140);
     expect(state.visits[0].after).toBe(361); // 501-140
     expect(state.players[0].remaining).toBe(261); // 361 - 100 (second P0 visit unchanged)
+  });
+
+  it('replays an edited visit that would leave 1 as a bust', () => {
+    let state = createX01Match(baseSettings({ startScore: 32 }));
+    state = applyVisit(state, 0);
+    state = editVisit(state, 0, 31, 3);
+    expect(state.players[0].remaining).toBe(32);
+    expect(state.visits[0]).toMatchObject({ before: 32, after: 32, bust: true });
+  });
+
+  it('busts an untouched later visit when an earlier correction makes it leave 1', () => {
+    let state = createX01Match(baseSettings({ startScore: 100 }));
+    state = applyVisit(state, 40); // P0: 60
+    state = applyVisit(state, 0); // P1
+    state = applyVisit(state, 40); // P0: 20
+    state = editVisit(state, 0, 59, 3); // P0: 41, then the later 40 must bust
+    expect(state.players[0].remaining).toBe(41);
+    expect(state.visits[2]).toMatchObject({ before: 41, after: 41, bust: true });
   });
 
   it('regression: preserves prior-leg cumulative stats when editing a visit in leg 2+', () => {

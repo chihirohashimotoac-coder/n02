@@ -25,6 +25,14 @@ async function hasHorizontalScroll(page: Page): Promise<boolean> {
   });
 }
 
+/** Narrow screens and wide touch-first screens need the on-screen input route. */
+const keypadExpected = (page: Page) =>
+  page.evaluate(
+    () =>
+      window.innerWidth <= 720 ||
+      window.matchMedia('(hover: none) and (pointer: coarse)').matches,
+  );
+
 /** Is the element the top-most thing at its own centre - i.e. genuinely clickable, not covered? */
 async function isUnobstructed(page: Page, selector: string): Promise<boolean> {
   return page.evaluate((sel) => {
@@ -105,13 +113,10 @@ test.describe('layout: no horizontal scrolling', () => {
 });
 
 test.describe('layout: Pentathlon X01 input', () => {
-  /** The on-screen keypad exists only on narrow viewports, exactly as in 通常01・チェックアウト練習. */
-  const keypadExpected = (page: Page) => (page.viewportSize()?.width ?? 0) <= 720;
-
-  test('the keypad follows 通常01: on narrow viewports only', async ({ page }) => {
+  test('the keypad follows input capability rather than viewport width alone', async ({ page }) => {
     await startSinglePentathlonX01(page);
     const keypad = page.locator('.n01-key-table');
-    if (keypadExpected(page)) await expect(keypad).toBeVisible();
+    if (await keypadExpected(page)) await expect(keypad).toBeVisible();
     else await expect(keypad).toBeHidden();
   });
 
@@ -144,7 +149,7 @@ test.describe('layout: Pentathlon X01 input', () => {
     await expect(cell).toHaveValue('45');
     await expect(cell).toBeInViewport();
 
-    if (!keypadExpected(page)) return;
+    if (!(await keypadExpected(page))) return;
     // Where the keypad exists, every key stays clickable while a score is part-entered.
     for (const label of ['1', '0', 'Enter']) {
       const button = page.locator('.n01-key-table button', { hasText: new RegExp(`^${label}$`) }).first();
@@ -154,7 +159,7 @@ test.describe('layout: Pentathlon X01 input', () => {
   });
 
   test('the keypad is on screen and clear of the bottom edge', async ({ page }) => {
-    test.skip(!keypadExpected(page), 'no on-screen keypad above 720px');
+    test.skip(!(await keypadExpected(page)), 'this viewport has a physical-keyboard input route');
     await startSinglePentathlonX01(page);
 
     const keypad = page.locator('.n01-key-table');
@@ -171,7 +176,7 @@ test.describe('layout: Pentathlon X01 input', () => {
   });
 
   test('is fully playable with the on-screen keypad where it exists', async ({ page }) => {
-    test.skip(!keypadExpected(page), 'no on-screen keypad above 720px');
+    test.skip(!(await keypadExpected(page)), 'this viewport has a physical-keyboard input route');
     await startSinglePentathlonX01(page);
 
     const key = (label: string) =>
@@ -202,6 +207,34 @@ test.describe('layout: Pentathlon X01 input', () => {
   });
 });
 
+test.describe('layout: shared 通常01 / checkout input route', () => {
+  for (const mode of ['通常01', 'チェックアウト練習'] as const) {
+    test(`${mode} can enter a visit by the available input route`, async ({ page }) => {
+      await openFreshApp(page);
+      if (mode === 'チェックアウト練習') {
+        await page.locator('.mode-card', { hasText: mode }).click();
+      }
+      await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+      const keypad = page.locator('.n01-key-table');
+      if (await keypadExpected(page)) {
+        await expect(keypad).toBeVisible();
+        await keypad.getByRole('button', { name: '0', exact: true }).click();
+        await keypad.locator('button.enter').click();
+      } else {
+        await expect(keypad).toBeHidden();
+        await page.keyboard.type('0');
+        await page.keyboard.press('Enter');
+      }
+
+      await expect(page.locator('.n01-score-table td.scored button').first()).toHaveText('0');
+      expect(await hasHorizontalScroll(page)).toBe(false);
+      const footer = (await page.locator('.n01-game-footer').boundingBox())!;
+      expect(footer.y + footer.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+    });
+  }
+});
+
 test.describe('layout: gameplay fits one screen', () => {
   /** Every discipline, at every layout viewport, must be playable without scrolling the page. */
   const DISCIPLINES = ['CORK', 'JDA 501', 'BASEBALL', 'HALF-IT', 'GOLF', 'CRICKET'] as const;
@@ -217,8 +250,8 @@ test.describe('layout: gameplay fits one screen', () => {
       expect(await hasHorizontalScroll(page)).toBe(false);
 
       // The controls that commit a throw are on screen and genuinely clickable, unscrolled.
-      // X01 commits with Enter (its keypad is hidden above 720px, as in 通常01), so the score
-      // sheet's live entry cell is what has to be reachable there.
+      // X01 commits with Enter. Its keypad is visible on touch-first layouts and hidden where a
+      // physical-keyboard route is expected, so the live entry cell must always remain reachable.
       const commit =
         label === 'JDA 501'
           ? page.locator('.n01-score-table td.scored.current input')

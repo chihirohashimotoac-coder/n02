@@ -29,6 +29,20 @@ export interface CreateSessionOptions {
   disciplines?: DisciplineId[];
 }
 
+/** Reconstructs only the setup needed for a fresh attempt from a saved/completed session. */
+export function replayOptionsFromSession(session: PentathlonSession): CreateSessionOptions {
+  return {
+    preset: session.preset,
+    playerCount: session.playerCount,
+    names: [...session.names] as [string, string],
+    starterMode: session.starterMode,
+    initialStarter: session.initialStarter,
+    showRoute: session.showRoute ?? false,
+    mode: session.mode ?? 'full',
+    ...(session.disciplines ? { disciplines: [...session.disciplines] } : {}),
+  };
+}
+
 const MAX_UNDO = 60;
 
 export function createPentathlonSession(options: CreateSessionOptions): PentathlonSession {

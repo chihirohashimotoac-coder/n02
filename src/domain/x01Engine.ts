@@ -418,7 +418,7 @@ export function editVisit(state: X01MatchState, visitIndex: number, newScore: nu
 }
 
 function newScoreIsBust(before: number, score: number, _editIndex: number, _rebuiltIndex: number, _all: X01Visit[]): boolean {
-  return score > before;
+  return score > before || before - score === 1;
 }
 
 /** Swaps the two players' current-leg progress (a manual correction tool for mis-entered players). */

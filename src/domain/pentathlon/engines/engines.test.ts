@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { DartHit } from '../../darts';
 import { HALF_IT_START_SCORE, HALF_IT_TARGETS, halfItDartValue, halfItEngine } from './halfIt';
-import { createRtcDoublesEngine, RTC_TARGET_COUNT, rtcAdvances, rtcTargetLabel } from './rtcDoubles';
+import {
+  createRtcDoublesEngine,
+  RTC_TARGET_COUNT,
+  rtcAdvances,
+  rtcTargetLabel,
+  rtcTurnCompletes,
+} from './rtcDoubles';
 import { GOLF_HOLES, golfEngine, golfStrokes } from './golf';
 import { CORK_DARTS, corkDartValue, corkEngine } from './cork';
 import { BASEBALL_INNINGS, baseballEngine, baseballRuns } from './baseball';
-import {
-  CRICKET_ROUND_LIMIT,
-  allCricketClosed,
-  cricketEngine,
-  cricketMarks,
-  cricketMpr,
-} from './cricket';
+import { allCricketClosed, cricketEngine, cricketMarks, cricketMpr } from './cricket';
 import { createX01SoloEngine } from './x01Solo';
 import { InvalidVisitError } from '../../x01Core';
 
@@ -131,6 +131,12 @@ describe('Round the Clock on Doubles', () => {
     for (let i = 1; i <= 20; i++) state = engine.applyInput(state, [D(i)]);
     state = engine.applyInput(state, [BULL, D(5), D(6)]); // extra darts after completion
     expect(state.darts).toBe(21);
+  });
+
+  it('recognizes a finishing Bull as dart 1 or dart 2 of the turn', () => {
+    expect(rtcTurnCompletes(RTC_TARGET_COUNT - 1, [BULL])).toBe(true);
+    expect(rtcTurnCompletes(RTC_TARGET_COUNT - 2, [D(20), BULL])).toBe(true);
+    expect(rtcTurnCompletes(RTC_TARGET_COUNT - 2, [D(20), MISS])).toBe(false);
   });
 
   it('honours a dart limit as DNF', () => {
@@ -312,11 +318,11 @@ describe('Cricket (head-to-head, same rules as soft-tip machines)', () => {
     expect(cricketEngine.getResult(state).completed).toBe(true);
   });
 
-  it('stops at the round limit, undecided, if neither side closes out', () => {
+  it('does not invent an automatic result after 30 rounds', () => {
     let state = cricketEngine.createState();
-    for (let i = 0; i <= CRICKET_ROUND_LIMIT; i++) state = cricketEngine.applyInput(state, [MISS, MISS, MISS]);
-    expect(cricketEngine.isFinished(state)).toBe(true);
-    expect(cricketEngine.getResult(state).completed).toBe(false);
+    for (let i = 0; i < 31; i++) state = cricketEngine.applyInput(state, [MISS, MISS, MISS]);
+    expect(state.self.darts).toBe(93);
+    expect(cricketEngine.isFinished(state)).toBe(false);
   });
 
   it('counts a turn as three darts however few of them are entered', () => {
@@ -428,6 +434,13 @@ describe('Cricket (head-to-head, same rules as soft-tip machines)', () => {
     expect(cricketEngine.compareResults(openHighPoints, closedLowPoints)).toBe('p1');
   });
 
+  it('compareResults: with both players still open, higher points rank higher', () => {
+    const high = { value: 100, unit: 'points' as const, completed: false, darts: 90, label: '100 PTS (未クローズ)' };
+    const low = { value: 20, unit: 'points' as const, completed: false, darts: 90, label: '20 PTS (未クローズ)' };
+    expect(cricketEngine.compareResults(high, low)).toBe('p0');
+    expect(cricketEngine.compareResults(low, high)).toBe('p1');
+  });
+
   describe('territory denial (mirrorForOpponent)', () => {
     function mirror(state: ReturnType<typeof cricketEngine.createState>) {
       return cricketEngine.mirrorForOpponent!(state);
@@ -510,6 +523,20 @@ describe('X01 solo attempts', () => {
     expect(state.remaining).toBe(141);
     expect(state.darts).toBe(9);
     expect(state.visits[2].bust).toBe(true);
+  });
+
+  it('501: leaving 1 is the same 3-dart bust as normal 01', () => {
+    const engine = createX01SoloEngine({
+      id: 'x01-501',
+      name: '501',
+      startScore: 32,
+      doubleIn: false,
+      roundLimit: 0,
+    });
+    const state = engine.applyInput(engine.createState(), { score: 31 });
+    expect(state.remaining).toBe(32);
+    expect(state.darts).toBe(3);
+    expect(state.visits[0]).toMatchObject({ score: 0, entered: 31, bust: true });
   });
 
   it('301: double-in is the player\'s own responsibility - entering 0 for a missed double leaves remaining unchanged', () => {
@@ -663,6 +690,34 @@ describe('X01 solo attempts', () => {
     it('is a no-op for a visit index that does not exist', () => {
       const state = engine501.applyInput(engine501.createState(), { score: 100 });
       expect(engine501.editVisit!(state, 5, 60, 3)).toBe(state);
+    });
+    it('turns a corrected visit that would leave 1 into a bust', () => {
+      const engine = createX01SoloEngine({
+        id: 'x01-501',
+        name: '501',
+        startScore: 32,
+        doubleIn: false,
+        roundLimit: 0,
+      });
+      let state = engine.applyInput(engine.createState(), { score: 0 });
+      state = engine.editVisit!(state, 0, 31, 3);
+      expect(state.remaining).toBe(32);
+      expect(state.visits[0]).toMatchObject({ score: 0, entered: 31, bust: true });
+    });
+
+    it('busts an untouched later visit when an earlier correction makes it leave 1', () => {
+      const engine = createX01SoloEngine({
+        id: 'x01-501',
+        name: '501',
+        startScore: 100,
+        doubleIn: false,
+        roundLimit: 0,
+      });
+      let state = engine.applyInput(engine.createState(), { score: 40 });
+      state = engine.applyInput(state, { score: 40 });
+      state = engine.editVisit!(state, 0, 59, 3);
+      expect(state.remaining).toBe(41);
+      expect(state.visits[1]).toMatchObject({ score: 0, entered: 40, bust: true });
     });
   });
 });
