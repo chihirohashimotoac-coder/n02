@@ -20,10 +20,16 @@ export default function DisciplineResult({ session, onNext, onUndo, canUndo, onE
    * Held-down keys are ignored: the turn that ended the discipline was very likely committed with
    * Enter itself, and an auto-repeat from that same press would otherwise skip this screen before
    * it has been read.
+   *
+   * A focused control keeps its own Enter. Otherwise tabbing to 戻る or 中断してメニューへ and
+   * pressing Enter would be swallowed here and advance the pentathlon instead of doing what the
+   * button under the keyboard focus says.
    */
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.key !== 'Enter' || event.repeat) return;
+      const target = event.target as Element | null;
+      if (target?.closest?.('button, a, input, select, textarea, [contenteditable]')) return;
       event.preventDefault();
       onNext();
     };
