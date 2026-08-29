@@ -411,7 +411,7 @@ export function editVisit(state: X01MatchState, visitIndex: number, newScore: nu
       stats.finishDarts = [...stats.finishDarts, legDarts[v.player]];
       stats.highestFinish = Math.max(stats.highestFinish, v.score);
     }
-    rebuilt.push({ ...v, after, bust });
+    rebuilt.push({ ...v, before, after, bust });
   }
 
   return { ...state, players, visits: rebuilt, legDarts, undo: [] };
