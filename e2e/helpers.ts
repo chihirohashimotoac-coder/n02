@@ -1,9 +1,9 @@
 import type { Page } from '@playwright/test';
 
 /**
- * Enters a visit score on the 01/Checkout game screen. The on-screen keypad only exists on narrow
- * viewports (desktop users type instead), so this drives whichever input the viewport actually
- * offers - exercising both paths across the desktop and mobile projects.
+ * Enters a visit score on the 01/Checkout game screen. The on-screen keypad exists on narrow and
+ * touch-first viewports (desktop keyboard users type instead), so this drives whichever input the
+ * current device actually offers.
  */
 export async function enterGameScore(page: Page, score: number | string) {
   const keypadVisible = await page.locator('.n01-key-table').isVisible();

@@ -8,6 +8,8 @@ interface Props {
   session: PentathlonSession;
   onPlayAgain: () => void;
   onChooseAnother: () => void;
+  onUndo: () => void;
+  canUndo: boolean;
   onExit: () => void;
 }
 
@@ -15,7 +17,14 @@ interface Props {
  * Result screen for 個別練習: one discipline, judged on its own. No overall standing, no discipline
  * win count, and no path onward to another discipline - those belong to a full pentathlon.
  */
-export default function SingleGameResult({ session, onPlayAgain, onChooseAnother, onExit }: Props) {
+export default function SingleGameResult({
+  session,
+  onPlayAgain,
+  onChooseAnother,
+  onUndo,
+  canUndo,
+  onExit,
+}: Props) {
   const record = session.records[session.records.length - 1];
   if (!record) return null;
 
@@ -64,6 +73,9 @@ export default function SingleGameResult({ session, onPlayAgain, onChooseAnother
           label="ルール説明"
           {...DISCIPLINE_RULE_TEXT[record.id]}
         />
+        <button type="button" className="secondary-button" onClick={onUndo} disabled={!canUndo}>
+          完走直前へ戻す
+        </button>
         <button type="button" className="primary-button" onClick={onPlayAgain}>
           もう一度プレイ
         </button>

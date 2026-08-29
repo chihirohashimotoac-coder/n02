@@ -411,14 +411,14 @@ export function editVisit(state: X01MatchState, visitIndex: number, newScore: nu
       stats.finishDarts = [...stats.finishDarts, legDarts[v.player]];
       stats.highestFinish = Math.max(stats.highestFinish, v.score);
     }
-    rebuilt.push({ ...v, after, bust });
+    rebuilt.push({ ...v, before, after, bust });
   }
 
   return { ...state, players, visits: rebuilt, legDarts, undo: [] };
 }
 
 function newScoreIsBust(before: number, score: number, _editIndex: number, _rebuiltIndex: number, _all: X01Visit[]): boolean {
-  return score > before;
+  return score > before || before - score === 1;
 }
 
 /** Swaps the two players' current-leg progress (a manual correction tool for mis-entered players). */

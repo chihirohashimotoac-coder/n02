@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import DartHitPad from './DartHitPad';
 import PentathlonProgress from './PentathlonProgress';
 import PentathlonPlayMenu from './PentathlonPlayMenu';
@@ -7,6 +7,10 @@ import { getEngine } from '../../domain/pentathlon/presets';
 import { currentDisciplineId } from '../../domain/pentathlon/session';
 import type { DartHit } from '../../domain/darts';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
+import {
+  rtcTurnCompletes,
+  type RtcDoublesState,
+} from '../../domain/pentathlon/engines/rtcDoubles';
 
 interface Props {
   session: PentathlonSession;
@@ -48,6 +52,25 @@ export default function PentathlonPlay({
   const activeState = activeProgress.state;
   const quickTarget = deriveQuickTarget(disciplineId, activeState, current.pendingHits);
   const aim = activeProgress.finished ? null : describeAim(disciplineId, activeState, quickTarget);
+  const rtcFinishCommitted = useRef(false);
+
+  const stageOrFinishRtc = (hit: DartHit) => {
+    if (
+      disciplineId === 'rtc-doubles' &&
+      rtcTurnCompletes(
+        (activeState as RtcDoublesState).targetIndex,
+        [...current.pendingHits, hit],
+      )
+    ) {
+      // The Bull is the real final dart. Commit it immediately instead of asking for fictional
+      // darts 2/3. The ref also closes the tiny double-tap window before React paints the result.
+      if (rtcFinishCommitted.current) return;
+      rtcFinishCommitted.current = true;
+      onTurn([...current.pendingHits, hit]);
+      return;
+    }
+    onStageHit(hit);
+  };
 
   const players: PlayerIndex[] = session.playerCount === 1 ? [0] : [0, 1];
   // Rounds are per player (the second thrower is a round behind until they have thrown), so the
@@ -141,7 +164,7 @@ export default function PentathlonPlay({
             pendingHits={current.pendingHits}
             maxDarts={engine.dartsRemainingThisTurn?.(activeState as never) ?? 3}
             disabled={activeProgress.finished}
-            onStage={onStageHit}
+            onStage={stageOrFinishRtc}
             onUndoHit={onUndoStagedHit}
             onCommit={() => onTurn(current.pendingHits)}
             allowEarlyCommit={engine.meta.allowEarlyCommit}

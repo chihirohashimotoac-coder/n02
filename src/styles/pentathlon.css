@@ -1321,6 +1321,24 @@
   }
 }
 
+/* The shared wide-touch rule exposes the keypad; keep Pentathlon's footer/score-area height tied to
+   it as well, including the extra gesture-safe padding used by this fullscreen variant. */
+@media (width > 720px) and (hover: none) and (pointer: coarse) {
+  .pent-x01-shell {
+    --pent-footer-h: calc(374px + env(safe-area-inset-bottom, 0px) + 20px);
+  }
+  .pent-x01-shell .n01-left-table {
+    height: 94px;
+  }
+  .pent-x01-shell .n01-menu-table {
+    height: 48px;
+  }
+  .pent-x01-shell .n01-key-table {
+    height: auto;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  }
+}
+
 /* Long player names (up to the 18-character input limit) must not push anything sideways. */
 .pent-x01-shell .n01-player-name strong,
 .pent-x01-shell .pent-player-label {

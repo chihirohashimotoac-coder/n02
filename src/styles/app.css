@@ -2357,6 +2357,66 @@ select:focus-visible {
   }
 }
 
+/* A wide touch-first device still needs an on-screen input route. Keep the desktop layout for a
+   mouse/keyboard (including the same viewport widths) and compact only the X01 footer on a primary
+   coarse pointer with no hover, such as an iPad used without a hardware keyboard. */
+@media (width > 720px) and (hover: none) and (pointer: coarse) {
+  .n01-game-footer {
+    height: calc(360px + max(12px, env(safe-area-inset-bottom, 0px)));
+  }
+  .n01-score-area {
+    inset: 84px 0 calc(360px + max(12px, env(safe-area-inset-bottom, 0px)));
+  }
+  .n01-left-table {
+    height: 94px;
+  }
+  .n01-left-table strong {
+    font-size: 58px;
+  }
+  .n01-left-table span {
+    min-height: 11px;
+    margin-top: 3px;
+    font-size: 7px;
+  }
+  .n01-left-table span.checkout-route {
+    font-size: clamp(12px, 2vw, 17px);
+  }
+  .n01-menu-table {
+    height: 48px;
+  }
+  .n01-menu-table button {
+    font-size: 12px;
+  }
+  .n01-key-table {
+    background: #354239;
+    grid-template-rows: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
+    height: calc(218px + max(12px, env(safe-area-inset-bottom, 0px)));
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    display: grid;
+  }
+  .n01-key-table button {
+    color: #fff;
+    cursor: pointer;
+    touch-action: manipulation;
+    background: 0 0;
+    border-top: 1px solid #ffffff24;
+    border-bottom: 0;
+    border-left: 0;
+    border-right: 1px solid #ffffff24;
+    font-size: 23px;
+    font-weight: 650;
+  }
+  .n01-key-table button:active {
+    background: var(--green);
+  }
+  .n01-key-table button.enter {
+    background: var(--green);
+    font-size: 14px;
+    font-weight: 800;
+  }
+}
+
 .reset-stats {
   width: 100%;
   margin-top: 14px;

@@ -2,10 +2,6 @@ import type { DartHit } from '../../darts';
 import type { CompareOutcome, DisciplineEngine, DisciplineResult } from '../types';
 
 export const CRICKET_NUMBERS = [20, 19, 18, 17, 16, 15] as const;
-/** Not a rule - just a practical safety net so a degenerate game (both missing almost everything)
- * can't run forever in the UI. Real Cricket has no such cap; the win condition below ends any
- * realistically-played game on its own. */
-export const CRICKET_ROUND_LIMIT = 30;
 const MARKS_TO_CLOSE = 3;
 /**
  * How many of the seven targets either side must have closed for the "80%" stat window to shut.
@@ -180,9 +176,6 @@ export const cricketEngine: DisciplineEngine<CricketState, DartHit[]> = {
     if (allCricketClosed(self) && points >= state.opponent.points) {
       finished = true;
       winner = 'self';
-    } else if (self.round > CRICKET_ROUND_LIMIT) {
-      finished = true;
-      winner = points > state.opponent.points ? 'self' : points < state.opponent.points ? 'opponent' : null;
     }
 
     return { self, opponent: state.opponent, finished, winner };

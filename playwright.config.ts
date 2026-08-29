@@ -27,6 +27,9 @@ const VIEWPORTS = {
   iphone13: { width: 390, height: 844 },
   iphone15: { width: 393, height: 852 },
   iphoneMax: { width: 430, height: 932 },
+  tabletPortrait: { width: 768, height: 1024 },
+  tabletLandscape: { width: 1024, height: 768 },
+  tabletWide: { width: 1180, height: 820 },
 } as const;
 
 const chromium = executablePath ? { launchOptions: { executablePath } } : {};
@@ -71,6 +74,36 @@ export default defineConfig({
       name: 'layout-iphone-430',
       testMatch: /layout\.spec\.ts/,
       use: { ...devices['Pixel 5'], viewport: VIEWPORTS.iphoneMax, ...chromium },
+    },
+    {
+      name: 'layout-touch-768x1024',
+      testMatch: /layout\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: VIEWPORTS.tabletPortrait,
+        hasTouch: true,
+        ...chromium,
+      },
+    },
+    {
+      name: 'layout-touch-1024x768',
+      testMatch: /layout\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: VIEWPORTS.tabletLandscape,
+        hasTouch: true,
+        ...chromium,
+      },
+    },
+    {
+      name: 'layout-touch-1180x820',
+      testMatch: /layout\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: VIEWPORTS.tabletWide,
+        hasTouch: true,
+        ...chromium,
+      },
     },
 
     /*

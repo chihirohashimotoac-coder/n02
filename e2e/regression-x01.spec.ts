@@ -43,6 +43,23 @@ test.describe('通常01', () => {
     await expect(page.locator('.result-card h2')).toHaveText('プレイヤー1');
   });
 
+  test('leaving 1 is a three-dart bust and hands over the turn', async ({ page }) => {
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    for (const score of [180, 0, 180, 0, 109, 0, 31]) await enterGameScore(page, score);
+
+    await expect(page.locator('.n01-notice')).toContainText('バスト');
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('32');
+    await expect(page.locator('.n01-player-name').nth(1)).toHaveClass(/active/);
+    const lastVisit = await page.evaluate(() => {
+      const raw = localStorage.getItem('n02-current-v1');
+      const visits = raw
+        ? (JSON.parse(raw) as { visits: Array<Record<string, unknown>> }).visits
+        : [];
+      return visits.at(-1);
+    });
+    expect(lastVisit).toMatchObject({ before: 32, after: 32, darts: 3, bust: true });
+  });
+
   test('has no always-on entry preview and keeps its four-button menu', async ({ page }) => {
     await page.getByRole('button', { name: /ゲームを開始/ }).click();
     await expect(page.locator('.n01-entry-display')).toHaveCount(0);
@@ -108,6 +125,19 @@ test.describe('チェックアウト練習', () => {
     const value = Number(target);
     expect(value).toBeGreaterThanOrEqual(41);
     expect(value).toBeLessThanOrEqual(170);
+  });
+
+  test('leaving 1 is also a bust', async ({ page }) => {
+    // This describe's beforeEach has already started the random challenge. Start a deterministic
+    // 41 challenge afresh so scoring 40 exercises the shared leave-1 boundary.
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+    await page.getByLabel('出題下限').fill('41');
+    await page.getByLabel('出題上限').fill('41');
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+    await enterGameScore(page, 40);
+    await expect(page.locator('.n01-notice')).toContainText('バスト');
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('41');
   });
 
   test('has no always-on entry preview', async ({ page }) => {
