@@ -115,6 +115,27 @@ test.describe('layout: Pentathlon X01 input', () => {
     else await expect(keypad).toBeHidden();
   });
 
+  test('the remaining score is set at exactly the size 通常01 uses', async ({ page }) => {
+    // Both screens are the same fullscreen shell, so the headline number a player reads from across
+    // the room must not shrink just because the game happens to be a Pentathlon discipline.
+    await startSinglePentathlonX01(page);
+    const pentathlon = await page
+      .locator('.n01-left-table strong')
+      .first()
+      .evaluate((el) => getComputedStyle(el).fontSize);
+
+    // 通常01 is the menu's own default selection, so starting straight away opens it.
+    await openFreshApp(page);
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await expect(page.locator('.n01-game-shell')).toBeVisible();
+    const standard = await page
+      .locator('.n01-left-table strong')
+      .first()
+      .evaluate((el) => getComputedStyle(el).fontSize);
+
+    expect(pentathlon).toBe(standard);
+  });
+
   test('the score being typed appears in the sheet, with nothing covering it', async ({ page }) => {
     await startSinglePentathlonX01(page);
 

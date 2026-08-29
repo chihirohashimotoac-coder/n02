@@ -1231,6 +1231,20 @@
   width: 100%;
   margin-top: 8px;
 }
+/* Enter advances between disciplines, so the primary action carries that shortcut on its face - the
+   same treatment 通常01's own leg-result button gives it. */
+.pent-play .primary-button kbd {
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #ffffff1f;
+  border: 1px solid #ffffff8c;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: 9px;
+}
+
 .pent-x01-result .secondary-button kbd {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1247,9 +1261,10 @@
    footer lays its rows out as a column and lets the keypad take whatever is left, so the keys can
    never overflow past the bottom edge however the rows above happen to measure. On desktop the
    keypad is hidden (the shared .n01-key-table rule in app.css), exactly as in 通常01・チェックアウト
-   練習, so the footer is only the remaining two rows: 120px scores + 62px menu. */
+   練習, so the footer is only the remaining two rows: 190px scores + 62px menu - the same 252px
+   通常01 uses, which is what keeps the remaining-score digits the same size as over there. */
 .pent-x01-shell {
-  --pent-footer-h: 182px;
+  --pent-footer-h: 252px;
 }
 .pent-x01-shell .n01-game-footer {
   height: var(--pent-footer-h);
@@ -1267,12 +1282,8 @@
 .pent-x01-shell .n01-score-area {
   inset: 84px 0 var(--pent-footer-h);
 }
-.pent-x01-shell .n01-left-table {
-  height: 120px;
-}
-.pent-x01-shell .n01-left-table strong {
-  font-size: 56px;
-}
+/* The remaining-score row itself is left entirely to the shared .n01-left-table rules: same height,
+   same digits, same everything as 通常01・チェックアウト練習. Nothing to override here. */
 
 /* Score cells are 01's own tap-to-edit buttons; only the colour needs restating, because the shared
    rule leaves it to inherit and Pentathlon's shell sets a different one further up the tree. */
@@ -1307,12 +1318,6 @@
   .pent-x01-shell .n01-key-table {
     height: auto;
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
-  }
-  .pent-x01-shell .n01-left-table {
-    height: 94px;
-  }
-  .pent-x01-shell .n01-left-table strong {
-    font-size: 46px;
   }
 }
 

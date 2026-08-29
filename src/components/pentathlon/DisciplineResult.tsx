@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { getEngine } from '../../domain/pentathlon/presets';
 import { computeNextStarter, sessionDisciplines } from '../../domain/pentathlon/session';
 import DisciplineResultTable from './DisciplineResultTable';
@@ -12,6 +13,30 @@ interface Props {
 }
 
 export default function DisciplineResult({ session, onNext, onUndo, canUndo, onExit }: Props) {
+  /*
+   * Enter moves on, so a whole pentathlon can be played from the keyboard without reaching for the
+   * mouse between disciplines - the play screens already commit a turn on Enter.
+   *
+   * Held-down keys are ignored: the turn that ended the discipline was very likely committed with
+   * Enter itself, and an auto-repeat from that same press would otherwise skip this screen before
+   * it has been read.
+   *
+   * A focused control keeps its own Enter. Otherwise tabbing to 戻る or 中断してメニューへ and
+   * pressing Enter would be swallowed here and advance the pentathlon instead of doing what the
+   * button under the keyboard focus says.
+   */
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.repeat) return;
+      const target = event.target as Element | null;
+      if (target?.closest?.('button, a, input, select, textarea, [contenteditable]')) return;
+      event.preventDefault();
+      onNext();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onNext]);
+
   const record = session.records[session.records.length - 1];
   if (!record) return null;
 
@@ -71,7 +96,7 @@ export default function DisciplineResult({ session, onNext, onUndo, canUndo, onE
       )}
 
       <button type="button" className="primary-button" onClick={onNext}>
-        {isLast ? '総合リザルトへ' : `次の種目へ・${getEngine(nextId).meta.name}`}
+        {isLast ? '総合リザルトへ' : `次の種目へ・${getEngine(nextId).meta.name}`} <kbd>Enter</kbd>
       </button>
       {canUndo && (
         <button type="button" className="text-button" onClick={onUndo}>

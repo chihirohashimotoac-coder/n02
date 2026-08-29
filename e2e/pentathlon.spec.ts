@@ -121,6 +121,38 @@ test.describe('Pentathlon 2-player progression', () => {
     await expect(page.locator('.pent-aim')).toContainText('プレイヤー2');
   });
 
+  test('Enter moves on to the next discipline, the same as the button', async ({ page }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+    await play501TwoPlayers(page);
+
+    await expect(page.getByText('DISCIPLINE COMPLETE')).toBeVisible();
+    await expect(page.getByRole('button', { name: /次の種目へ/ })).toContainText('Enter');
+
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('DISCIPLINE COMPLETE')).toHaveCount(0);
+    await expect(page.locator('.pent-aim')).toContainText('プレイヤー2');
+  });
+
+  test('Enter on a focused secondary button does that button, not the next discipline', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+    await play501TwoPlayers(page);
+
+    await expect(page.getByText('DISCIPLINE COMPLETE')).toBeVisible();
+    const undo = page.getByRole('button', { name: /直前の入力をやり直す/ });
+    await undo.focus();
+    await page.keyboard.press('Enter');
+
+    // Back on 501 with the checkout taken back - NOT forward into Half-It.
+    await expect(page.locator('.pent-x01-shell')).toBeVisible();
+    await expect(page.locator('.pent-aim')).toHaveCount(0);
+  });
+
   test('alternate mode swaps the starter regardless of who won', async ({ page }) => {
     await openFreshApp(page);
     await openPentathlon(page);
