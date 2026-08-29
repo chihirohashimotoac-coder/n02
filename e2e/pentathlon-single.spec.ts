@@ -249,9 +249,9 @@ test.describe('ラウンド数の表示', () => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await expect(page.getByText('GAME COMPLETE')).toBeVisible();
-    await expect(page.locator('.pent-result-table .pent-result-row').nth(1)).toContainText(
-      '22 DARTS・8R',
-    );
+    const resultRow = page.locator('.pent-result-table .pent-result-row').nth(1);
+    await expect(resultRow.locator('.pent-result-stat b')).toHaveText('8');
+    await expect(resultRow.locator('.pent-result-stat em')).toHaveText('22 DARTS');
     const savedRecords = await page.evaluate(() => {
       const raw = localStorage.getItem('n02-pentathlon-single-v1');
       return raw ? (JSON.parse(raw) as { records: unknown[] }).records.length : 0;
@@ -280,9 +280,9 @@ test.describe('ラウンド数の表示', () => {
     await page.locator('.pent-quick-btn.hit').first().click();
 
     await expect(page.getByText('GAME COMPLETE')).toBeVisible();
-    await expect(page.locator('.pent-result-table .pent-result-row').nth(1)).toContainText(
-      '23 DARTS・8R',
-    );
+    const resultRow = page.locator('.pent-result-table .pent-result-row').nth(1);
+    await expect(resultRow.locator('.pent-result-stat b')).toHaveText('8');
+    await expect(resultRow.locator('.pent-result-stat em')).toHaveText('23 DARTS');
   });
 });
 

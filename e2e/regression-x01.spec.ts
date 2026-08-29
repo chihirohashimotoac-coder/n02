@@ -50,8 +50,14 @@ test.describe('通常01', () => {
     await expect(page.locator('.n01-notice')).toContainText('バスト');
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('32');
     await expect(page.locator('.n01-player-name').nth(1)).toHaveClass(/active/);
-    const lastVisit = page.locator('.n01-score-table tbody tr').last();
-    await expect(lastVisit.locator('td.darts').first()).toHaveText('3');
+    const lastVisit = await page.evaluate(() => {
+      const raw = localStorage.getItem('n02-current-v1');
+      const visits = raw
+        ? (JSON.parse(raw) as { visits: Array<Record<string, unknown>> }).visits
+        : [];
+      return visits.at(-1);
+    });
+    expect(lastVisit).toMatchObject({ before: 32, after: 32, darts: 3, bust: true });
   });
 
   test('has no always-on entry preview and keeps its four-button menu', async ({ page }) => {

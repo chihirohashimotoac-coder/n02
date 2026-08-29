@@ -377,7 +377,6 @@ test.describe('Pentathlon full session', () => {
     await tapQuickTarget(page, '成功（D19）');
     await tapQuickTarget(page, '成功（D20）');
     await tapQuickTarget(page, 'インナーブル');
-    await commitPentTurn(page);
     // RTC reports the round count it was played by, with the dart count underneath it; SCORE stays
     // empty, because for a discipline measured in darts it would only repeat the same number.
     const rtcRow = page.locator('.pent-result-table .pent-result-row').nth(1);
@@ -483,6 +482,8 @@ test.describe('Pentathlon 2-player full sessions', () => {
     for (let turn = 0; turn < maxTurns; turn += 1) {
       if (await page.locator('.pent-result-table').isVisible()) return;
       await tap();
+      // RTC can finish on dart 1 or 2 and moves to the result screen immediately.
+      if (await page.locator('.pent-result-table').isVisible()) return;
       await commitPentTurn(page);
     }
     await expect(page.locator('.pent-result-table')).toBeVisible();
