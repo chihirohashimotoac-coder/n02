@@ -121,6 +121,20 @@ test.describe('Pentathlon 2-player progression', () => {
     await expect(page.locator('.pent-aim')).toContainText('プレイヤー2');
   });
 
+  test('Enter moves on to the next discipline, the same as the button', async ({ page }) => {
+    await openFreshApp(page);
+    await openPentathlon(page);
+    await page.getByRole('button', { name: /ペンタスロンを開始/ }).click();
+    await play501TwoPlayers(page);
+
+    await expect(page.getByText('DISCIPLINE COMPLETE')).toBeVisible();
+    await expect(page.getByRole('button', { name: /次の種目へ/ })).toContainText('Enter');
+
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('DISCIPLINE COMPLETE')).toHaveCount(0);
+    await expect(page.locator('.pent-aim')).toContainText('プレイヤー2');
+  });
+
   test('alternate mode swaps the starter regardless of who won', async ({ page }) => {
     await openFreshApp(page);
     await openPentathlon(page);
