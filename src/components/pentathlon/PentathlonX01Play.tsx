@@ -17,13 +17,15 @@ interface Props {
   onTurn: (input: X01SoloInput) => void;
   /** Takes back the previous committed round (X01 has no per-dart staging). */
   onUndoRound: () => void;
+  /** Corrects one already-committed visit and replays the rest of that player's attempt. */
+  onEditVisit: (player: PlayerIndex, visitIndex: number, score: number, darts: number) => void;
   canUndoRound: boolean;
   onExit: () => void;
   error: string | null;
   onError: (message: string | null) => void;
 }
 
-type Modal = 'none' | 'finish-darts' | 'menu' | 'stats' | 'rules';
+type Modal = 'none' | 'finish-darts' | 'menu' | 'stats' | 'rules' | 'edit';
 
 /**
  * 301/501 in Pentathlon. Deliberately the same screen as 通常01・チェックアウト練習 (GameScreen): the
@@ -32,13 +34,14 @@ type Modal = 'none' | 'finish-darts' | 'menu' | 'stats' | 'rules';
  * untouched; this is a parallel implementation over the Pentathlon session state, because the two
  * screens read from completely different engines.
  *
- * The one intentional omission is GameScreen's edit-a-past-score flow: the Pentathlon X01 engine has
- * no equivalent editVisit operation, so score cells here are display-only.
+ * That includes GameScreen's edit-a-past-score flow: tapping any already-entered score cell opens
+ * the same 修正して再計算 dialog, backed by the X01 engine's own editVisit.
  */
 export default function PentathlonX01Play({
   session,
   onTurn,
   onUndoRound,
+  onEditVisit,
   canUndoRound,
   onExit,
   error,
@@ -47,6 +50,17 @@ export default function PentathlonX01Play({
   const [entry, setEntry] = useState('');
   const [modal, setModal] = useState<Modal>('none');
   const [pendingFinish, setPendingFinish] = useState<number | null>(null);
+  const [edit, setEdit] = useState<{
+    player: PlayerIndex;
+    visitIndex: number;
+    /** What the player was on before this visit - what decides whether a correction can go out. */
+    remainingBefore: number;
+  } | null>(null);
+  const [editScore, setEditScore] = useState('');
+  const [editDarts, setEditDarts] = useState(3);
+  // Shown inside the edit dialog: the play screen's own error banner sits behind it, where a
+  // rejected correction would go unread.
+  const [editError, setEditError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const current = session.current!;
@@ -139,6 +153,12 @@ export default function PentathlonX01Play({
 
   const finishCounts = pendingFinish !== null ? validFinishDartCounts(activeState.remaining) : [];
 
+  // A correction that lands exactly on what the player was sitting on is a finish declaration, and
+  // has to be held to the same double-out rules as one entered live.
+  const isEditFinish = edit !== null && Number(editScore) === edit.remainingBefore && edit.remainingBefore > 0;
+  const editFinishCounts = isEditFinish ? validFinishDartCounts(edit.remainingBefore) : [];
+  const editEffectiveDarts = editFinishCounts.includes(editDarts) ? editDarts : (editFinishCounts[0] ?? 3);
+
   const openFinishModal = () => {
     const counts = validFinishDartCounts(activeState.remaining);
     if (counts.length === 0) {
@@ -147,6 +167,21 @@ export default function PentathlonX01Play({
     }
     setPendingFinish(activeState.remaining);
     setModal('finish-darts');
+  };
+
+  const openEditor = (player: PlayerIndex, visitIndex: number) => {
+    const state = current.progress[player].state as X01SoloState;
+    const visit = state.visits[visitIndex];
+    if (!visit) return;
+    // Everything before the edited visit is untouched, so the score it was thrown at is exact.
+    const remainingBefore = state.visits
+      .slice(0, visitIndex)
+      .reduce((left, earlier) => left - earlier.score, state.startScore);
+    setEdit({ player, visitIndex, remainingBefore });
+    setEditScore(String(visit.entered ?? visit.score));
+    setEditDarts(visit.darts);
+    setEditError(null);
+    setModal('edit');
   };
 
   const positionLabel = isSingleGameSession(session)
@@ -210,11 +245,21 @@ export default function PentathlonX01Play({
             <tbody>
               {rows.map((row) => (
                 <tr key={row.round}>
-                  <ScoreCell cell={row.cells[0]} isCurrent={active === 0 && row.isCurrentRow} entry={entry} />
+                  <ScoreCell
+                    cell={row.cells[0]}
+                    isCurrent={active === 0 && row.isCurrentRow}
+                    entry={entry}
+                    onSelect={(visitIndex) => openEditor(0, visitIndex)}
+                  />
                   <td className="to-go">{toGo(row, 0, active, current.progress)}</td>
                   <td className="darts">{row.darts}</td>
                   {!solo && (
-                    <ScoreCell cell={row.cells[1]} isCurrent={active === 1 && row.isCurrentRow} entry={entry} />
+                    <ScoreCell
+                      cell={row.cells[1]}
+                      isCurrent={active === 1 && row.isCurrentRow}
+                      entry={entry}
+                      onSelect={(visitIndex) => openEditor(1, visitIndex)}
+                    />
                   )}
                   {!solo && <td className="to-go">{toGo(row, 1, active, current.progress)}</td>}
                 </tr>
@@ -222,7 +267,9 @@ export default function PentathlonX01Play({
             </tbody>
           </table>
         </div>
-        <p className="n01-table-hint">得点表をスクロールすると1ラウンド目から確認できます。</p>
+        <p className="n01-table-hint">
+          得点表をスクロールすると1ラウンド目から確認できます。得点セルを選択すると過去ラウンドを修正できます。
+        </p>
       </div>
 
       <footer className="n01-game-footer">
@@ -282,6 +329,7 @@ export default function PentathlonX01Play({
       {modal === 'finish-darts' && pendingFinish !== null && (
         <PentathlonModal
           label="上がり本数を選択"
+          variant="menu-list"
           onClose={() => {
             setModal('none');
             setPendingFinish(null);
@@ -295,15 +343,13 @@ export default function PentathlonX01Play({
           }}
         >
           <h2>上がり本数</h2>
-          <div className="menu-list">
-            {finishCounts.map((count) => (
-              <button key={count} type="button" onClick={() => submitVisit(String(pendingFinish), count)}>
-                <kbd>{count}</kbd>{'　'}{count}本目で終了
-              </button>
-            ))}
-          </div>
+          {finishCounts.map((count) => (
+            <button key={count} type="button" onClick={() => submitVisit(String(pendingFinish), count)}>
+              <kbd>{count}</kbd>{'　'}{count}本目で終了
+            </button>
+          ))}
           <p>
-            残り{activeState.remaining}は最短{finishCounts[0]}本で上がれます。
+            残り{activeState.remaining}は最短{finishCounts[0]}本で上がれます。ボタンまたは数字キーで選択してください。
           </p>
           <button
             type="button"
@@ -318,32 +364,30 @@ export default function PentathlonX01Play({
       )}
 
       {modal === 'menu' && (
-        <PentathlonModal label="ゲームメニュー" onClose={() => setModal('none')}>
+        <PentathlonModal label="ゲームメニュー" variant="menu-list" onClose={() => setModal('none')}>
           <h2>メニュー</h2>
-          <div className="menu-list">
-            <button
-              type="button"
-              disabled={!canUndoRound}
-              onClick={() => {
-                onUndoRound();
-                setModal('none');
-              }}
-            >
-              前の確定ラウンドに戻す
-            </button>
-            <button type="button" onClick={() => setModal('rules')}>
-              ルール説明
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setModal('none');
-                onExit();
-              }}
-            >
-              中断してメニューへ
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={!canUndoRound}
+            onClick={() => {
+              onUndoRound();
+              setModal('none');
+            }}
+          >
+            前の確定ラウンドに戻す
+          </button>
+          <button type="button" onClick={() => setModal('rules')}>
+            ルール説明
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setModal('none');
+              onExit();
+            }}
+          >
+            中断してメニューへ
+          </button>
           <p>
             キーボード：<kbd>0</kbd>–<kbd>9</kbd> 得点入力・<kbd>Enter</kbd> 確定・
             <kbd>Backspace</kbd> 1文字削除・<kbd>U</kbd> 前の確定ラウンドに戻す
@@ -363,6 +407,91 @@ export default function PentathlonX01Play({
           <p className="pent-rules-body">{DISCIPLINE_RULE_TEXT[disciplineId].body}</p>
           <button type="button" className="n01-modal-primary" onClick={() => setModal('menu')}>
             閉じる
+          </button>
+        </PentathlonModal>
+      )}
+
+      {modal === 'edit' && edit !== null && (
+        <PentathlonModal
+          label="過去得点の修正"
+          onClose={() => {
+            setModal('none');
+            setEdit(null);
+          }}
+        >
+          <h2>過去得点を修正</h2>
+          <p className="pent-edit-target">
+            {session.names[edit.player]}・{edit.visitIndex + 1} ラウンド目
+          </p>
+          <label>
+            <span>得点</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={editScore}
+              onChange={(event) => setEditScore(event.target.value)}
+            />
+          </label>
+          {/*
+            * The dart count only ever means anything on the visit that goes out - every other visit
+            * is three darts. So it is offered only when the correction actually finishes, and then
+            * only in the counts that can finish this number, rather than letting a 1-dart 170
+            * through for the engine to reject.
+            */}
+          {editFinishCounts.length > 0 ? (
+            <div className="n01-darts-inline">
+              <span>上がり本数</span>
+              {[1, 2, 3].map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  disabled={!editFinishCounts.includes(count)}
+                  className={editEffectiveDarts === count ? 'selected' : ''}
+                  onClick={() => setEditDarts(count)}
+                >
+                  {count}本
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="pent-edit-note">
+              {isEditFinish
+                ? `残り${edit.remainingBefore}は上がれない数字のため、この得点では確定できません。バストだった投球は0を入力してください。`
+                : `残り${edit.remainingBefore}に対する得点として再計算します（上がり以外は3ダーツ）。`}
+            </p>
+          )}
+          {editError && (
+            <p className="n01-notice warning" role="alert">
+              {editError}
+            </p>
+          )}
+          <button
+            type="button"
+            className="n01-modal-primary"
+            onClick={() => {
+              try {
+                onEditVisit(edit.player, edit.visitIndex, Number(editScore), editEffectiveDarts);
+                setModal('none');
+                setEdit(null);
+                setEditError(null);
+                onError(null);
+              } catch (caught) {
+                if (caught instanceof InvalidVisitError) setEditError(caught.message);
+                else throw caught;
+              }
+            }}
+          >
+            修正して再計算
+          </button>
+          <button
+            type="button"
+            className="n01-modal-cancel"
+            onClick={() => {
+              setModal('none');
+              setEdit(null);
+            }}
+          >
+            キャンセル
           </button>
         </PentathlonModal>
       )}
@@ -444,6 +573,8 @@ function countTons(state: X01SoloState, min: number, max: number): number {
 }
 
 interface RowCell {
+  /** Index into that player's own visit list - what editVisit corrects. */
+  visitIndex: number;
   score: number;
   after: number;
   bust: boolean;
@@ -482,10 +613,10 @@ function buildRows(progress: Progress, active: PlayerIndex, solo: boolean): Row[
     if (solo && index === 1) break;
     const state = progress[index].state as X01SoloState;
     let remaining = state.startScore;
-    for (const visit of state.visits) {
+    state.visits.forEach((visit, visitIndex) => {
       remaining -= visit.score;
-      perPlayer[index].push({ score: visit.score, after: remaining, bust: visit.bust });
-    }
+      perPlayer[index].push({ visitIndex, score: visit.score, after: remaining, bust: visit.bust });
+    });
   }
 
   const rowCount = Math.max(perPlayer[0].length, perPlayer[1].length) + 1;
@@ -505,18 +636,20 @@ function ScoreCell({
   cell,
   isCurrent,
   entry,
+  onSelect,
 }: {
   cell: RowCell | null;
   isCurrent: boolean;
   entry: string;
+  onSelect: (visitIndex: number) => void;
 }) {
   if (cell) {
     const display = cell.bust ? 'BUST' : String(cell.score);
     return (
       <td className="scored">
-        <span className="value">
+        <button type="button" onClick={() => onSelect(cell.visitIndex)} aria-label={`${display} を修正`}>
           {cell.score >= 100 && !cell.bust ? <span className="ton-score">{display}</span> : display}
-        </span>
+        </button>
       </td>
     );
   }

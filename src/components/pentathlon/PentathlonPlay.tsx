@@ -50,6 +50,9 @@ export default function PentathlonPlay({
   const aim = activeProgress.finished ? null : describeAim(disciplineId, activeState, quickTarget);
 
   const players: PlayerIndex[] = session.playerCount === 1 ? [0] : [0, 1];
+  // Rounds are per player (the second thrower is a round behind until they have thrown), so the
+  // header shows whoever is on the oche - which is what "何ラウンド目" means while playing.
+  const roundLabel = engine.roundLabel?.(activeState as never) ?? null;
 
   return (
     <div className="pent-game-shell pent-play-shell">
@@ -59,6 +62,11 @@ export default function PentathlonPlay({
             <p className="eyebrow">{engine.meta.name}</p>
             <h2>{engine.meta.description}</h2>
           </div>
+          {roundLabel && (
+            <span className="pent-round-chip" aria-label={`現在のラウンド：${roundLabel}`}>
+              {roundLabel}
+            </span>
+          )}
           <button
             type="button"
             className="pent-menu-button"

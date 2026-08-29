@@ -39,7 +39,9 @@ export default function SingleGameResult({ session, onPlayAgain, onChooseAnother
         />
 
         {isTwoPlayer && (
-          <div className="pent-next-starter">
+          <div
+            className={`pent-next-starter pent-winner-banner ${record.outcome === 'draw' ? 'draw' : ''}`}
+          >
             <span>WINNER</span>
             <strong>
               {record.outcome === 'draw'

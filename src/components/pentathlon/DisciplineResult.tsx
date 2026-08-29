@@ -42,7 +42,9 @@ export default function DisciplineResult({ session, onNext, onUndo, canUndo, onE
       />
 
       {session.playerCount === 2 && (
-        <div className="pent-next-starter">
+        <div
+          className={`pent-next-starter pent-winner-banner ${record.outcome === 'draw' ? 'draw' : ''}`}
+        >
           <span>WINNER</span>
           <strong>
             {record.outcome === 'draw'

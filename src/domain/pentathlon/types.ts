@@ -100,6 +100,19 @@ export interface DisciplineEngine<TState = unknown, TInput = unknown> {
   compareResults(a: DisciplineResult, b: DisciplineResult): CompareOutcome;
   /** Human-readable "what should I aim at now" for the current state. */
   describeTarget(state: TState): string;
+  /**
+   * Which round this player is on, for disciplines played over a fixed cadence of rounds. Screens
+   * show it verbatim (e.g. "ROUND 3 / 5"); disciplines without a meaningful round count omit it and
+   * no round caption is shown at all.
+   */
+  roundLabel?(state: TState): string;
+  /**
+   * Corrects an already-entered input and replays everything after it (301/501 only, mirroring
+   * 通常01・チェックアウト練習's "修正して再計算"). Play screens offer a tap-to-edit score cell exactly
+   * where an engine provides this. Throws InvalidVisitError if the correction itself is not a
+   * possible score.
+   */
+  editVisit?(state: TState, visitIndex: number, newScore: number, newDarts: number): TState;
   /** How many darts the player may still throw this turn (for dart-hit input UIs). */
   dartsRemainingThisTurn?(state: TState): number;
   /**

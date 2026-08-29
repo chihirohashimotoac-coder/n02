@@ -60,5 +60,9 @@ export const corkEngine: DisciplineEngine<CorkState, DartHit[]> = {
 
   describeTarget: (state) => (state.finished ? 'FINISHED' : `BULL（残り${CORK_DARTS - state.darts}投）`),
 
+  // Fixed five rounds, so the caption carries the total as well: "ROUND 3 / 5".
+  roundLabel: (state) =>
+    `ROUND ${Math.min(Math.floor(state.darts / 3) + 1, CORK_ROUNDS)} / ${CORK_ROUNDS}`,
+
   dartsRemainingThisTurn: () => 3,
 };

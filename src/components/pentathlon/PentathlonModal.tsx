@@ -8,6 +8,12 @@ interface Props {
    * keystroke is swallowed, so gameplay behind the dialog still never sees it.
    */
   onKeyDown?: (event: KeyboardEvent) => void;
+  /**
+   * 'menu-list' opts this dialog into 通常01・チェックアウト練習's own menu card design - full-width
+   * rows separated by rules, each one a bordered, coloured button. Children are laid out by that
+   * shared stylesheet, so with this variant the buttons must be DIRECT children of the dialog.
+   */
+  variant?: 'default' | 'menu-list';
   children: ReactNode;
 }
 
@@ -20,7 +26,13 @@ const FOCUSABLE =
  * while a click inside does not. Pentathlon-only - 通常01・チェックアウト練習 keep their own
  * pre-existing .n01-modal-backdrop markup untouched.
  */
-export default function PentathlonModal({ label, onClose, onKeyDown, children }: Props) {
+export default function PentathlonModal({
+  label,
+  onClose,
+  onKeyDown,
+  variant = 'default',
+  children,
+}: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   // Captured on mount so focus can go back exactly where it came from - usually the trigger button.
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -93,7 +105,7 @@ export default function PentathlonModal({ label, onClose, onKeyDown, children }:
   return (
     <div className="n01-modal-backdrop pent-modal-backdrop" onClick={onClose}>
       <div
-        className="n01-modal-card pent-modal-card"
+        className={`n01-modal-card pent-modal-card ${variant === 'menu-list' ? 'menu-list' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label={label}

@@ -69,7 +69,9 @@ export default function PentathlonResult({ session, onFinish }: Props) {
         </div>
 
         {session.playerCount === 2 && (
-          <div className="pent-next-starter">
+          <div
+            className={`pent-next-starter pent-winner-banner ${totals.overall === 'draw' ? 'draw' : ''}`}
+          >
             <span>WINNER</span>
             <strong>
               {totals.overall === 'draw'

@@ -9,6 +9,7 @@ import {
   createPentathlonSession,
   currentDisciplineId,
   disciplineCount,
+  editVisitScore,
   isDisciplineComplete,
   isSingleGameSession,
   sessionDisciplines,
@@ -33,6 +34,11 @@ function newSession(overrides: Partial<CreateSessionOptions> = {}): PentathlonSe
     initialStarter: 0,
     ...overrides,
   });
+}
+
+/** One player's remaining score in the X01 discipline currently in progress. */
+function x01Remaining(session: PentathlonSession, player: 0 | 1): number {
+  return (session.current!.progress[player].state as { remaining: number }).remaining;
 }
 
 /** 1-player only: plays a 9-dart 501 finish for the lone player. */
@@ -111,15 +117,15 @@ describe('two-player progression', () => {
   });
 
   it('ends a NON-race discipline only once both players have their own final result', () => {
-    // RTC-on-doubles is a parallel attempt, not a race: P1 completing the clock must not stop P2.
+    // Half-It is a parallel attempt, not a race: P1 playing out all 9 rounds must not stop P2.
     let session = newSession({
       mode: 'single',
-      disciplines: ['rtc-doubles'],
+      disciplines: ['half-it'],
       initialStarter: 0,
     });
-    for (let offset = 0; offset < RTC_SEQUENCE.length; offset += 3) {
-      session = applyTurn(session, RTC_SEQUENCE.slice(offset, offset + 3)); // P1 advances
-      session = applyTurn(session, [MISS, MISS, MISS]); // P2 gets nowhere
+    for (let round = 0; round < 9; round += 1) {
+      session = applyTurn(session, [MISS, MISS, MISS]); // P1's round
+      if (round < 8) session = applyTurn(session, [MISS, MISS, MISS]); // P2 stays one round behind
     }
 
     expect(session.current!.progress[0].finished).toBe(true);
@@ -128,7 +134,87 @@ describe('two-player progression', () => {
     // Play must now stay with P2 for every subsequent turn.
     expect(session.current!.active).toBe(1);
     session = applyTurn(session, [MISS, MISS, MISS]);
-    expect(session.current!.active).toBe(1);
+    expect(isDisciplineComplete(session)).toBe(true);
+  });
+});
+
+describe('editVisitScore (tap a past X01 score to correct it)', () => {
+  it('corrects the chosen player only, and leaves the turn order alone', () => {
+    let session = newSession({ initialStarter: 0 });
+    session = applyTurn(session, { score: 100 }); // P1 -> 401
+    session = applyTurn(session, { score: 100 }); // P2 -> 401
+    session = editVisitScore(session, 0, 0, 140, 3);
+
+    expect(x01Remaining(session, 0)).toBe(361);
+    expect(x01Remaining(session, 1)).toBe(401);
+    expect(session.current!.active).toBe(0);
+    expect(session.status).toBe('playing');
+  });
+
+  it('ends the discipline when the correction turns into a checkout', () => {
+    let session = newSession({ initialStarter: 0 });
+    session = applyTurn(session, { score: 180 }); // P1 -> 321
+    session = applyTurn(session, { score: 60 }); // P2 -> 441
+    session = applyTurn(session, { score: 180 }); // P1 -> 141
+    session = applyTurn(session, { score: 60 }); // P2 -> 381
+    session = applyTurn(session, { score: 100 }); // P1 -> 41
+    session = editVisitScore(session, 0, 2, 141, 3);
+
+    expect(session.status).toBe('between-disciplines');
+    expect(session.records[0].results[0]!.label).toBe('9 DARTS');
+    expect(session.records[0].results[1]!.completed).toBe(false);
+    expect(session.records[0].outcome).toBe('p0');
+  });
+
+  it('is undoable in one step, like any other committed change', () => {
+    let session = newSession({ initialStarter: 0 });
+    session = applyTurn(session, { score: 100 });
+    const before = x01Remaining(session, 0);
+    session = editVisitScore(session, 0, 0, 140, 3);
+    expect(x01Remaining(session, 0)).not.toBe(before);
+    session = undoRound(session);
+    expect(x01Remaining(session, 0)).toBe(before);
+  });
+
+  it('does nothing in a discipline whose engine has no edit operation', () => {
+    let session = newSession({ mode: 'single', disciplines: ['cork'] });
+    session = applyTurn(session, [BULL, BULL, BULL]);
+    expect(editVisitScore(session, 0, 0, 140, 3)).toBe(session);
+  });
+});
+
+describe('Round-the-Clock ON DOUBLES as a race (first to the BULL wins)', () => {
+  it('ends the discipline the moment a player hits the BULL, with the opponent recorded where they stood', () => {
+    let session = newSession({
+      mode: 'single',
+      disciplines: ['rtc-doubles'],
+      initialStarter: 0,
+    });
+    for (let offset = 0; offset < RTC_SEQUENCE.length; offset += 3) {
+      session = applyTurn(session, RTC_SEQUENCE.slice(offset, offset + 3)); // P1 advances
+      if (session.status === 'playing') session = applyTurn(session, [MISS, MISS, MISS]); // P2 gets nowhere
+    }
+
+    expect(session.status).toBe('between-disciplines');
+    expect(isDisciplineComplete(session)).toBe(true);
+    const record = session.records[0];
+    expect(record.results[0]!.completed).toBe(true);
+    expect(record.results[1]!.completed).toBe(false);
+    expect(record.outcome).toBe('p0');
+  });
+
+  it('reports the round count as well as the dart count', () => {
+    let session = newSession({ mode: 'single', playerCount: 1, disciplines: ['rtc-doubles'] });
+    for (let offset = 0; offset < RTC_SEQUENCE.length; offset += 3) {
+      session = applyTurn(session, RTC_SEQUENCE.slice(offset, offset + 3));
+    }
+    // A perfect run is 21 darts, i.e. exactly 7 rounds of 3.
+    expect(session.records[0].results[0]!.stat).toEqual({
+      label: 'ROUNDS',
+      primary: '7',
+      secondary: '21 DARTS',
+    });
+    expect(session.records[0].results[0]!.label).toBe('21 DARTS・7R');
   });
 });
 
