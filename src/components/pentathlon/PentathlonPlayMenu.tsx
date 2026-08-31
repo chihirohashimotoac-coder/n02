@@ -13,7 +13,7 @@ interface Props {
   onClose: () => void;
   /**
    * Which input pad this screen is showing, so the shortcut list describes the keys that actually
-   * do something here: a quick pad binds its buttons to 1-4, the full grid takes darts notation.
+   * do something here: a quick pad binds its buttons to 1-3, the full grid takes darts notation.
    */
   padKind: 'quick' | 'grid' | 'cricket';
 }
@@ -78,7 +78,7 @@ export default function PentathlonPlayMenu({
         キーボード：
         {padKind === 'quick' && (
           <>
-            <kbd>1</kbd>–<kbd>4</kbd> 各ボタン・<kbd>M</kbd> ミス・
+            <kbd>1</kbd>–<kbd>3</kbd> 各ボタン・<kbd>0</kbd> ミス・
           </>
         )}
         {padKind !== 'quick' && (
@@ -90,7 +90,7 @@ export default function PentathlonPlayMenu({
             <kbd>T</kbd> でT20）・<kbd>B</kbd> インナーブル・<kbd>O</kbd> アウターブル・
             {padKind === 'grid' && (
               <>
-                <kbd>M</kbd> ミス・
+                <kbd>0</kbd> ミス（数字を打ちかけていないとき）・
               </>
             )}
           </>

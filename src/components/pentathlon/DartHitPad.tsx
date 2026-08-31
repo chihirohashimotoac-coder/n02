@@ -43,9 +43,9 @@ interface QuickOption {
  * three taps rather than three dialogs.
  *
  * On a PC the whole pad is also driveable from the keyboard, in whichever way suits the screen:
- * a small quick-target pad binds its buttons to 1-4 in display order, while the full number grid
- * takes darts notation (a number, then S/D/T - e.g. "20" then "t" for T20; b/o for the bulls,
- * m for a miss). Enter commits the turn and Backspace takes a dart back, on both.
+ * a small quick-target pad binds its scoring buttons to 1-3 in display order, while the full number
+ * grid takes darts notation (a number, then S/D/T - e.g. "20" then "t" for T20; b/o for the bulls).
+ * A miss is 0 on both pads. Enter commits the turn and Backspace takes a dart back, on both.
  */
 export default function DartHitPad({
   pendingHits,
@@ -130,7 +130,9 @@ export default function DartHitPad({
         setTyped('');
         return;
       }
-      if (key === 'm') {
+      // A miss is 0 on every pad. In grid mode 0 is also the second digit of 10 and 20, so it only
+      // means "miss" there while no number is half-typed - "2" then "0" still resolves to 20.
+      if (key === '0' && (quickOptions !== null || typed === '')) {
         event.preventDefault();
         setTyped('');
         stage({ kind: 'miss' });
@@ -139,7 +141,13 @@ export default function DartHitPad({
 
       if (quickOptions) {
         const index = Number(key) - 1;
-        if (Number.isInteger(index) && index >= 0 && index < quickOptions.length) {
+        // The miss button is off the positional numbering - it answers to 0, above, only.
+        if (
+          Number.isInteger(index) &&
+          index >= 0 &&
+          index < quickOptions.length &&
+          quickOptions[index].hit.kind !== 'miss'
+        ) {
           event.preventDefault();
           stage(quickOptions[index].hit);
         }
@@ -248,7 +256,7 @@ export default function DartHitPad({
               key={index}
               type="button"
               className={`pent-quick-btn ${option.className ?? ''}`}
-              data-key={index + 1}
+              data-key={option.hit.kind === 'miss' ? 0 : index + 1}
               disabled={disabled || full}
               aria-label={option.ariaLabel}
               onClick={stageFromClick(option.hit)}
