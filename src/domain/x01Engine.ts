@@ -91,6 +91,12 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+/** A visit is 1-3 darts; anything else is a caller mistake and is pulled back into range. */
+function clampDarts(darts: number): number {
+  if (!Number.isInteger(darts)) return 3;
+  return Math.min(3, Math.max(1, darts));
+}
+
 function newPlayerStats(name: string): X01PlayerStats {
   return {
     name,
@@ -208,20 +214,32 @@ function coreSnapshot(state: X01MatchState): X01CoreState {
   };
 }
 
-/** Applies one visit for the currently-active player. Pushes an undo snapshot first. */
-export function applyVisit(state: X01MatchState, enteredScore: number, finishDarts?: number): X01MatchState {
+/**
+ * Applies one visit for the currently-active player. Pushes an undo snapshot first.
+ *
+ * `dartsUsed` records a visit thrown with fewer than three darts (the 使用ダーツ selector / the +/-
+ * keys); it defaults to the full three and is ignored on a checkout, where the declared finish count
+ * is authoritative. It feeds the dart totals, so a visit marked as 2 darts counts as 2 in 3DA.
+ */
+export function applyVisit(
+  state: X01MatchState,
+  enteredScore: number,
+  finishDarts?: number,
+  dartsUsed?: number,
+): X01MatchState {
   if (state.matchWinner !== null || state.legResult !== null) return state;
 
   const player = state.active;
   const before = state.players[player].remaining;
   const resolution = resolveVisit(before, enteredScore, finishDarts);
+  const darts = resolution.checkout ? resolution.darts : clampDarts(dartsUsed ?? resolution.darts);
 
   const undoStack = [...state.undo, coreSnapshot(state)];
   const players = clone(state.players) as [X01PlayerStats, X01PlayerStats];
   const stats = players[player];
   const scoredAmount = resolution.bust ? 0 : enteredScore;
 
-  stats.totalDarts += resolution.darts;
+  stats.totalDarts += darts;
   stats.totalScored += scoredAmount;
   if (!resolution.bust) {
     if (scoredAmount >= 180) stats.ton80Count += 1;
@@ -230,23 +248,23 @@ export function applyVisit(state: X01MatchState, enteredScore: number, finishDar
   }
   if (stats.first9Darts < 9) {
     const room = 9 - stats.first9Darts;
-    const dartsTowardFirst9 = Math.min(room, resolution.darts);
+    const dartsTowardFirst9 = Math.min(room, darts);
     if (dartsTowardFirst9 > 0) {
       stats.first9Darts += dartsTowardFirst9;
-      stats.first9Score += dartsTowardFirst9 === resolution.darts ? scoredAmount : 0;
+      stats.first9Score += dartsTowardFirst9 === darts ? scoredAmount : 0;
     }
   }
   stats.remaining = resolution.after;
 
   const legDarts = clone(state.legDarts) as [number, number];
-  legDarts[player] += resolution.darts;
+  legDarts[player] += darts;
 
   const visit: X01Visit = {
     player,
     score: resolution.bust ? 0 : enteredScore,
     before,
     after: resolution.after,
-    darts: resolution.darts,
+    darts,
     bust: resolution.bust,
     checkout: resolution.checkout,
   };

@@ -292,6 +292,48 @@ function winLegAsP0(state: X01MatchState): X01MatchState {
   return applyVisit(next, 141, 3);
 }
 
+describe('applyVisit - 使用ダーツ (+/- keys)', () => {
+  it('defaults a visit to three darts', () => {
+    let state = createX01Match(baseSettings());
+    state = applyVisit(state, 60);
+    expect(state.visits[0].darts).toBe(3);
+    expect(state.players[0].totalDarts).toBe(3);
+  });
+
+  it('records a visit thrown with fewer darts and counts it in the dart total', () => {
+    let state = createX01Match(baseSettings());
+    state = applyVisit(state, 60, undefined, 2);
+    expect(state.visits[0].darts).toBe(2);
+    expect(state.players[0].totalDarts).toBe(2);
+    expect(state.legDarts[0]).toBe(2);
+    // 3DA is scored/darts*3, so 60 off 2 darts averages 90.
+    expect(threeDartAverage(state.players[0])).toBeCloseTo(90, 5);
+  });
+
+  it('applies to a bust visit too', () => {
+    let state = createX01Match(baseSettings({ mode: 'checkout', checkoutMin: 41, checkoutMax: 41 }));
+    state = applyVisit(state, 40, undefined, 1); // leaves 1 -> bust
+    expect(state.visits[0].bust).toBe(true);
+    expect(state.visits[0].darts).toBe(1);
+    expect(state.players[0].totalDarts).toBe(1);
+  });
+
+  it('is ignored on a checkout, where the declared finish count wins', () => {
+    let state = createX01Match(baseSettings({ mode: 'checkout', checkoutMin: 40, checkoutMax: 40 }));
+    state = applyVisit(state, 40, 1, 3);
+    expect(state.visits[0].darts).toBe(1);
+    expect(state.legResult?.darts).toBe(1);
+  });
+
+  it('pulls an out-of-range count back to 1-3', () => {
+    let state = createX01Match(baseSettings());
+    state = applyVisit(state, 60, undefined, 0);
+    expect(state.visits[0].darts).toBe(1);
+    state = applyVisit(state, 60, undefined, 9);
+    expect(state.visits[1].darts).toBe(3);
+  });
+});
+
 describe('setLegStarter', () => {
   it('swaps who throws first while the leg is still untouched', () => {
     let state = createX01Match(baseSettings());
