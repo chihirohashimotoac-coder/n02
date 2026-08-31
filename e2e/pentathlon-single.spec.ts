@@ -672,22 +672,58 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     await openFreshApp(page);
     await startSingleGame(page, 'CORK');
 
-    // CORK's pad is アウターブル / インナーブル / ミス, so 1/2/3 stage exactly those.
+    // CORK's pad is アウターブル / インナーブル / ミス: 1/2 stage the two scoring buttons, and the
+    // miss is 0 - the key it is on in all five dart-hit disciplines.
     await page.keyboard.press('1');
     await page.keyboard.press('2');
-    await page.keyboard.press('3');
+    await page.keyboard.press('0');
     const chips = page.locator('.pent-pending-chip');
     await expect(chips.nth(0)).toHaveText('OUTER BULL');
     await expect(chips.nth(1)).toHaveText('BULL');
     await expect(chips.nth(2)).toHaveText('MISS');
 
-    // Backspace takes the last dart back, Enter commits the turn.
+    // The miss button is off the positional numbering, so its old key (3 here) stages nothing.
     await page.keyboard.press('Backspace');
     await expect(chips.nth(2)).toContainText('3投目');
     await page.keyboard.press('3');
+    await expect(chips.nth(2)).toContainText('3投目');
+    await page.keyboard.press('0');
     await page.keyboard.press('Enter');
     // 1 inner (2) + 1 outer (1) = 3 bulls counted.
     await expect(page.locator('.pent-player-value').first()).toHaveText('3');
+  });
+
+  test('HALF-IT\'s number-grid round keeps 0 as the second digit of 10/20, and as the miss', async ({
+    page,
+  }) => {
+    await openFreshApp(page);
+    await startSingleGame(page, 'HALF-IT');
+
+    // Rounds 1 (15) and 2 (16) are quick pads - three misses each takes us to round 3, ANY DOUBLE,
+    // which is the one shape of pad in these five disciplines that types numbers.
+    for (let round = 0; round < 2; round += 1) {
+      for (let dart = 0; dart < 3; dart += 1) await page.keyboard.press('0');
+      await page.keyboard.press('Enter');
+    }
+    await expect(page.locator('.pent-aim-target')).toContainText('ダブル');
+
+    const chips = page.locator('.pent-pending-chip');
+    // Nothing half-typed: 0 is the miss, exactly as on the quick pads.
+    await page.keyboard.press('0');
+    await expect(chips.nth(0)).toHaveText('MISS');
+    await page.keyboard.press('Backspace');
+
+    // Mid-number, 0 is still the digit it always was: "2" then "0" is D20, not a miss.
+    await page.keyboard.press('2');
+    await expect(page.locator('.pent-typing')).toContainText('D2');
+    await page.keyboard.press('0');
+    await expect(chips.nth(0)).toHaveText('D20');
+    await expect(page.locator('.pent-typing')).toHaveCount(0);
+
+    // And 1 then 0 is D10 - the other number 0 completes.
+    await page.keyboard.press('1');
+    await page.keyboard.press('0');
+    await expect(chips.nth(1)).toHaveText('D10');
   });
 
   test('CRICKET takes darts notation, with the digits shown as they are typed', async ({ page }) => {
@@ -839,6 +875,9 @@ test.describe('PCキーボード操作（ダーツ入力系の種目）', () => 
     await startSingleGame(page, 'CORK');
     await openPentGameMenu(page);
     await expect(page.getByRole('dialog')).toContainText('各ボタン');
+    // The miss is listed on the key it is actually on.
+    await expect(page.getByRole('dialog').locator('kbd', { hasText: /^0$/ })).toBeVisible();
+    await expect(page.getByRole('dialog').locator('kbd', { hasText: /^M$/ })).toHaveCount(0);
     await page.keyboard.press('Escape');
 
     await page.goto('/');
