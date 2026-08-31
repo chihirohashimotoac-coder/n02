@@ -8,13 +8,15 @@ import {
   maybePlayComTurn,
   needsRoundLimitDecision,
   resolveRoundLimit,
+  resumePreviousLeg,
+  setLegStarter,
   swapCurrentLegScores,
   threeDartAverage,
   undoLastAction,
   type X01MatchState,
 } from '../domain/x01Engine';
 import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../domain/darts';
-import { appendHistory } from '../storage/matchStorage';
+import { appendHistory, removeLatestHistory } from '../storage/matchStorage';
 import MatchResultCard from './MatchResultCard';
 
 interface Props {
@@ -44,6 +46,10 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   const awaitingRoundLimit = needsRoundLimitDecision(state);
   const effectiveModal: Modal = awaitingRoundLimit ? 'round-limit' : modal;
   const isComTurn = state.settings.comEnabled[state.active];
+  // The 1st-round tap-the-opponent's-cell gesture that swaps who throws first, offered only while the
+  // leg is genuinely untouched. That condition is also what keeps it clear of the edit-a-past-score
+  // gesture: a cell is either a played visit (editable) or empty (a starter pick), never both.
+  const canPickStarter = state.visits.length === 0 && state.legResult === null && state.matchWinner === null;
 
   const showNotice = useCallback((message: string, kind: 'info' | 'warning' = 'info') => {
     setNotice(message);
@@ -132,6 +138,25 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   // Keyboard support mirrors the on-screen keypad.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      // Never act on the Enter that merely commits an IME conversion.
+      if (event.isComposing || event.keyCode === 229) return;
+
+      // The leg-result dialog and the match-result card are driven by state.legResult/matchWinner,
+      // not by `modal`, so they need their own branch here - without it the <kbd>Enter</kbd> badge on
+      // 「次のLegへ」 promises a shortcut that no listener implements. Claim every key while one is up
+      // so nothing queues into the keypad behind the dialog, and leave a focused button to the
+      // browser's own Enter-activates-button handling so 「戻る」 cannot fire twice (or fire at all
+      // when 「次のLegへ」 was meant).
+      if ((state.legResult !== null || state.matchWinner !== null) && !awaitingRoundLimit) {
+        const onButton = (event.target as HTMLElement | null)?.tagName === 'BUTTON';
+        if (event.key === 'Enter' && !onButton) {
+          event.preventDefault();
+          if (state.matchWinner === null) onChange(advanceLeg(state));
+          else onExit({ clearSave: true });
+        }
+        return;
+      }
+
       if (effectiveModal === 'finish-darts') {
         const counts = pendingFinish !== null ? validFinishDartCounts(activePlayer.remaining) : [];
         const digit = Number(event.key);
@@ -169,7 +194,30 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activePlayer.remaining, effectiveModal, entry, onChange, pendingFinish, pressKey, showNotice, state, submitScore]);
+  }, [
+    activePlayer.remaining,
+    awaitingRoundLimit,
+    effectiveModal,
+    entry,
+    onChange,
+    onExit,
+    pendingFinish,
+    pressKey,
+    showNotice,
+    state,
+    submitScore,
+  ]);
+
+  const pickStarter = useCallback(
+    (starter: 0 | 1) => {
+      const next = setLegStarter(state, starter);
+      if (next === state) return;
+      onChange(next);
+      setEntry('');
+      showNotice(`${state.players[starter].name}を先攻に変更しました。`);
+    },
+    [onChange, showNotice, state],
+  );
 
   const rows = useMemo(() => buildRows(state), [state]);
 
@@ -252,6 +300,8 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
                     isCurrent={state.active === 0 && row.isCurrentRow}
                     entry={entry}
                     onSelect={(index) => openEditor(index)}
+                    playerName={state.players[0].name}
+                    onPickStarter={canPickStarter && row.round === 1 ? () => pickStarter(0) : undefined}
                   />
                   <td className="to-go">{toGo(row, 0, state)}</td>
                   <td className="darts">{row.darts}</td>
@@ -260,6 +310,8 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
                     isCurrent={state.active === 1 && row.isCurrentRow}
                     entry={entry}
                     onSelect={(index) => openEditor(index)}
+                    playerName={state.players[1].name}
+                    onPickStarter={canPickStarter && row.round === 1 ? () => pickStarter(1) : undefined}
                   />
                   <td className="to-go">{toGo(row, 1, state)}</td>
                 </tr>
@@ -269,6 +321,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         </div>
         <p className="n01-table-hint">
           得点表をスクロールすると1ラウンド目から確認できます。得点セルを選択すると過去ラウンドを修正できます。
+          {canPickStarter && '1ラウンド目の未入力の間は、相手側の「—」セルを選択すると先攻を入れ替えられます。'}
         </p>
       </div>
 
@@ -424,6 +477,21 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
               }}
             >
               直前の入力を戻す
+            </button>
+            <button
+              type="button"
+              disabled={state.completed.length === 0}
+              onClick={() => {
+                // The rewound completion must also leave the 成績 history, and free its slot in
+                // historyRecorded so the replayed leg is recorded again when it finishes.
+                historyRecorded.current.delete(state.completed.length - 1);
+                removeLatestHistory();
+                onChange(resumePreviousLeg(state));
+                setModal('none');
+                showNotice('前のLegを勝利直前の状態で再開しました。以降の進行は破棄されます。');
+              }}
+            >
+              前のLegをやり直す
             </button>
             <button
               type="button"
@@ -623,11 +691,16 @@ function ScoreCell({
   isCurrent,
   entry,
   onSelect,
+  playerName,
+  onPickStarter,
 }: {
   cell: RowCell | null;
   isCurrent: boolean;
   entry: string;
   onSelect: (visitIndex: number) => void;
+  playerName: string;
+  /** Set only on the opponent's empty 1st-round cell of an untouched leg; tapping it hands them the throw. */
+  onPickStarter?: () => void;
 }) {
   if (cell) {
     const display = cell.bust ? 'BUST' : String(cell.score);
@@ -643,6 +716,21 @@ function ScoreCell({
     return (
       <td className="scored current">
         <input value={entry} readOnly aria-label="得点入力" />
+      </td>
+    );
+  }
+  if (onPickStarter) {
+    return (
+      <td className="scored">
+        <button
+          type="button"
+          className="starter-picker"
+          aria-label={`${playerName}を先攻にする`}
+          title={`${playerName}を先攻にする`}
+          onClick={onPickStarter}
+        >
+          —
+        </button>
       </td>
     );
   }

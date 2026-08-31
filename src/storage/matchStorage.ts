@@ -65,6 +65,20 @@ export function appendHistory(entry: HistoryEntry): HistoryEntry[] {
   return next;
 }
 
+/**
+ * Drops the newest history entry. Used when a completed leg is rewound (resumePreviousLeg), so the
+ * 成績 panel does not keep a result the player has just taken back.
+ */
+export function removeLatestHistory(): HistoryEntry[] {
+  const next = loadHistory().slice(1);
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+  return next;
+}
+
 export function clearHistory(): void {
   try {
     localStorage.removeItem(HISTORY_KEY);

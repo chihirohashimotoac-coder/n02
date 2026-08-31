@@ -1,5 +1,36 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { confirmFinish, enterGameScore, openFreshApp } from './helpers';
+
+/** The 先攻/後攻 badge each player's header currently shows. */
+async function starterBadges(page: Page) {
+  return [
+    (await page.locator('.n01-player-name').nth(0).locator('span').innerText()).trim(),
+    (await page.locator('.n01-player-name').nth(1).locator('span').innerText()).trim(),
+  ];
+}
+
+/** True when player 1's header carries the THROW/active highlight. */
+async function p0IsThrowing(page: Page) {
+  return ((await page.locator('.n01-player-name').nth(0).getAttribute('class')) ?? '').includes('active');
+}
+
+/** Plays a 501 leg out so that プレイヤー1 always wins it, whichever player opened. */
+async function p0WinsLeg(page: Page) {
+  if (!(await p0IsThrowing(page))) await enterGameScore(page, 0); // P2 opens
+  await enterGameScore(page, 180);
+  await enterGameScore(page, 0);
+  await enterGameScore(page, 180);
+  await enterGameScore(page, 0);
+  await enterGameScore(page, 141);
+  await confirmFinish(page);
+}
+
+/** Plays a fixed-41 checkout leg so that プレイヤー1 always wins it, whichever player opened. */
+async function p0WinsCheckoutLeg(page: Page) {
+  if (!(await p0IsThrowing(page))) await enterGameScore(page, 0); // P2 opens
+  await enterGameScore(page, 41);
+  await confirmFinish(page);
+}
 
 /**
  * Regression coverage for the two pre-existing modes. These must keep passing unchanged as
@@ -180,6 +211,220 @@ test.describe('チェックアウト練習', () => {
     const nextTarget = await remaining.nth(0).innerText();
     await expect(remaining.nth(1)).toHaveText(nextTarget);
     expect(Number(nextTarget)).not.toBeNaN();
+  });
+});
+
+/**
+ * 先攻の交代・Leg結果ダイアログのEnter・1ラウンド目の先攻入れ替え。
+ * All three regressed when 通常01/チェックアウト練習 were re-implemented alongside Pentathlon.
+ */
+test.describe('交互先攻とLeg送り', () => {
+  test('通常01: 同じプレイヤーが勝ち続けても先攻はLegごとに交代し、Enterで次のLegへ進める', async ({ page }) => {
+    await openFreshApp(page);
+    await page.getByLabel('勝利条件').selectOption({ label: 'なし（Legを継続）' });
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+    // Leg 1: P1 opens.
+    expect(await starterBadges(page)).toEqual(['先攻', '後攻']);
+    expect(await p0IsThrowing(page)).toBe(true);
+    await p0WinsLeg(page);
+    await expect(page.locator('.result-card')).toContainText('LEG 1 WINNER');
+    await expect(page.locator('.result-card h2')).toHaveText('プレイヤー1');
+
+    // The <kbd>Enter</kbd> badge must actually work.
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.result-card')).toHaveCount(0);
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 2');
+
+    // Leg 2: the throw changed hands even though P1 won leg 1.
+    expect(await starterBadges(page)).toEqual(['後攻', '先攻']);
+    expect(await p0IsThrowing(page)).toBe(false);
+    await p0WinsLeg(page);
+    await expect(page.locator('.result-card h2')).toHaveText('プレイヤー1');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 3');
+
+    // Leg 3: back to P1, after two straight P1 wins.
+    expect(await starterBadges(page)).toEqual(['先攻', '後攻']);
+    expect(await p0IsThrowing(page)).toBe(true);
+    await expect(page.locator('.n01-leg-center strong')).toHaveText('2 - 0');
+  });
+
+  test('チェックアウト練習: 連勝しても先攻は交代し、Enterで次のLegへ進める', async ({ page }) => {
+    await openFreshApp(page);
+    await page.locator('.mode-card', { hasText: 'チェックアウト練習' }).click();
+    await page.getByLabel('出題下限').fill('41');
+    await page.getByLabel('出題上限').fill('41');
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+    expect(await starterBadges(page)).toEqual(['先攻', '後攻']);
+    await p0WinsCheckoutLeg(page);
+    await expect(page.locator('.result-card')).toContainText('LEG 1 WINNER');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 2');
+    expect(await starterBadges(page)).toEqual(['後攻', '先攻']);
+
+    await p0WinsCheckoutLeg(page);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 3');
+    expect(await starterBadges(page)).toEqual(['先攻', '後攻']);
+    await expect(page.locator('.n01-leg-center strong')).toHaveText('2 - 0');
+  });
+
+  test('Leg結果ダイアログ: IME変換確定のEnterでは進まない', async ({ page }) => {
+    await openFreshApp(page);
+    await page.getByLabel('勝利条件').selectOption({ label: 'なし（Legを継続）' });
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await p0WinsLeg(page);
+    await expect(page.locator('.result-card')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }),
+      );
+    });
+    await expect(page.locator('.result-card')).toBeVisible();
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 1');
+
+    // A real Enter still advances.
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 2');
+  });
+
+  test('Leg結果ダイアログ: 表示中のキー入力が裏のテンキーに溜まらない', async ({ page }) => {
+    await openFreshApp(page);
+    await page.getByLabel('勝利条件').selectOption({ label: 'なし（Legを継続）' });
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await p0WinsLeg(page);
+    await expect(page.locator('.result-card')).toBeVisible();
+
+    await page.keyboard.type('99');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 2');
+    // The 99 must not have survived into leg 2's entry field.
+    await expect(page.locator('.n01-score-table td.scored.current input')).toHaveValue('');
+  });
+});
+
+test.describe('復活した旧機能', () => {
+  test('前のLegをやり直す: 勝利直前の状態まで巻き戻り、Legカウントも戻る', async ({ page }) => {
+    await openFreshApp(page);
+    await page.getByLabel('勝利条件').selectOption({ label: 'なし（Legを継続）' });
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+    await p0WinsLeg(page);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 2');
+    await expect(page.locator('.n01-leg-center strong')).toHaveText('1 - 0');
+
+    await page.locator('.n01-menu-table button', { hasText: '☰' }).click();
+    await page.getByRole('button', { name: '前のLegをやり直す' }).click();
+
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 1');
+    await expect(page.locator('.n01-leg-center strong')).toHaveText('0 - 0');
+    // Back on the checkout, just before taking it.
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('141');
+    await expect(page.locator('.result-card')).toHaveCount(0);
+    await expect(page.locator('.n01-notice')).toContainText('前のLegを勝利直前の状態で再開しました');
+  });
+
+  test('前のLegをやり直す: 戻せるLegが無いうちは選べない', async ({ page }) => {
+    await openFreshApp(page);
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await page.locator('.n01-menu-table button', { hasText: '☰' }).click();
+    await expect(page.getByRole('button', { name: '前のLegをやり直す' })).toBeDisabled();
+  });
+
+  test('マッチ結果: Enterで新しい対戦を始められる', async ({ page }) => {
+    await openFreshApp(page);
+    await page.getByLabel('勝利条件').selectOption({ label: '2 Leg先取' });
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+    await p0WinsLeg(page);
+    await page.keyboard.press('Enter');
+    await p0WinsLeg(page);
+
+    await expect(page.locator('.result-card.match-summary')).toContainText('MATCH WINNER');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.mode-card').first()).toBeVisible();
+    // 新しい対戦を始める clears the save, so no resume button is offered.
+    await expect(page.getByRole('button', { name: /保存した対戦を再開/ })).toHaveCount(0);
+  });
+});
+
+test.describe('1ラウンド目の先攻入れ替え', () => {
+  test('通常01: 相手セルをタップして先攻を入れ替えられ、トグルで元に戻る', async ({ page }) => {
+    await openFreshApp(page);
+    await page.getByLabel('勝利条件').selectOption({ label: 'なし（Legを継続）' });
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+    // Exactly one picker: the opponent's empty 1st-round cell.
+    const picker = page.locator('.n01-score-table button.starter-picker');
+    await expect(picker).toHaveCount(1);
+    await expect(picker).toHaveAttribute('aria-label', 'プレイヤー2を先攻にする');
+
+    await picker.click();
+    expect(await starterBadges(page)).toEqual(['後攻', '先攻']);
+    expect(await p0IsThrowing(page)).toBe(false);
+    await expect(page.locator('.n01-notice')).toContainText('プレイヤー2を先攻に変更しました');
+
+    // Tapping the other side toggles it straight back.
+    await expect(picker).toHaveAttribute('aria-label', 'プレイヤー1を先攻にする');
+    await picker.click();
+    expect(await starterBadges(page)).toEqual(['先攻', '後攻']);
+    expect(await p0IsThrowing(page)).toBe(true);
+  });
+
+  test('通常01: 1投でも入力されたら入れ替え不可になり、得点修正と競合しない', async ({ page }) => {
+    await openFreshApp(page);
+    await page.getByLabel('勝利条件').selectOption({ label: 'なし（Legを継続）' });
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+    await enterGameScore(page, 100);
+    await expect(page.locator('.n01-score-table button.starter-picker')).toHaveCount(0);
+
+    // The played cell still opens the past-score editor, unchanged.
+    await page.locator('.n01-score-table td.scored button').first().click();
+    await expect(page.locator('.n01-modal-card')).toContainText('過去得点を修正');
+  });
+
+  test('通常01: 入れ替えた順序を起点に以降のLegも交互先攻になる', async ({ page }) => {
+    await openFreshApp(page);
+    await page.getByLabel('勝利条件').selectOption({ label: 'なし（Legを継続）' });
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+    await page.locator('.n01-score-table button.starter-picker').click();
+    expect(await starterBadges(page)).toEqual(['後攻', '先攻']);
+
+    await p0WinsLeg(page);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 2');
+    // Leg 2 alternates from the swapped order, not from the match's original starter.
+    expect(await starterBadges(page)).toEqual(['先攻', '後攻']);
+
+    await p0WinsLeg(page);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 3');
+    expect(await starterBadges(page)).toEqual(['後攻', '先攻']);
+  });
+
+  test('チェックアウト練習: 相手セルのタップで先攻が入れ替わり、以降も交互になる', async ({ page }) => {
+    await openFreshApp(page);
+    await page.locator('.mode-card', { hasText: 'チェックアウト練習' }).click();
+    await page.getByLabel('出題下限').fill('41');
+    await page.getByLabel('出題上限').fill('41');
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+
+    const picker = page.locator('.n01-score-table button.starter-picker');
+    await expect(picker).toHaveCount(1);
+    await picker.click();
+    expect(await starterBadges(page)).toEqual(['後攻', '先攻']);
+    expect(await p0IsThrowing(page)).toBe(false);
+
+    await p0WinsCheckoutLeg(page);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.n01-leg-center small')).toHaveText('LEG 2');
+    expect(await starterBadges(page)).toEqual(['先攻', '後攻']);
   });
 });
 

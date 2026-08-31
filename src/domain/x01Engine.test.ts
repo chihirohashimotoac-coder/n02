@@ -6,9 +6,12 @@ import {
   declareDraw,
   editVisit,
   resolveRoundLimit,
+  resumePreviousLeg,
+  setLegStarter,
   swapCurrentLegScores,
   threeDartAverage,
   undoLastAction,
+  type X01MatchState,
   type X01Settings,
 } from './x01Engine';
 import { InvalidVisitError, resolveVisit } from './x01Core';
@@ -237,7 +240,7 @@ describe('applyVisit - checkout and leg/match completion', () => {
     expect(state.matchWinner).toBe(0);
   });
 
-  it('alternates the next leg starter to the loser (checkout winner is not next starter)', () => {
+  it('hands the throw to the other player for the next leg', () => {
     let state = createX01Match(baseSettings({ targetLegs: 5 }));
     state = applyVisit(state, 180);
     state = applyVisit(state, 26);
@@ -249,6 +252,124 @@ describe('applyVisit - checkout and leg/match completion', () => {
     expect(state.legStarter).toBe(1);
     expect(state.active).toBe(1);
     expect(state.players[0].remaining).toBe(501);
+  });
+
+  it('regression: 交互先攻 - the leg winner never affects who starts the next leg', () => {
+    // P0 wins leg after leg. The throw must still change hands every single leg: 0,1,0,1,0.
+    let state = createX01Match(baseSettings({ targetLegs: 0 }));
+    const starters: Array<0 | 1> = [state.legStarter];
+    for (let leg = 1; leg <= 4; leg += 1) {
+      // Whoever is not P0 opens or answers; P0 checks out from 501 in three visits either way.
+      while (state.legResult === null) {
+        state = state.active === 0 ? winLegAsP0(state) : applyVisit(state, 26);
+      }
+      expect(state.legResult.winner).toBe(0); // P0 keeps winning
+      state = advanceLeg(state);
+      starters.push(state.legStarter);
+    }
+    expect(starters).toEqual([0, 1, 0, 1, 0]);
+    expect(state.players[0].legs).toBe(4);
+    expect(state.players[1].legs).toBe(0);
+  });
+
+  it('regression: a drawn leg alternates the starter the same way', () => {
+    let state = createX01Match(baseSettings({ targetLegs: 0 }));
+    expect(state.legStarter).toBe(0);
+    state = applyVisit(state, 60);
+    state = declareDraw(state);
+    state = advanceLeg(state);
+    expect(state.legStarter).toBe(1);
+    expect(state.active).toBe(1);
+  });
+});
+
+/** Drives P0 from 501 to a checkout, leaving P1's visits to the caller. */
+function winLegAsP0(state: X01MatchState): X01MatchState {
+  let next = applyVisit(state, 180); // 321
+  if (next.active === 1) next = applyVisit(next, 26);
+  next = applyVisit(next, 180); // 141
+  if (next.active === 1) next = applyVisit(next, 26);
+  return applyVisit(next, 141, 3);
+}
+
+describe('setLegStarter', () => {
+  it('swaps who throws first while the leg is still untouched', () => {
+    let state = createX01Match(baseSettings());
+    expect(state.legStarter).toBe(0);
+    state = setLegStarter(state, 1);
+    expect(state.legStarter).toBe(1);
+    expect(state.active).toBe(1);
+    // Tapping again puts it back - the gesture is a toggle.
+    state = setLegStarter(state, 0);
+    expect(state.legStarter).toBe(0);
+    expect(state.active).toBe(0);
+  });
+
+  it('is a no-op once a visit has been entered', () => {
+    let state = createX01Match(baseSettings());
+    state = applyVisit(state, 100);
+    const before = state;
+    state = setLegStarter(state, 0);
+    expect(state).toBe(before);
+  });
+
+  it('is a no-op while a leg result is on screen', () => {
+    let state = createX01Match(baseSettings({ targetLegs: 0 }));
+    state = applyVisit(state, 60);
+    state = declareDraw(state);
+    const before = state;
+    expect(setLegStarter(state, 1)).toBe(before);
+  });
+
+  it('leaves per-player scores where they are (it is not swapCurrentLegScores)', () => {
+    let state = createX01Match(baseSettings({ handicapEnabled: [true, false], handicapScores: [301, 501] }));
+    expect(state.players[0].remaining).toBe(301);
+    state = setLegStarter(state, 1);
+    expect(state.players[0].remaining).toBe(301);
+    expect(state.players[1].remaining).toBe(501);
+  });
+
+  it('makes the swapped order the new origin of the alternation', () => {
+    let state = createX01Match(baseSettings({ targetLegs: 0 }));
+    state = setLegStarter(state, 1); // P1 now opens leg 1
+    state = applyVisit(state, 60); // P1 throws first
+    expect(state.visits[0].player).toBe(1);
+    state = declareDraw(state);
+    state = advanceLeg(state);
+    expect(state.legStarter).toBe(0); // leg 2 alternates from the swapped order, not from P0
+    state = declareDraw(state);
+    state = advanceLeg(state);
+    expect(state.legStarter).toBe(1);
+  });
+});
+
+describe('resumePreviousLeg', () => {
+  it('rewinds to the state just before the winning visit and un-awards the leg', () => {
+    let state = createX01Match(baseSettings({ targetLegs: 5 }));
+    state = applyVisit(state, 180); // P0 -> 321
+    state = applyVisit(state, 26); // P1 -> 475
+    state = applyVisit(state, 180); // P0 -> 141
+    state = applyVisit(state, 26); // P1 -> 449
+    state = applyVisit(state, 141, 3); // P0 checks out
+    state = advanceLeg(state);
+    expect(state.leg).toBe(2);
+    expect(state.players[0].legs).toBe(1);
+
+    state = resumePreviousLeg(state);
+    expect(state.leg).toBe(1);
+    expect(state.legResult).toBeNull();
+    expect(state.matchWinner).toBeNull();
+    expect(state.completed).toHaveLength(0);
+    expect(state.players[0].legs).toBe(0);
+    expect(state.players[0].remaining).toBe(141); // back on the checkout, before taking it
+    expect(state.players[0].checkouts).toBe(0);
+    expect(state.players[0].highestFinish).toBe(0);
+    expect(state.active).toBe(0);
+  });
+
+  it('is a no-op with no completed leg to go back to', () => {
+    const state = createX01Match(baseSettings());
+    expect(resumePreviousLeg(state)).toBe(state);
   });
 });
 
@@ -332,7 +453,7 @@ describe('editVisit', () => {
     expect(p0AfterLeg1.highestFinish).toBe(141);
 
     // Leg 2: P0 throws once, then that visit gets corrected.
-    expect(state.legStarter).toBe(1); // loser-of-leg1 (P0 won, so P1 starts leg 2 - see advanceLeg test)
+    expect(state.legStarter).toBe(1); // 交互先攻: P0 opened leg 1, so P1 opens leg 2
     state = applyVisit(state, 60); // P1's leg-2 visit -> 441
     state = applyVisit(state, 100); // P0's leg-2 visit -> 401
     state = editVisit(state, state.visits.length - 1, 140, 3); // correct P0's leg-2 visit to 140

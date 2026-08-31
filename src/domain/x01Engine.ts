@@ -344,13 +344,36 @@ export function declareDraw(state: X01MatchState): X01MatchState {
   };
 }
 
-/** Starts the next leg after a leg-result screen has been acknowledged. */
+/**
+ * Starts the next leg after a leg-result screen has been acknowledged.
+ *
+ * 通常01 and チェックアウト練習 use 交互先攻: the throw simply changes hands every leg, starting from
+ * whoever opened the match (or from whatever setLegStarter() last chose). The leg's winner is
+ * deliberately NOT consulted - a player on a winning streak must not keep or lose the throw because
+ * of it. Pentathlon's own 敗者先攻/交互先攻 rules live in domain/pentathlon/session.ts
+ * (computeNextStarter) and share no code with this function.
+ */
 export function advanceLeg(state: X01MatchState): X01MatchState {
   if (state.legResult === null || state.matchWinner !== null) return state;
-  const lastCompletion = state.completed[state.completed.length - 1];
-  const nextStarter: 0 | 1 = lastCompletion.winner === null ? (state.legStarter === 0 ? 1 : 0) : lastCompletion.winner === 0 ? 1 : 0;
+  const nextStarter: 0 | 1 = state.legStarter === 0 ? 1 : 0;
   const core = coreForNewLeg(state.settings, state.leg + 1, nextStarter, state.players, state.startScore);
   return { ...state, ...core, legResult: null, undo: [] };
+}
+
+/**
+ * Chooses who throws first in the current leg, for the 1st-round tap-the-opponent's-cell gesture.
+ *
+ * Only legal while the leg is untouched (no visit entered yet), so it can never rewrite a leg that is
+ * already under way. Because advanceLeg() alternates from `legStarter`, a swap made here becomes the
+ * new origin of the alternation and every later leg follows from it.
+ *
+ * This is NOT swapCurrentLegScores(): that one moves already-thrown visits and stats between the two
+ * players, whereas this only decides the order of an empty leg.
+ */
+export function setLegStarter(state: X01MatchState, starter: 0 | 1): X01MatchState {
+  if (state.visits.length > 0 || state.legResult !== null || state.matchWinner !== null) return state;
+  if (state.legStarter === starter) return state;
+  return { ...state, active: starter, legStarter: starter };
 }
 
 /** Undoes the most recent visit (or, if a leg just finished, un-finishes it back to in-progress). */
@@ -361,6 +384,24 @@ export function undoLastAction(state: X01MatchState): X01MatchState {
   const wasLegCompletingVisit = state.legResult !== null && state.completed.length > 0;
   const completed = wasLegCompletingVisit ? state.completed.slice(0, -1) : state.completed;
   return { ...state, ...clone(previous), undo, completed, legResult: null, matchWinner: null };
+}
+
+/**
+ * Rewinds to the most recently completed leg, at the state it stood in just before the visit that
+ * ended it. Every `completed` entry carries the snapshot needed for this, so the leg can be replayed
+ * from its deciding throw. Whatever has been played since is discarded.
+ */
+export function resumePreviousLeg(state: X01MatchState): X01MatchState {
+  if (state.completed.length === 0) return state;
+  const last = state.completed[state.completed.length - 1];
+  return {
+    ...state,
+    ...clone(last.restore),
+    completed: state.completed.slice(0, -1),
+    undo: [],
+    legResult: null,
+    matchWinner: null,
+  };
 }
 
 /** Edits a past visit's score/darts in place and recomputes everything after it. */
