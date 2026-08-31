@@ -91,6 +91,12 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+/** A visit is 1-3 darts; anything else is a caller mistake and is pulled back into range. */
+function clampDarts(darts: number): number {
+  if (!Number.isInteger(darts)) return 3;
+  return Math.min(3, Math.max(1, darts));
+}
+
 function newPlayerStats(name: string): X01PlayerStats {
   return {
     name,
@@ -208,20 +214,32 @@ function coreSnapshot(state: X01MatchState): X01CoreState {
   };
 }
 
-/** Applies one visit for the currently-active player. Pushes an undo snapshot first. */
-export function applyVisit(state: X01MatchState, enteredScore: number, finishDarts?: number): X01MatchState {
+/**
+ * Applies one visit for the currently-active player. Pushes an undo snapshot first.
+ *
+ * `dartsUsed` records a visit thrown with fewer than three darts (the 使用ダーツ selector / the +/-
+ * keys); it defaults to the full three and is ignored on a checkout, where the declared finish count
+ * is authoritative. It feeds the dart totals, so a visit marked as 2 darts counts as 2 in 3DA.
+ */
+export function applyVisit(
+  state: X01MatchState,
+  enteredScore: number,
+  finishDarts?: number,
+  dartsUsed?: number,
+): X01MatchState {
   if (state.matchWinner !== null || state.legResult !== null) return state;
 
   const player = state.active;
   const before = state.players[player].remaining;
   const resolution = resolveVisit(before, enteredScore, finishDarts);
+  const darts = resolution.checkout ? resolution.darts : clampDarts(dartsUsed ?? resolution.darts);
 
   const undoStack = [...state.undo, coreSnapshot(state)];
   const players = clone(state.players) as [X01PlayerStats, X01PlayerStats];
   const stats = players[player];
   const scoredAmount = resolution.bust ? 0 : enteredScore;
 
-  stats.totalDarts += resolution.darts;
+  stats.totalDarts += darts;
   stats.totalScored += scoredAmount;
   if (!resolution.bust) {
     if (scoredAmount >= 180) stats.ton80Count += 1;
@@ -230,23 +248,23 @@ export function applyVisit(state: X01MatchState, enteredScore: number, finishDar
   }
   if (stats.first9Darts < 9) {
     const room = 9 - stats.first9Darts;
-    const dartsTowardFirst9 = Math.min(room, resolution.darts);
+    const dartsTowardFirst9 = Math.min(room, darts);
     if (dartsTowardFirst9 > 0) {
       stats.first9Darts += dartsTowardFirst9;
-      stats.first9Score += dartsTowardFirst9 === resolution.darts ? scoredAmount : 0;
+      stats.first9Score += dartsTowardFirst9 === darts ? scoredAmount : 0;
     }
   }
   stats.remaining = resolution.after;
 
   const legDarts = clone(state.legDarts) as [number, number];
-  legDarts[player] += resolution.darts;
+  legDarts[player] += darts;
 
   const visit: X01Visit = {
     player,
     score: resolution.bust ? 0 : enteredScore,
     before,
     after: resolution.after,
-    darts: resolution.darts,
+    darts,
     bust: resolution.bust,
     checkout: resolution.checkout,
   };
@@ -344,13 +362,36 @@ export function declareDraw(state: X01MatchState): X01MatchState {
   };
 }
 
-/** Starts the next leg after a leg-result screen has been acknowledged. */
+/**
+ * Starts the next leg after a leg-result screen has been acknowledged.
+ *
+ * 通常01 and チェックアウト練習 use 交互先攻: the throw simply changes hands every leg, starting from
+ * whoever opened the match (or from whatever setLegStarter() last chose). The leg's winner is
+ * deliberately NOT consulted - a player on a winning streak must not keep or lose the throw because
+ * of it. Pentathlon's own 敗者先攻/交互先攻 rules live in domain/pentathlon/session.ts
+ * (computeNextStarter) and share no code with this function.
+ */
 export function advanceLeg(state: X01MatchState): X01MatchState {
   if (state.legResult === null || state.matchWinner !== null) return state;
-  const lastCompletion = state.completed[state.completed.length - 1];
-  const nextStarter: 0 | 1 = lastCompletion.winner === null ? (state.legStarter === 0 ? 1 : 0) : lastCompletion.winner === 0 ? 1 : 0;
+  const nextStarter: 0 | 1 = state.legStarter === 0 ? 1 : 0;
   const core = coreForNewLeg(state.settings, state.leg + 1, nextStarter, state.players, state.startScore);
   return { ...state, ...core, legResult: null, undo: [] };
+}
+
+/**
+ * Chooses who throws first in the current leg, for the 1st-round tap-the-opponent's-cell gesture.
+ *
+ * Only legal while the leg is untouched (no visit entered yet), so it can never rewrite a leg that is
+ * already under way. Because advanceLeg() alternates from `legStarter`, a swap made here becomes the
+ * new origin of the alternation and every later leg follows from it.
+ *
+ * This is NOT swapCurrentLegScores(): that one moves already-thrown visits and stats between the two
+ * players, whereas this only decides the order of an empty leg.
+ */
+export function setLegStarter(state: X01MatchState, starter: 0 | 1): X01MatchState {
+  if (state.visits.length > 0 || state.legResult !== null || state.matchWinner !== null) return state;
+  if (state.legStarter === starter) return state;
+  return { ...state, active: starter, legStarter: starter };
 }
 
 /** Undoes the most recent visit (or, if a leg just finished, un-finishes it back to in-progress). */
@@ -361,6 +402,24 @@ export function undoLastAction(state: X01MatchState): X01MatchState {
   const wasLegCompletingVisit = state.legResult !== null && state.completed.length > 0;
   const completed = wasLegCompletingVisit ? state.completed.slice(0, -1) : state.completed;
   return { ...state, ...clone(previous), undo, completed, legResult: null, matchWinner: null };
+}
+
+/**
+ * Rewinds to the most recently completed leg, at the state it stood in just before the visit that
+ * ended it. Every `completed` entry carries the snapshot needed for this, so the leg can be replayed
+ * from its deciding throw. Whatever has been played since is discarded.
+ */
+export function resumePreviousLeg(state: X01MatchState): X01MatchState {
+  if (state.completed.length === 0) return state;
+  const last = state.completed[state.completed.length - 1];
+  return {
+    ...state,
+    ...clone(last.restore),
+    completed: state.completed.slice(0, -1),
+    undo: [],
+    legResult: null,
+    matchWinner: null,
+  };
 }
 
 /** Edits a past visit's score/darts in place and recomputes everything after it. */

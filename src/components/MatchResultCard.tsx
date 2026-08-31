@@ -85,7 +85,7 @@ export default function MatchResultCard({ state, onNewMatch, onBackToMenu }: Pro
           リザルトカードを共有
         </button>
         <button type="button" className="primary-button" onClick={onNewMatch}>
-          新しい対戦を始める
+          新しい対戦を始める <kbd>Enter</kbd>
         </button>
         <button type="button" className="text-button" onClick={onBackToMenu}>
           メニューへ戻る
