@@ -146,6 +146,14 @@ test.describe('COUNT-UP play', () => {
     await expect(total(page, 1)).toContainText('40');
   });
 
+  test('2 players: each TOTAL column is announced with the player it belongs to', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUpGame(page, { players: 2, names: ['あお', 'みどり'] });
+    // On screen both columns read "TOTAL"; their accessible names must still tell them apart.
+    await expect(page.getByRole('columnheader', { name: 'あお の累計TOTAL' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'みどり の累計TOTAL' })).toBeVisible();
+  });
+
   test('rejects an out-of-range score without changing the game', async ({ page }) => {
     await startCountUp(page);
     await enterRound(page, 181);

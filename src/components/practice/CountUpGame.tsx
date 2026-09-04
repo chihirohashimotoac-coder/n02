@@ -251,7 +251,14 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
                   <th scope="col" className={active === player ? 'active' : ''}>
                     {state.players[player].name}
                   </th>
-                  <th scope="col" className={`total-col ${active === player ? 'active' : ''}`}>
+                  {/* Both players' totals read "TOTAL" on screen, which is unambiguous next to the
+                      name beside it - but not once a screen reader announces the column on its own,
+                      so the accessible name carries the player. */}
+                  <th
+                    scope="col"
+                    className={`total-col ${active === player ? 'active' : ''}`}
+                    aria-label={`${state.players[player].name} の累計TOTAL`}
+                  >
                     TOTAL
                   </th>
                 </Fragment>
