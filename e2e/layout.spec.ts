@@ -7,6 +7,7 @@ import {
   openSingleGame,
   startCountUp,
   tapQuickTarget,
+  typeCountUpDigit,
 } from './helpers';
 
 /**
@@ -356,6 +357,55 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     expect(await isUnobstructed(page, '.countup-keypad button.enter')).toBe(true);
     const box = (await enter.boundingBox())!;
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+  });
+
+  test('the sheet shows a few rounds at a time and scrolls for the rest', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page);
+
+    // Like 01's history: three or four rounds on screen, the other rounds a scroll away, rather
+    // than all 8 squeezed in at once.
+    const visibleRounds = await page.evaluate(() => {
+      const board = document.querySelector('.countup-board')!;
+      const row = document.querySelector('.countup-table tbody tr')!.getBoundingClientRect();
+      const head = document.querySelector('.countup-table thead')!.getBoundingClientRect();
+      return (board.clientHeight - head.height) / row.height;
+    });
+    expect(visibleRounds).toBeGreaterThanOrEqual(3);
+    expect(visibleRounds).toBeLessThanOrEqual(6);
+
+    const board = page.locator('.countup-board');
+    expect(await board.evaluate((el) => el.scrollHeight > el.clientHeight + 1)).toBe(true);
+    expect(await hasVerticalScroll(page)).toBe(false); // the board scrolls, the page never does
+  });
+
+  test('entering a score snaps the sheet back to the round in play', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page);
+    // Six rounds in: ROUND 7 is well past the three-to-five rounds any supported viewport shows,
+    // so scrolling to the top genuinely takes it off screen.
+    for (const score of [100, 60, 140, 45, 90, 30]) await enterCountUpRound(page, score);
+    await expect(page.locator('.countup-round-badge strong')).toContainText('7');
+
+    /** Is the round being thrown fully inside the scroll box? */
+    const currentRoundInView = () =>
+      page.evaluate(() => {
+        const board = document.querySelector('.countup-board')!.getBoundingClientRect();
+        const current = document.querySelector('.countup-table tr.current')!.getBoundingClientRect();
+        return current.top >= board.top - 1 && current.bottom <= board.bottom + 1;
+      });
+
+    // Scroll right back to ROUND 1 to read an early score - the live round goes off screen.
+    const board = page.locator('.countup-board');
+    await board.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    expect(await currentRoundInView()).toBe(false);
+
+    // The very first digit of the next score brings it back, without touching the scrollbar.
+    await typeCountUpDigit(page, '9');
+    expect(await currentRoundInView()).toBe(true);
+    await expect(page.locator('.countup-cell-entry')).toHaveText('9');
   });
 
   test('the sheet spans the screen the way 通常01 does, with compact rows', async ({ page }) => {
