@@ -171,8 +171,17 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
     [indexes, state.players],
   );
 
-  // Keep the round being thrown in view as the sheet fills up. Measured against the scroll box
-  // itself rather than offsetTop, which resolves against the fixed shell, not the board.
+  /**
+   * Keep the round being thrown in view.
+   *
+   * Only a few rounds fit the board at once, so a player may well have scrolled back to read an
+   * earlier one. Entering a score must always snap the sheet back to the round in play: this runs
+   * on the entry as well as on the round and the thrower, so the very first digit typed brings the
+   * live row back, and confirming, undoing or swapping player keeps it there.
+   *
+   * Measured against the scroll box itself rather than offsetTop, which resolves against the fixed
+   * shell, not the board.
+   */
   useEffect(() => {
     const container = boardRef.current;
     const current = container?.querySelector('tr.current');
@@ -180,7 +189,7 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
     const row = current.getBoundingClientRect();
     const box = container.getBoundingClientRect();
     container.scrollTop += row.top - box.top - (box.height - row.height) / 2;
-  }, [round, active]);
+  }, [round, active, entry]);
 
   const openEditor = (player: PlayerIndex, roundIndex: number) => {
     const score = state.players[player].scores[roundIndex];
@@ -238,16 +247,24 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
       </div>
 
       <div className="countup-board" ref={boardRef} tabIndex={0} aria-label="ラウンド履歴">
-        {/* Laid out like 通常01's sheet: full width, a narrow round column, and a 得点 + derived
-            number pair per player - so no single cell is stretched across a desktop screen. */}
+        {/* Laid out like 通常01's sheet: full width, a 得点 + derived number pair per player, and -
+            with two players - the round column between them, so each player reads their own half
+            outwards from the middle. A solo game keeps R on the left, with nothing to split. */}
         <table className={`countup-table ${solo ? 'solo' : ''}`}>
           <thead>
             <tr>
-              <th scope="col" className="round-col">
-                R
-              </th>
+              {solo && (
+                <th scope="col" className="round-col">
+                  R
+                </th>
+              )}
               {indexes.map((player) => (
                 <Fragment key={player}>
+                  {!solo && player === 1 && (
+                    <th scope="col" className="round-col">
+                      R
+                    </th>
+                  )}
                   <th scope="col" className={active === player ? 'active' : ''}>
                     {state.players[player].name}
                   </th>
@@ -268,16 +285,20 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
           <tbody>
             {rows.map((row) => {
               const isCurrentRow = row.round === round;
+              const roundCell = (
+                <th scope="row" className="round-col">
+                  {row.round}
+                </th>
+              );
               return (
                 <tr key={row.round} className={isCurrentRow ? 'current' : ''}>
-                  <th scope="row" className="round-col">
-                    {row.round}
-                  </th>
+                  {solo && roundCell}
                   {indexes.map((player) => {
                     const { score, runningTotal } = row.cells[player];
                     const isEntryCell = isCurrentRow && active === player && score === null;
                     return (
                       <Fragment key={player}>
+                        {!solo && player === 1 && roundCell}
                         {score !== null ? (
                           <td className="scored">
                             <button

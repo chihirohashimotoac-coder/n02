@@ -94,8 +94,9 @@ test.describe('COUNT-UP setup', () => {
     await page.locator('.name-input input').nth(0).fill('   ');
     await page.locator('.name-input input').nth(1).fill('');
     await page.getByRole('button', { name: /COUNT-UP を開始/ }).click();
-    // R | name | TOTAL | name | TOTAL - each player owns a 得点 column and its running total.
-    await expect(page.locator('.countup-table thead th').nth(1)).toHaveText('PLAYER 1');
+    // name | TOTAL | R | name | TOTAL - each player owns a 得点 column and its running total, with
+    // the round column between them.
+    await expect(page.locator('.countup-table thead th').nth(0)).toHaveText('PLAYER 1');
     await expect(page.locator('.countup-table thead th').nth(3)).toHaveText('PLAYER 2');
   });
 
@@ -144,6 +145,39 @@ test.describe('COUNT-UP play', () => {
     await expect(page.locator('.countup-round-badge strong')).toContainText('2');
     await expect(total(page, 0)).toContainText('60');
     await expect(total(page, 1)).toContainText('40');
+  });
+
+  test('the round column sits between the players, and on the left when playing alone', async ({ page }) => {
+    await startCountUp(page, { players: 2 });
+    expect(await page.locator('.countup-table thead th').allTextContents()).toEqual([
+      'PLAYER 1',
+      'TOTAL',
+      'R',
+      'PLAYER 2',
+      'TOTAL',
+    ]);
+
+    await openFreshApp(page);
+    await startCountUpGame(page);
+    expect(await page.locator('.countup-table thead th').allTextContents()).toEqual([
+      'R',
+      'PLAYER 1',
+      'TOTAL',
+    ]);
+  });
+
+  test('the headline TOTAL is the biggest number on the screen', async ({ page }) => {
+    await startCountUp(page);
+    await enterRound(page, 100);
+    const fontSize = (selector: string) =>
+      page
+        .locator(selector)
+        .first()
+        .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+
+    const total = await fontSize('.countup-total-value');
+    expect(total).toBeGreaterThan(await fontSize('.countup-table td.scored button'));
+    expect(total).toBeGreaterThan(await fontSize('.countup-table td.running-total'));
   });
 
   test('2 players: each TOTAL column is announced with the player it belongs to', async ({ page }) => {
@@ -426,7 +460,7 @@ test.describe('COUNT-UP result', () => {
     await expect(page.locator('.countup-verdict strong')).toHaveText('あお');
 
     await page.getByRole('button', { name: /SAME SETTINGS/ }).click();
-    await expect(page.locator('.countup-table thead th').nth(1)).toHaveText('あお');
+    await expect(page.locator('.countup-table thead th').nth(0)).toHaveText('あお');
     await expect(page.locator('.countup-table thead th').nth(3)).toHaveText('みどり');
     await expect(total(page, 0)).toContainText('0');
     await expect(page.locator('.countup-round-badge strong')).toContainText('1');

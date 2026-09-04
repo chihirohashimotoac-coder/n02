@@ -157,6 +157,15 @@ export const keypadExpected = (page: Page) =>
     () => window.innerWidth <= 720 || window.matchMedia('(hover: none) and (pointer: coarse)').matches,
   );
 
+/** Types one digit into the COUNT-UP entry, by whichever input route the device offers. */
+export async function typeCountUpDigit(page: Page, digit: string) {
+  if (await page.locator('.countup-keypad').isVisible()) {
+    await page.locator('.countup-keypad button', { hasText: new RegExp(`^${digit}$`) }).first().click();
+  } else {
+    await page.keyboard.type(digit);
+  }
+}
+
 /**
  * Enters one COUNT-UP round total by whichever input route the current device actually offers:
  * its own on-screen keypad where that exists, the physical keyboard otherwise.
