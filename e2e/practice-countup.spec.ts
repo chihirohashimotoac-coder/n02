@@ -94,8 +94,9 @@ test.describe('COUNT-UP setup', () => {
     await page.locator('.name-input input').nth(0).fill('   ');
     await page.locator('.name-input input').nth(1).fill('');
     await page.getByRole('button', { name: /COUNT-UP を開始/ }).click();
+    // R | name | TOTAL | name | TOTAL - each player owns a 得点 column and its running total.
     await expect(page.locator('.countup-table thead th').nth(1)).toHaveText('PLAYER 1');
-    await expect(page.locator('.countup-table thead th').nth(2)).toHaveText('PLAYER 2');
+    await expect(page.locator('.countup-table thead th').nth(3)).toHaveText('PLAYER 2');
   });
 
   test('goes back to the PRACTICE hub', async ({ page }) => {
@@ -143,6 +144,14 @@ test.describe('COUNT-UP play', () => {
     await expect(page.locator('.countup-round-badge strong')).toContainText('2');
     await expect(total(page, 0)).toContainText('60');
     await expect(total(page, 1)).toContainText('40');
+  });
+
+  test('2 players: each TOTAL column is announced with the player it belongs to', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUpGame(page, { players: 2, names: ['あお', 'みどり'] });
+    // On screen both columns read "TOTAL"; their accessible names must still tell them apart.
+    await expect(page.getByRole('columnheader', { name: 'あお の累計TOTAL' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'みどり の累計TOTAL' })).toBeVisible();
   });
 
   test('rejects an out-of-range score without changing the game', async ({ page }) => {
@@ -418,7 +427,7 @@ test.describe('COUNT-UP result', () => {
 
     await page.getByRole('button', { name: /SAME SETTINGS/ }).click();
     await expect(page.locator('.countup-table thead th').nth(1)).toHaveText('あお');
-    await expect(page.locator('.countup-table thead th').nth(2)).toHaveText('みどり');
+    await expect(page.locator('.countup-table thead th').nth(3)).toHaveText('みどり');
     await expect(total(page, 0)).toContainText('0');
     await expect(page.locator('.countup-round-badge strong')).toContainText('1');
   });
