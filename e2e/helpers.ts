@@ -163,8 +163,8 @@ export const keypadExpected = (page: Page) =>
  */
 export async function enterCountUpRound(page: Page, score: number | string) {
   if (!(await page.locator('.countup-keypad').isVisible())) {
-    // A button left focused by an earlier click would swallow Enter as its own activation.
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    // Typed exactly as a player would, with no focus fix-ups: the screen itself has to leave the
+    // keyboard route usable after any button press.
     await page.keyboard.type(String(score));
     await page.keyboard.press('Enter');
     return;

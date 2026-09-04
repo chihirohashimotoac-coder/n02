@@ -306,7 +306,19 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
           <button type="button" onClick={requestExit}>
             PRACTICE
           </button>
-          <button type="button" disabled={!canUndo(state)} onClick={undo}>
+          <button
+            type="button"
+            disabled={!canUndo(state)}
+            onClick={() => {
+              undo();
+              // This button stays mounted and would otherwise keep the focus, and the keydown
+              // handler below deliberately leaves a focused button its native Enter activation -
+              // so the next Enter would fire UNDO again instead of confirming the typed score.
+              // Hand the focus back to the score sheet, which is where typing belongs. Matters on
+              // a desktop especially, where Enter is the only way to confirm a round.
+              boardRef.current?.focus({ preventScroll: true });
+            }}
+          >
             UNDO
           </button>
           <button type="button" onClick={() => setModal('menu')} aria-label="メニュー">

@@ -194,6 +194,27 @@ test.describe('COUNT-UP input route', () => {
     await expect(total(page)).toContainText('100');
   });
 
+  test('PC: Enter still confirms a score after the footer UNDO button was clicked', async ({ page }) => {
+    test.skip(await keypadExpected(page), 'this device is served by the on-screen keypad');
+    await startCountUp(page);
+    for (const score of ['100', '60']) {
+      await page.keyboard.type(score);
+      await page.keyboard.press('Enter');
+    }
+    await expect(total(page)).toContainText('160');
+
+    // Clicking UNDO must not leave the keyboard route aimed at that button: with no on-screen ENTER
+    // to fall back on, the next Enter would re-fire UNDO instead of confirming the typed score.
+    await page.locator('.countup-menu button', { hasText: 'UNDO' }).click();
+    await expect(total(page)).toContainText('100');
+
+    await page.keyboard.type('40');
+    await expect(page.locator('.countup-entry-value')).toHaveText('40');
+    await page.keyboard.press('Enter');
+    await expect(total(page)).toContainText('140');
+    await expect(page.locator('.countup-round-badge strong')).toContainText('3');
+  });
+
   test('touch: the on-screen keypad enters a round by tapping', async ({ page }) => {
     test.skip(!(await keypadExpected(page)), 'this device has a physical-keyboard route');
     await startCountUp(page);
