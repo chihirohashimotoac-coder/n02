@@ -105,13 +105,22 @@ export function clearCountUpHistory(): void {
 }
 
 /**
- * Rewrites the newest entry in place. Used when a finished game's round score is corrected on the
- * result screen, so the stored record matches what the player is looking at rather than gaining a
- * second entry for the same game.
+ * Rewrites one already-recorded game in place, matched on its own `date`. Used when a finished
+ * game's round score is corrected on the result screen, so the stored record matches what the
+ * player is looking at rather than gaining a second entry for the same game.
+ *
+ * Matched rather than assumed to be the newest: another tab (or another window of the installed
+ * PWA) can finish its own COUNT-UP in between, and overwriting the head would delete that game's
+ * result while leaving this one uncorrected.
  */
-export function replaceLatestCountUpHistory(entry: CountUpHistoryEntry): CountUpHistoryEntry[] {
+export function updateCountUpHistoryEntry(entry: CountUpHistoryEntry): CountUpHistoryEntry[] {
   const current = loadCountUpHistory();
-  const next = current.length === 0 ? [entry] : [entry, ...current.slice(1)];
+  const index = current.findIndex((item) => item.date === entry.date);
+  // Gone from the list means it was pushed past the 10-entry cap by games finished elsewhere.
+  // Re-inserting it would put an older game at the head, so the stored list is left as it is.
+  if (index === -1) return current;
+
+  const next = current.map((item, position) => (position === index ? entry : item));
   try {
     localStorage.setItem(COUNT_UP_HISTORY_KEY, JSON.stringify(next));
   } catch {

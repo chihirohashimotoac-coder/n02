@@ -5,7 +5,7 @@ import {
   appendCountUpHistory,
   clearCountUpHistory,
   loadCountUpHistory,
-  replaceLatestCountUpHistory,
+  updateCountUpHistoryEntry,
   type CountUpHistoryEntry,
 } from './practiceStorage';
 import { CURRENT_MATCH_KEY, HISTORY_KEY, THEME_KEY } from './matchStorage';
@@ -75,14 +75,41 @@ describe('COUNT-UP history storage', () => {
     expect(stored[9].date).toBe('2026-01-01T00:00:04.000Z');
   });
 
-  it('replaces the newest entry in place when a finished game is corrected', () => {
+  it('replaces the matching entry in place when a finished game is corrected', () => {
     appendCountUpHistory(entry({ date: 'a' }));
     appendCountUpHistory(entry({ date: 'b' }));
-    replaceLatestCountUpHistory(entry({ date: 'b', players: [{ ...entry().players[0], total: 700 }] }));
+    updateCountUpHistoryEntry(entry({ date: 'b', players: [{ ...entry().players[0], total: 700 }] }));
     const stored = loadCountUpHistory();
     expect(stored).toHaveLength(2);
     expect(stored[0].players[0].total).toBe(700);
     expect(stored[1].date).toBe('a');
+  });
+
+  it('corrects its own entry, not whatever another tab recorded in the meantime', () => {
+    appendCountUpHistory(entry({ date: 'mine' }));
+    // Another tab finishes its own COUNT-UP: it, not this game, is now the newest entry.
+    appendCountUpHistory(entry({ date: 'other-tab', players: [{ ...entry().players[0], name: 'OTHER' }] }));
+
+    updateCountUpHistoryEntry(entry({ date: 'mine', players: [{ ...entry().players[0], total: 700 }] }));
+
+    const stored = loadCountUpHistory();
+    expect(stored).toHaveLength(2);
+    expect(stored[0].date).toBe('other-tab');
+    expect(stored[0].players[0].name).toBe('OTHER'); // the other tab's result survives
+    expect(stored[1].date).toBe('mine');
+    expect(stored[1].players[0].total).toBe(700); // and this game is the one corrected
+  });
+
+  it('leaves the list untouched when the corrected game has fallen past the cap', () => {
+    for (let index = 0; index < COUNT_UP_HISTORY_LIMIT; index += 1) {
+      appendCountUpHistory(entry({ date: `newer-${index}` }));
+    }
+    const before = localStorage.getItem(COUNT_UP_HISTORY_KEY);
+
+    updateCountUpHistoryEntry(entry({ date: 'evicted', players: [{ ...entry().players[0], total: 700 }] }));
+
+    expect(localStorage.getItem(COUNT_UP_HISTORY_KEY)).toBe(before);
+    expect(loadCountUpHistory()).toHaveLength(COUNT_UP_HISTORY_LIMIT);
   });
 
   it('survives corrupted JSON', () => {
@@ -137,7 +164,7 @@ describe('COUNT-UP history storage', () => {
     localStorage.setItem(PENTATHLON_SINGLE_SESSION_KEY, '{"keep":4}');
 
     appendCountUpHistory(entry());
-    replaceLatestCountUpHistory(entry({ date: 'z' }));
+    updateCountUpHistoryEntry(entry({ date: 'z' }));
     loadCountUpHistory();
     clearCountUpHistory();
 

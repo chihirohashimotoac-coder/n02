@@ -18,7 +18,7 @@ import {
   type CountUpSettings,
   type CountUpState,
 } from '../../domain/practice/countUp';
-import { appendCountUpHistory, replaceLatestCountUpHistory, type CountUpHistoryEntry } from '../../storage/practiceStorage';
+import { appendCountUpHistory, updateCountUpHistoryEntry, type CountUpHistoryEntry } from '../../storage/practiceStorage';
 import type { ThemeName } from '../../storage/matchStorage';
 
 interface Props {
@@ -82,7 +82,7 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
       recordedDate.current = date;
       appendCountUpHistory(buildHistoryEntry(game, date));
     } else {
-      replaceLatestCountUpHistory(buildHistoryEntry(game, recordedDate.current));
+      updateCountUpHistoryEntry(buildHistoryEntry(game, recordedDate.current));
     }
   }, [game]);
 
