@@ -1,12 +1,14 @@
 import { expect, test, type ConsoleMessage, type Page } from '@playwright/test';
 import {
   commitPentTurn,
+  enterCountUpRound,
   confirmFinish,
   enterGameScore,
   enterPentScore,
   openFreshApp,
   openPentathlon,
   openSingleGame,
+  startCountUp,
   tapBaseballOutcome,
   tapQuickTarget,
 } from './helpers';
@@ -73,6 +75,36 @@ test.describe('no console errors', () => {
     await enterPentScore(page, 141);
     await confirmFinish(page);
     await page.getByRole('button', { name: /次の種目へ/ }).click();
+
+    expect(errors).toEqual([]);
+  });
+
+  test('PRACTICE hub, COUNT-UP play, award overlay, edit dialog and result', async ({ page }) => {
+    const errors = collectErrors(page);
+
+    await openFreshApp(page);
+    await startCountUp(page, { players: 2, bull: 'fat' });
+
+    await enterCountUpRound(page, 180); // award overlay
+    await enterCountUpRound(page, 150); // the opponent's award replaces it
+    await enterCountUpRound(page, 181); // rejected, validation notice
+    await page.locator('.countup-menu button', { hasText: 'UNDO' }).click();
+
+    await page.locator('.countup-table td.scored button').first().click();
+    await page.getByLabel('修正後のラウンド得点').fill('99');
+    await page.getByRole('button', { name: '修正して再計算' }).click();
+
+    await page.getByRole('button', { name: 'メニュー' }).click();
+    await page.getByRole('button', { name: '閉じる' }).click();
+
+    // One entry stands (P1 round 1, corrected above), so 15 more finish the 2-player game.
+    for (let round = 0; round < 15; round += 1) await enterCountUpRound(page, 60);
+    await expect(page.locator('.countup-result-shell')).toBeVisible();
+
+    await page.getByRole('button', { name: /SAME SETTINGS/ }).click();
+    await enterCountUpRound(page, 100);
+    await page.locator('.countup-menu button', { hasText: 'PRACTICE' }).click();
+    await page.getByRole('button', { name: '続ける' }).click();
 
     expect(errors).toEqual([]);
   });

@@ -121,3 +121,40 @@ export async function openPentRules(page: Page) {
 export async function tapBaseballOutcome(page: Page, label: string) {
   await page.locator('.pent-quick-btn', { hasText: new RegExp(`^${label}`) }).click();
 }
+
+/**
+ * Opens the PRACTICE hub from the top menu. `data-mode` rather than the label, so this can never
+ * pick up one of the Pentathlon cards.
+ */
+export async function openPracticeHub(page: Page) {
+  await page.locator('.mode-card[data-mode="practice"]').click();
+  await page.waitForSelector('.practice-card');
+}
+
+/** Opens PRACTICE → COUNT-UP and starts a game with the given options. */
+export async function startCountUp(
+  page: Page,
+  options: { players?: 1 | 2; bull?: 'separate' | 'fat'; names?: string[] } = {},
+) {
+  await openPracticeHub(page);
+  await page.locator('.practice-card[data-practice="count-up"]').click();
+  await page.waitForSelector('.countup-setup');
+  if (options.players === 2) await page.getByRole('button', { name: /2 PLAYERS/ }).click();
+  if (options.bull === 'fat') await page.getByRole('button', { name: /FAT BULL/ }).click();
+  for (const [index, name] of (options.names ?? []).entries()) {
+    await page.locator('.name-input input').nth(index).fill(name);
+  }
+  await page.getByRole('button', { name: /COUNT-UP を開始/ }).click();
+  await page.waitForSelector('.countup-shell');
+}
+
+/**
+ * Enters one COUNT-UP round total on its own keypad, which is offered at every viewport (desktop
+ * players can type the same digits instead).
+ */
+export async function enterCountUpRound(page: Page, score: number | string) {
+  for (const char of String(score)) {
+    await page.locator('.countup-keypad button', { hasText: new RegExp(`^${char}$`) }).first().click();
+  }
+  await page.locator('.countup-keypad button.enter').click();
+}

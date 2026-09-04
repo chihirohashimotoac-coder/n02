@@ -1,5 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openFreshApp, openPentathlon, openSingleGame, tapQuickTarget } from './helpers';
+import {
+  enterCountUpRound,
+  openFreshApp,
+  openPentathlon,
+  openPracticeHub,
+  openSingleGame,
+  startCountUp,
+  tapQuickTarget,
+} from './helpers';
 
 /**
  * Layout guarantees that must hold at every supported viewport size (see playwright.config.ts's
@@ -288,5 +296,74 @@ test.describe('layout: gameplay fits one screen', () => {
     await tapQuickTarget(page, 'インナーブル');
     expect(await hasVerticalScroll(page)).toBe(false);
     await expect(page.locator('button', { hasText: 'この投球を確定' })).toBeInViewport();
+  });
+});
+
+
+test.describe('layout: PRACTICE / COUNT-UP', () => {
+  test('the hub and the COUNT-UP setup never scroll sideways', async ({ page }) => {
+    await openFreshApp(page);
+    await openPracticeHub(page);
+    expect(await hasHorizontalScroll(page)).toBe(false);
+
+    await page.locator('.practice-card[data-practice="count-up"]').click();
+    await expect(page.locator('.countup-setup')).toBeVisible();
+    expect(await hasHorizontalScroll(page)).toBe(false);
+  });
+
+  test('the play screen fits one viewport, keypad clear of the bottom edge', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page, { players: 2, names: [LONG_NAME, LONG_NAME] });
+
+    expect(await hasVerticalScroll(page)).toBe(false);
+    expect(await hasHorizontalScroll(page)).toBe(false);
+
+    // ROUND, the active player, TOTAL and the input are all on screen at once, unscrolled.
+    await expect(page.locator('.countup-round-badge')).toBeInViewport();
+    await expect(page.locator('.countup-total-card.active')).toBeInViewport();
+    await expect(page.locator('.countup-entry-value')).toBeInViewport();
+    const enter = page.locator('.countup-keypad button.enter');
+    await expect(enter).toBeInViewport();
+    expect(await isUnobstructed(page, '.countup-keypad button.enter')).toBe(true);
+
+    const box = (await enter.boundingBox())!;
+    const viewport = page.viewportSize()!;
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+  });
+
+  test('the score being typed is visible while the keypad stays reachable', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page);
+    for (const digit of ['1', '4', '0']) {
+      await page.locator('.countup-keypad button', { hasText: new RegExp(`^${digit}$`) }).first().click();
+    }
+    await expect(page.locator('.countup-entry-value')).toHaveText('140');
+    await expect(page.locator('.countup-entry-value')).toBeInViewport();
+    await expect(page.locator('.countup-cell-entry')).toHaveText('140');
+  });
+
+  test('the award presentation covers neither the entry nor the keypad', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page);
+    await enterCountUpRound(page, 180);
+    await expect(page.locator('.countup-award-card')).toBeVisible();
+
+    // The overlay takes no pointer events, so every control underneath stays live.
+    expect(await isUnobstructed(page, '.countup-keypad button.enter')).toBe(true);
+    await enterCountUpRound(page, 60);
+    await expect(page.locator('.countup-total-value').first()).toContainText('240');
+    expect(await hasHorizontalScroll(page)).toBe(false);
+  });
+
+  test('the result screen fits, with 18-character player names', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page, { players: 2, names: [LONG_NAME, LONG_NAME] });
+    for (let round = 0; round < 8; round += 1) {
+      await enterCountUpRound(page, 100);
+      await enterCountUpRound(page, 40);
+    }
+    await expect(page.locator('.countup-result-shell')).toBeVisible();
+    expect(await hasHorizontalScroll(page)).toBe(false);
+    await expect(page.locator('.countup-verdict strong')).toContainText('あいうえお');
   });
 });

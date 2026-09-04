@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import SetupScreen from './components/SetupScreen';
 import GameScreen from './components/GameScreen';
 import PentathlonFlow from './components/pentathlon/PentathlonFlow';
+import PracticeFlow from './components/practice/PracticeFlow';
 import { createX01Match, type X01MatchState, type X01Settings } from './domain/x01Engine';
 import {
   clearCurrentMatch,
@@ -14,7 +15,7 @@ import {
 } from './storage/matchStorage';
 import { loadPentathlonSession } from './storage/pentathlonStorage';
 
-type Screen = 'setup' | 'game' | 'pentathlon' | 'pentathlon-single';
+type Screen = 'setup' | 'game' | 'pentathlon' | 'pentathlon-single' | 'practice';
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('setup');
@@ -68,6 +69,10 @@ export default function App() {
     setHasSavedPentathlon(loadPentathlonSession() !== null);
   }, []);
 
+  if (screen === 'practice') {
+    return <PracticeFlow theme={theme} onChangeTheme={changeTheme} onExit={() => setScreen('setup')} />;
+  }
+
   if (screen === 'pentathlon' || screen === 'pentathlon-single') {
     return (
       <PentathlonFlow
@@ -98,6 +103,7 @@ export default function App() {
       onChangeTheme={changeTheme}
       onStartPentathlon={() => setScreen('pentathlon')}
       onStartPentathlonSingle={() => setScreen('pentathlon-single')}
+      onStartPractice={() => setScreen('practice')}
       hasSavedPentathlon={hasSavedPentathlon}
     />
   );

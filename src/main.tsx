@@ -5,6 +5,7 @@ import { purgeLegacyCache } from './pwa/legacyCache';
 import './styles/global.css';
 import './styles/app.css';
 import './styles/pentathlon.css';
+import './styles/practice.css';
 
 void purgeLegacyCache();
 
