@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CountUpEditDialog, { type EditTarget } from './CountUpEditDialog';
 import {
   COUNT_UP_ROUNDS,
@@ -147,11 +147,26 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
     return () => window.removeEventListener('keydown', handler);
   }, [entry.length, modal, pressKey, undo]);
 
+  /**
+   * One row per round: each player's round score plus the TOTAL they stood on after it.
+   *
+   * The running total is what 通常01's 「残り」 column is to its 得点 column - the derived number a
+   * player reads next to the score they just threw - except COUNT-UP climbs instead of counting
+   * down. It is only ever shown for rounds that have actually been thrown.
+   */
   const rows = useMemo(
     () =>
       Array.from({ length: COUNT_UP_ROUNDS }, (_, index) => ({
         round: index + 1,
-        cells: indexes.map((player) => state.players[player].scores[index] ?? null),
+        cells: indexes.map((player) => {
+          const scores = state.players[player].scores;
+          const score = scores[index] ?? null;
+          if (score === null) return { score: null, runningTotal: null };
+          return {
+            score,
+            runningTotal: scores.slice(0, index + 1).reduce((sum, value) => sum + value, 0),
+          };
+        }),
       })),
     [indexes, state.players],
   );
@@ -223,16 +238,23 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
       </div>
 
       <div className="countup-board" ref={boardRef} tabIndex={0} aria-label="ラウンド履歴">
-        {/* `solo` narrows the sheet: one player means one score column, which must not be stretched
-            across a whole desktop screen. */}
+        {/* Laid out like 通常01's sheet: full width, a narrow round column, and a 得点 + derived
+            number pair per player - so no single cell is stretched across a desktop screen. */}
         <table className={`countup-table ${solo ? 'solo' : ''}`}>
           <thead>
             <tr>
-              <th scope="col">R</th>
+              <th scope="col" className="round-col">
+                R
+              </th>
               {indexes.map((player) => (
-                <th key={player} scope="col" className={active === player ? 'active' : ''}>
-                  {state.players[player].name}
-                </th>
+                <Fragment key={player}>
+                  <th scope="col" className={active === player ? 'active' : ''}>
+                    {state.players[player].name}
+                  </th>
+                  <th scope="col" className={`total-col ${active === player ? 'active' : ''}`}>
+                    TOTAL
+                  </th>
+                </Fragment>
               ))}
             </tr>
           </thead>
@@ -241,27 +263,37 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
               const isCurrentRow = row.round === round;
               return (
                 <tr key={row.round} className={isCurrentRow ? 'current' : ''}>
-                  <th scope="row">{row.round}</th>
+                  <th scope="row" className="round-col">
+                    {row.round}
+                  </th>
                   {indexes.map((player) => {
-                    const score = row.cells[player];
+                    const { score, runningTotal } = row.cells[player];
                     const isEntryCell = isCurrentRow && active === player && score === null;
-                    if (score !== null) {
-                      return (
-                        <td key={player} className="scored">
-                          <button
-                            type="button"
-                            onClick={() => openEditor(player, row.round - 1)}
-                            aria-label={`${state.players[player].name} ROUND ${row.round} の ${score} を修正`}
-                          >
-                            {score}
-                          </button>
-                        </td>
-                      );
-                    }
                     return (
-                      <td key={player} className={isEntryCell ? 'entry' : 'empty'}>
-                        {isEntryCell ? <span className="countup-cell-entry">{entry || '–'}</span> : <span>–</span>}
-                      </td>
+                      <Fragment key={player}>
+                        {score !== null ? (
+                          <td className="scored">
+                            <button
+                              type="button"
+                              onClick={() => openEditor(player, row.round - 1)}
+                              aria-label={`${state.players[player].name} ROUND ${row.round} の ${score} を修正`}
+                            >
+                              {score}
+                            </button>
+                          </td>
+                        ) : (
+                          <td className={isEntryCell ? 'entry' : 'empty'}>
+                            {isEntryCell ? (
+                              <span className="countup-cell-entry">{entry || '–'}</span>
+                            ) : (
+                              <span>–</span>
+                            )}
+                          </td>
+                        )}
+                        <td className="running-total">
+                          {runningTotal !== null ? runningTotal : <span>–</span>}
+                        </td>
+                      </Fragment>
                     );
                   })}
                 </tr>

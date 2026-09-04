@@ -400,27 +400,17 @@
 
 .countup-table {
   /*
-   * The 8 fixed rounds share the board, so a whole COUNT-UP is normally on screen at once - but
-   * only up to a natural sheet height. Without that ceiling a tall desktop (where the on-screen
-   * keypad is gone) would stretch 8 rounds into 8 tall bands; a viewport too short for even the
-   * compact sheet falls back to scrolling the board.
+   * Full width, like 通常01's score sheet - a COUNT-UP screen must not sit as a narrow island with
+   * empty margins beside it. Cells stay a sensible size because each player carries a 得点 + TOTAL
+   * pair (the same trick 01 uses with 得点 + 残り), not because the table is squeezed.
    */
-  height: min(100%, max(420px, 72vh));
-  /* A round score is a 0-180 number, not a headline: the sheet keeps a scoresheet-like width and
-     centres, instead of running one cell across a whole desktop screen. */
-  width: min(700px, 100%);
-  margin-inline: auto;
-  /* Reads as a sheet rather than as floating rows once the board is wider than it is. */
-  border-inline: 1px solid var(--line);
+  width: 100%;
+  /* The 8 fixed rounds share the board so a whole COUNT-UP is normally on screen at once; a
+     viewport too short for that falls back to scrolling the board. */
+  height: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   text-align: center;
-}
-
-/* One player means one score column, so the sheet is narrower still - but never so narrow that it
-   leaves big empty margins on a phone, where 100% wins. */
-.countup-table.solo {
-  width: min(440px, 100%);
 }
 
 .countup-table thead th {
@@ -433,7 +423,7 @@
   letter-spacing: 0.08em;
   color: var(--muted);
   background: var(--surface-soft);
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--line);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -445,24 +435,60 @@
   background: var(--cu-accent-soft);
 }
 
-.countup-table thead th:first-child {
-  width: 40px;
+.countup-table thead th.total-col {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+}
+
+/*
+ * Column shares, in the spirit of 通常01's 18/23/18/18/23: a narrow round column and, per player,
+ * a wide 得点 cell next to its running TOTAL. Percentages rather than pixels so the sheet fills
+ * whatever width it is given without any one cell becoming a screen-wide banner.
+ */
+.countup-table .round-col {
+  width: 10%;
+}
+
+.countup-table .total-col {
+  width: 21%;
+}
+
+.countup-table.solo .round-col {
+  width: 12%;
+}
+
+.countup-table.solo .total-col {
+  width: 40%;
 }
 
 .countup-table tbody th {
-  width: 40px;
-  font-size: 11px;
+  font-size: clamp(11px, 1.2vw, 16px);
   font-weight: 800;
   color: var(--muted);
   background: var(--surface-soft);
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--line);
 }
 
 .countup-table td {
-  /* A floor, not the final height: the sheet above shares its height across the 8 rounds. */
+  /* A floor, not the final height: the sheet shares its height across the 8 rounds. */
   height: clamp(28px, 4.4vh, 44px);
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--line);
   font-variant-numeric: tabular-nums;
+}
+
+/* The climbing total, next to the score that produced it - COUNT-UP's answer to 01's 「残り」. */
+.countup-table td.running-total {
+  background: var(--surface-soft);
+  color: var(--cu-accent-strong);
+  font-size: clamp(20px, min(2.8vw, 3.7vh), 36px);
+  font-weight: 800;
+}
+
+.countup-table td.running-total span {
+  color: var(--muted);
+  opacity: 0.55;
+  font-size: 16px;
+  font-weight: 400;
 }
 
 .countup-table tr.current td,
@@ -476,8 +502,9 @@
   border: 0;
   background: transparent;
   cursor: pointer;
-  /* Sized against the sheet, which is capped at 700px, rather than against the whole viewport. */
-  font-size: clamp(19px, 4.6vw, 26px);
+  /* A headline number in its cell, the way 01's 得点 is in its own - but bounded by height too,
+     because COUNT-UP always shows all 8 rounds where 01 scrolls a couple of them. */
+  font-size: clamp(22px, min(3.2vw, 4.3vh), 42px);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: inherit;
@@ -499,7 +526,7 @@
 
 .countup-cell-entry {
   display: block;
-  font-size: clamp(21px, 5vw, 28px);
+  font-size: clamp(24px, min(3.6vw, 4.7vh), 46px);
   font-weight: 900;
   color: var(--cu-accent-strong);
   font-variant-numeric: tabular-nums;
@@ -515,10 +542,10 @@
   box-shadow: 0 -8px 30px #19241e14;
 }
 
-/* Same measure as the score sheet above, so the footer reads as one column with it. */
+/* Full width, like 通常01's footer: the TOTAL panels and the menu bar span the screen rather than
+   sitting as a centred island with empty margins beside them. */
 .countup-footer > * {
-  width: min(700px, 100%);
-  margin-inline: auto;
+  width: 100%;
 }
 
 .countup-totals {
@@ -577,9 +604,9 @@
   display: flex;
   align-items: baseline;
   gap: 4px;
-  /* The headline number, but bounded by height as well as width: a short landscape tablet must not
-     spend a tenth of its screen on it. */
-  font-size: clamp(34px, min(10vw, 6.4vh), 58px);
+  /* The headline number, sized like 01's remaining score, but bounded by height as well as width so
+     a short landscape tablet does not spend a tenth of its screen on it. */
+  font-size: clamp(36px, min(9vw, 8vh), 96px);
   font-weight: 900;
   line-height: 1;
   letter-spacing: -0.04em;
@@ -645,10 +672,11 @@
   background: var(--cu-accent-soft);
 }
 
+/* Same bar as 通常01's New / Finish / Stats / ☰ row: full width, 62px, 48px where space is tight. */
 .countup-menu {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  height: 42px;
+  height: 62px;
   background: #26342d;
 }
 
@@ -665,7 +693,7 @@
   border-right: 1px solid #ffffff29;
   background: transparent;
   color: #fff;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 800;
   letter-spacing: 0.06em;
   cursor: pointer;
@@ -702,6 +730,20 @@
 @media (width <= 720px), (hover: none) and (pointer: coarse) {
   .countup-keypad {
     display: grid;
+  }
+
+  /* The keypad takes roughly 200px off the board, so the sheet's numbers step down with it and all
+     8 rounds still fit without scrolling. */
+  .countup-table td.scored button {
+    font-size: clamp(20px, min(3.2vw, 3.2vh), 30px);
+  }
+
+  .countup-table td.running-total {
+    font-size: clamp(17px, min(2.8vw, 2.8vh), 26px);
+  }
+
+  .countup-cell-entry {
+    font-size: clamp(21px, min(3.6vw, 3.5vh), 32px);
   }
 }
 
@@ -763,11 +805,11 @@
   inset: 0;
   z-index: 70;
   display: grid;
-  justify-items: center;
-  /* Above the middle on purpose: the presentation must never sit on top of the TOTAL or the entry
-     strip, which the player is reading while they throw. */
-  align-content: start;
-  padding-top: clamp(56px, 12vh, 160px);
+  /* Centred on the screen. It still takes no pointer events and no focus, so the controls and the
+     TOTAL underneath stay live and clickable while it is up. */
+  place-content: center;
+  place-items: center;
+  padding: 16px;
   pointer-events: none;
 }
 
@@ -1244,5 +1286,24 @@
 
   .countup-keypad {
     height: clamp(160px, 25vh, 200px);
+  }
+
+  /* Same step-down 01 makes on a narrow screen, so the keypad keeps its room. */
+  .countup-menu {
+    height: 48px;
+  }
+
+  .countup-menu button {
+    font-size: 13px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .countup-menu {
+    height: 48px;
+  }
+
+  .countup-menu button {
+    font-size: 13px;
   }
 }

@@ -94,8 +94,9 @@ test.describe('COUNT-UP setup', () => {
     await page.locator('.name-input input').nth(0).fill('   ');
     await page.locator('.name-input input').nth(1).fill('');
     await page.getByRole('button', { name: /COUNT-UP を開始/ }).click();
+    // R | name | TOTAL | name | TOTAL - each player owns a 得点 column and its running total.
     await expect(page.locator('.countup-table thead th').nth(1)).toHaveText('PLAYER 1');
-    await expect(page.locator('.countup-table thead th').nth(2)).toHaveText('PLAYER 2');
+    await expect(page.locator('.countup-table thead th').nth(3)).toHaveText('PLAYER 2');
   });
 
   test('goes back to the PRACTICE hub', async ({ page }) => {
@@ -418,7 +419,7 @@ test.describe('COUNT-UP result', () => {
 
     await page.getByRole('button', { name: /SAME SETTINGS/ }).click();
     await expect(page.locator('.countup-table thead th').nth(1)).toHaveText('あお');
-    await expect(page.locator('.countup-table thead th').nth(2)).toHaveText('みどり');
+    await expect(page.locator('.countup-table thead th').nth(3)).toHaveText('みどり');
     await expect(total(page, 0)).toContainText('0');
     await expect(page.locator('.countup-round-badge strong')).toContainText('1');
   });

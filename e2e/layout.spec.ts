@@ -358,29 +358,56 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
   });
 
-  test('the round rows stay compact and the sheet keeps a scoresheet width', async ({ page }) => {
+  test('the sheet spans the screen the way 通常01 does, with compact rows', async ({ page }) => {
     await openFreshApp(page);
     await startCountUp(page);
     const viewport = page.viewportSize()!;
+
+    // Full bleed, like 01's score table: no empty margins beside the sheet, and the footer and its
+    // menu bar run the same full width underneath.
+    const table = (await page.locator('.countup-table').boundingBox())!;
+    expect(table.x).toBeLessThanOrEqual(1);
+    expect(table.width).toBeGreaterThanOrEqual(viewport.width - 20); // allow a scrollbar gutter
+    for (const selector of ['.countup-footer', '.countup-menu']) {
+      const box = (await page.locator(selector).boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(viewport.width - 20);
+    }
 
     // 8 fixed rounds are never stretched into 8 tall bands to fill the screen.
     const row = (await page.locator('.countup-table tbody tr').first().boundingBox())!;
     expect(row.height).toBeLessThanOrEqual(viewport.height * 0.16);
 
-    // 1 PLAYER: the single score column stays a column, not a screen-wide banner.
+    // 1 PLAYER: the round score shares the width with its running TOTAL, so no single cell runs
+    // across the whole screen the way one undivided column would.
     const cell = (await page.locator('.countup-table tbody td').first().boundingBox())!;
-    expect(cell.width).toBeLessThanOrEqual(Math.min(viewport.width, 460));
+    expect(cell.width).toBeLessThanOrEqual(viewport.width * 0.55);
     expect(await hasHorizontalScroll(page)).toBe(false);
   });
 
   test('2 PLAYERS: the two score columns stay equal, even with 18-character names', async ({ page }) => {
     await openFreshApp(page);
     await startCountUp(page, { players: 2, names: [LONG_NAME, LONG_NAME] });
+    // Cells run 得点 P1 | TOTAL P1 | 得点 P2 | TOTAL P2, so the players' columns are 0 vs 2 and 1 vs 3.
     const cells = page.locator('.countup-table tbody tr').first().locator('td');
-    const first = (await cells.nth(0).boundingBox())!;
-    const second = (await cells.nth(1).boundingBox())!;
-    expect(Math.abs(first.width - second.width)).toBeLessThanOrEqual(2);
+    const boxes = await Promise.all([0, 1, 2, 3].map(async (i) => (await cells.nth(i).boundingBox())!));
+    expect(Math.abs(boxes[0].width - boxes[2].width)).toBeLessThanOrEqual(2);
+    expect(Math.abs(boxes[1].width - boxes[3].width)).toBeLessThanOrEqual(2);
     expect(await hasHorizontalScroll(page)).toBe(false);
+  });
+
+  test('each round shows the TOTAL the player stood on after it', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page);
+    for (const score of [100, 60, 140]) await enterCountUpRound(page, score);
+
+    const totals = page.locator('.countup-table td.running-total');
+    await expect(totals.nth(0)).toHaveText('100');
+    await expect(totals.nth(1)).toHaveText('160');
+    await expect(totals.nth(2)).toHaveText('300');
+    // Rounds not yet thrown carry no total at all.
+    await expect(totals.nth(3)).toHaveText('–');
+    // The last one agrees with the headline TOTAL in the footer.
+    await expect(page.locator('.countup-total-value').first()).toContainText('300');
   });
 
   test('the score being typed is visible on whichever input route the device offers', async ({ page }) => {
