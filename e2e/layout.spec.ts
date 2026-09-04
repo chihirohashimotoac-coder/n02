@@ -311,7 +311,21 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     expect(await hasHorizontalScroll(page)).toBe(false);
   });
 
-  test('the play screen fits one viewport, keypad clear of the bottom edge', async ({ page }) => {
+  test('the COUNT-UP keypad follows input capability rather than viewport width alone', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page);
+    const keypad = page.locator('.countup-keypad');
+    // A touch-first tablet keeps its keypad in either orientation; a mouse/keyboard desktop of the
+    // same width, or wider, types instead.
+    if (await keypadExpected(page)) {
+      await expect(keypad).toBeVisible();
+      await expect(keypad).toBeInViewport();
+    } else {
+      await expect(keypad).toBeHidden();
+    }
+  });
+
+  test('the play screen fits one viewport, with its input route clear of the bottom edge', async ({ page }) => {
     await openFreshApp(page);
     await startCountUp(page, { players: 2, names: [LONG_NAME, LONG_NAME] });
 
@@ -322,34 +336,79 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     await expect(page.locator('.countup-round-badge')).toBeInViewport();
     await expect(page.locator('.countup-total-card.active')).toBeInViewport();
     await expect(page.locator('.countup-entry-value')).toBeInViewport();
+
+    const viewport = page.viewportSize()!;
+    const footer = (await page.locator('.countup-footer').boundingBox())!;
+    expect(footer.y + footer.height).toBeLessThanOrEqual(viewport.height + 1);
+
+    if (!(await keypadExpected(page))) {
+      // No keypad here - and no hole left where it would have been: the score sheet takes the
+      // height back, so the footer follows the board with nothing empty in between.
+      await expect(page.locator('.countup-keypad')).toBeHidden();
+      const board = (await page.locator('.countup-board').boundingBox())!;
+      const table = (await page.locator('.countup-table').boundingBox())!;
+      expect(board.height - table.height).toBeLessThanOrEqual(viewport.height * 0.15);
+      return;
+    }
+
     const enter = page.locator('.countup-keypad button.enter');
     await expect(enter).toBeInViewport();
     expect(await isUnobstructed(page, '.countup-keypad button.enter')).toBe(true);
-
     const box = (await enter.boundingBox())!;
-    const viewport = page.viewportSize()!;
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
   });
 
-  test('the score being typed is visible while the keypad stays reachable', async ({ page }) => {
+  test('the round rows stay compact and the sheet keeps a scoresheet width', async ({ page }) => {
     await openFreshApp(page);
     await startCountUp(page);
-    for (const digit of ['1', '4', '0']) {
-      await page.locator('.countup-keypad button', { hasText: new RegExp(`^${digit}$`) }).first().click();
+    const viewport = page.viewportSize()!;
+
+    // 8 fixed rounds are never stretched into 8 tall bands to fill the screen.
+    const row = (await page.locator('.countup-table tbody tr').first().boundingBox())!;
+    expect(row.height).toBeLessThanOrEqual(viewport.height * 0.16);
+
+    // 1 PLAYER: the single score column stays a column, not a screen-wide banner.
+    const cell = (await page.locator('.countup-table tbody td').first().boundingBox())!;
+    expect(cell.width).toBeLessThanOrEqual(Math.min(viewport.width, 460));
+    expect(await hasHorizontalScroll(page)).toBe(false);
+  });
+
+  test('2 PLAYERS: the two score columns stay equal, even with 18-character names', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page, { players: 2, names: [LONG_NAME, LONG_NAME] });
+    const cells = page.locator('.countup-table tbody tr').first().locator('td');
+    const first = (await cells.nth(0).boundingBox())!;
+    const second = (await cells.nth(1).boundingBox())!;
+    expect(Math.abs(first.width - second.width)).toBeLessThanOrEqual(2);
+    expect(await hasHorizontalScroll(page)).toBe(false);
+  });
+
+  test('the score being typed is visible on whichever input route the device offers', async ({ page }) => {
+    await openFreshApp(page);
+    await startCountUp(page);
+    if (await keypadExpected(page)) {
+      for (const digit of ['1', '4', '0']) {
+        await page.locator('.countup-keypad button', { hasText: new RegExp(`^${digit}$`) }).first().click();
+      }
+    } else {
+      await page.keyboard.type('140');
     }
     await expect(page.locator('.countup-entry-value')).toHaveText('140');
     await expect(page.locator('.countup-entry-value')).toBeInViewport();
     await expect(page.locator('.countup-cell-entry')).toHaveText('140');
   });
 
-  test('the award presentation covers neither the entry nor the keypad', async ({ page }) => {
+  test('the award presentation covers neither the entry nor the input route', async ({ page }) => {
     await openFreshApp(page);
     await startCountUp(page);
     await enterCountUpRound(page, 180);
     await expect(page.locator('.countup-award-card')).toBeVisible();
 
     // The overlay takes no pointer events, so every control underneath stays live.
-    expect(await isUnobstructed(page, '.countup-keypad button.enter')).toBe(true);
+    expect(await isUnobstructed(page, '.countup-entry-value')).toBe(true);
+    if (await keypadExpected(page)) {
+      expect(await isUnobstructed(page, '.countup-keypad button.enter')).toBe(true);
+    }
     await enterCountUpRound(page, 60);
     await expect(page.locator('.countup-total-value').first()).toContainText('240');
     expect(await hasHorizontalScroll(page)).toBe(false);

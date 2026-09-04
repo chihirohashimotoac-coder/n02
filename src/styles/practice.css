@@ -302,7 +302,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 0 clamp(12px, 3vw, 26px);
-  height: clamp(54px, 8vh, 76px);
+  height: clamp(46px, 6.6vh, 62px);
   color: #fff;
   background: linear-gradient(100deg, var(--cu-header-a), var(--cu-header-b));
   box-shadow: 0 4px 18px #00000033;
@@ -315,7 +315,7 @@
 }
 
 .countup-identity strong {
-  font-size: clamp(20px, 5.4vw, 32px);
+  font-size: clamp(19px, 4.8vw, 27px);
   font-weight: 900;
   letter-spacing: 0.06em;
   line-height: 1;
@@ -334,7 +334,7 @@
   display: grid;
   justify-items: center;
   gap: 1px;
-  padding: 5px 14px;
+  padding: 3px 12px;
   border-radius: 12px;
   background: #ffffff1f;
   border: 1px solid #ffffff2e;
@@ -347,7 +347,7 @@
 }
 
 .countup-round-badge strong {
-  font-size: clamp(20px, 5vw, 28px);
+  font-size: clamp(18px, 4.4vw, 24px);
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -365,13 +365,13 @@
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   gap: 3px;
-  padding: 6px clamp(12px, 3vw, 26px);
+  padding: 4px clamp(12px, 3vw, 26px);
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
 
 .countup-pip {
-  height: 6px;
+  height: 5px;
   border-radius: 999px;
   background: var(--cu-pip);
 }
@@ -399,20 +399,35 @@
 }
 
 .countup-table {
-  /* height:100% lets the 8 fixed rounds share the board exactly, so a whole COUNT-UP is normally
-     on screen at once; a viewport too short for that falls back to scrolling the board. */
-  height: 100%;
-  width: 100%;
+  /*
+   * The 8 fixed rounds share the board, so a whole COUNT-UP is normally on screen at once - but
+   * only up to a natural sheet height. Without that ceiling a tall desktop (where the on-screen
+   * keypad is gone) would stretch 8 rounds into 8 tall bands; a viewport too short for even the
+   * compact sheet falls back to scrolling the board.
+   */
+  height: min(100%, max(420px, 72vh));
+  /* A round score is a 0-180 number, not a headline: the sheet keeps a scoresheet-like width and
+     centres, instead of running one cell across a whole desktop screen. */
+  width: min(700px, 100%);
+  margin-inline: auto;
+  /* Reads as a sheet rather than as floating rows once the board is wider than it is. */
+  border-inline: 1px solid var(--line);
   table-layout: fixed;
   border-collapse: collapse;
   text-align: center;
+}
+
+/* One player means one score column, so the sheet is narrower still - but never so narrow that it
+   leaves big empty margins on a phone, where 100% wins. */
+.countup-table.solo {
+  width: min(440px, 100%);
 }
 
 .countup-table thead th {
   position: sticky;
   top: 0;
   z-index: 2;
-  height: 34px;
+  height: 28px;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -431,11 +446,11 @@
 }
 
 .countup-table thead th:first-child {
-  width: 46px;
+  width: 40px;
 }
 
 .countup-table tbody th {
-  width: 46px;
+  width: 40px;
   font-size: 11px;
   font-weight: 800;
   color: var(--muted);
@@ -444,7 +459,8 @@
 }
 
 .countup-table td {
-  height: clamp(30px, 5.4vh, 54px);
+  /* A floor, not the final height: the sheet above shares its height across the 8 rounds. */
+  height: clamp(28px, 4.4vh, 44px);
   border-bottom: 1px solid var(--line);
   font-variant-numeric: tabular-nums;
 }
@@ -460,7 +476,8 @@
   border: 0;
   background: transparent;
   cursor: pointer;
-  font-size: clamp(20px, 5.6vw, 30px);
+  /* Sized against the sheet, which is capped at 700px, rather than against the whole viewport. */
+  font-size: clamp(19px, 4.6vw, 26px);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: inherit;
@@ -482,7 +499,7 @@
 
 .countup-cell-entry {
   display: block;
-  font-size: clamp(22px, 6vw, 32px);
+  font-size: clamp(21px, 5vw, 28px);
   font-weight: 900;
   color: var(--cu-accent-strong);
   font-variant-numeric: tabular-nums;
@@ -498,8 +515,9 @@
   box-shadow: 0 -8px 30px #19241e14;
 }
 
+/* Same measure as the score sheet above, so the footer reads as one column with it. */
 .countup-footer > * {
-  width: min(720px, 100%);
+  width: min(700px, 100%);
   margin-inline: auto;
 }
 
@@ -520,7 +538,7 @@
   justify-items: center;
   align-content: center;
   gap: 1px;
-  padding: 6px 8px;
+  padding: 4px 8px;
   background: var(--surface);
   min-width: 0;
 }
@@ -559,7 +577,9 @@
   display: flex;
   align-items: baseline;
   gap: 4px;
-  font-size: clamp(38px, 10.5vw, 68px);
+  /* The headline number, but bounded by height as well as width: a short landscape tablet must not
+     spend a tenth of its screen on it. */
+  font-size: clamp(34px, min(10vw, 6.4vh), 58px);
   font-weight: 900;
   line-height: 1;
   letter-spacing: -0.04em;
@@ -593,7 +613,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  padding: 5px clamp(12px, 3vw, 20px);
+  padding: 4px clamp(12px, 3vw, 20px);
   border-bottom: 1px solid var(--line);
 }
 
@@ -609,7 +629,7 @@
 .countup-entry-value {
   min-width: 3ch;
   text-align: right;
-  font-size: clamp(26px, 7vw, 38px);
+  font-size: clamp(24px, 6.4vw, 34px);
   font-weight: 900;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
@@ -618,7 +638,7 @@
 
 .countup-notice {
   margin: 0;
-  padding: 5px 12px;
+  padding: 4px 12px;
   font-size: 11px;
   text-align: center;
   color: var(--cu-accent-strong);
@@ -661,12 +681,28 @@
   cursor: not-allowed;
 }
 
+/*
+ * The on-screen keypad is a touch input route, not a viewport-width feature.
+ *
+ * It is hidden by default - a desktop/laptop types the same digits on its physical keyboard, which
+ * CountUpGame's own keydown handler serves - and is switched on for narrow screens and for any
+ * device whose primary pointer is coarse and cannot hover (a phone or a tablet such as an iPad,
+ * whatever its width or orientation). Same capability test 通常01 already uses, and no
+ * User-Agent sniffing. Because it is `display: none` rather than merely invisible, the footer
+ * simply ends above it on a desktop: no reserved hole where the keypad used to be.
+ */
 .countup-keypad {
-  display: grid;
+  display: none;
   grid-template-columns: repeat(3, 1fr);
   grid-auto-rows: minmax(38px, 1fr);
   height: clamp(168px, 26vh, 210px);
   background: #354239;
+}
+
+@media (width <= 720px), (hover: none) and (pointer: coarse) {
+  .countup-keypad {
+    display: grid;
+  }
 }
 
 [data-theme='neon'] .countup-keypad {
@@ -701,6 +737,21 @@
   letter-spacing: 0.08em;
 }
 
+/*
+ * A landscape tablet is the tightest supported layout - wider than it is tall, and still owed a
+ * keypad. Trim the keypad and the headline just enough to keep all 8 rounds on screen; the keys
+ * stay full-width bars, so they are still comfortably tappable.
+ */
+@media (hover: none) and (pointer: coarse) and (height <= 820px) and (orientation: landscape) {
+  .countup-keypad {
+    height: clamp(150px, 21vh, 176px);
+  }
+
+  .countup-total-value {
+    font-size: clamp(30px, 5.4vh, 42px);
+  }
+}
+
 /* ---------------------------------------------------------------- award presentation */
 
 /*
@@ -731,7 +782,12 @@
   background: linear-gradient(150deg, #1b1204f2, #4d3208f2);
   border: 2px solid var(--cu-accent, #d97706);
   box-shadow: 0 24px 70px #000000a6;
-  animation: countup-award-in 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+  /*
+   * Entry, hold and exit are one keyframe run rather than three pieces of state. The card is
+   * unmounted at ~3s (see CountUpAwardOverlay); this run finishes a fraction earlier and holds its
+   * last frame, so the fade-out is actually seen instead of the card vanishing mid-animation.
+   */
+  animation: countup-award-cycle 2.92s both;
 }
 
 .countup-award-player {
@@ -781,14 +837,29 @@
   border-color: #ffd166;
 }
 
-@keyframes countup-award-in {
-  from {
+/*
+ * ~0.32s in, ~2.3s on screen, ~0.3s out. Deliberately small: opacity, a few percent of scale and a
+ * dozen pixels of travel - no zoom, spin, bounce, flash or shake.
+ */
+@keyframes countup-award-cycle {
+  0% {
     opacity: 0;
-    transform: translateY(18px) scale(0.9);
+    transform: translateY(16px) scale(0.94);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   }
-  to {
+  11% {
     opacity: 1;
     transform: none;
+    animation-timing-function: linear;
+  }
+  89% {
+    opacity: 1;
+    transform: none;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.7, 1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.985);
   }
 }
 

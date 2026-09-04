@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { enterCountUpRound, openFreshApp, openPracticeHub, startCountUp as startCountUpGame } from './helpers';
+import {
+  enterCountUpRound,
+  keypadExpected,
+  openFreshApp,
+  openPracticeHub,
+  startCountUp as startCountUpGame,
+} from './helpers';
 
 /**
  * PRACTICE / COUNT-UP end-to-end coverage. Nothing here touches 01, checkout or Pentathlon: the
@@ -148,6 +154,85 @@ test.describe('COUNT-UP play', () => {
   });
 });
 
+test.describe('COUNT-UP input route', () => {
+  test('the on-screen keypad appears only where the device has no physical keyboard', async ({ page }) => {
+    await startCountUp(page);
+    const keypad = page.locator('.countup-keypad');
+    if (await keypadExpected(page)) await expect(keypad).toBeVisible();
+    else await expect(keypad).toBeHidden();
+  });
+
+  test('PC: the physical keyboard enters, corrects and confirms a round', async ({ page }) => {
+    test.skip(await keypadExpected(page), 'this device is served by the on-screen keypad');
+    await startCountUp(page);
+    await expect(page.locator('.countup-keypad')).toBeHidden();
+
+    // 1 → 0 → 0 → Enter confirms ROUND SCORE 100.
+    await page.keyboard.type('100');
+    await expect(page.locator('.countup-entry-value')).toHaveText('100');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.countup-table td.scored button').first()).toHaveText('100');
+    await expect(total(page)).toContainText('100');
+    await expect(page.locator('.countup-round-badge strong')).toContainText('2');
+
+    // Backspace and Delete both drop the last digit typed; Escape clears the whole entry.
+    await page.keyboard.type('12');
+    await page.keyboard.press('Backspace');
+    await expect(page.locator('.countup-entry-value')).toHaveText('1');
+    await page.keyboard.type('4');
+    await page.keyboard.press('Delete');
+    await expect(page.locator('.countup-entry-value')).toHaveText('1');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.countup-entry-value')).toHaveText('–');
+
+    await page.keyboard.type('140');
+    await page.keyboard.press('Enter');
+    await expect(total(page)).toContainText('240');
+
+    // U still takes the last round back without touching the on-screen menu.
+    await page.keyboard.press('u');
+    await expect(total(page)).toContainText('100');
+  });
+
+  test('PC: Enter still confirms a score after the footer UNDO button was clicked', async ({ page }) => {
+    test.skip(await keypadExpected(page), 'this device is served by the on-screen keypad');
+    await startCountUp(page);
+    for (const score of ['100', '60']) {
+      await page.keyboard.type(score);
+      await page.keyboard.press('Enter');
+    }
+    await expect(total(page)).toContainText('160');
+
+    // Clicking UNDO must not leave the keyboard route aimed at that button: with no on-screen ENTER
+    // to fall back on, the next Enter would re-fire UNDO instead of confirming the typed score.
+    await page.locator('.countup-menu button', { hasText: 'UNDO' }).click();
+    await expect(total(page)).toContainText('100');
+
+    await page.keyboard.type('40');
+    await expect(page.locator('.countup-entry-value')).toHaveText('40');
+    await page.keyboard.press('Enter');
+    await expect(total(page)).toContainText('140');
+    await expect(page.locator('.countup-round-badge strong')).toContainText('3');
+  });
+
+  test('touch: the on-screen keypad enters a round by tapping', async ({ page }) => {
+    test.skip(!(await keypadExpected(page)), 'this device has a physical-keyboard route');
+    await startCountUp(page);
+    const keypad = page.locator('.countup-keypad');
+    await expect(keypad).toBeVisible();
+
+    for (const digit of ['1', '0', '0']) {
+      await keypad.locator('button', { hasText: new RegExp(`^${digit}$`) }).first().click();
+    }
+    await expect(page.locator('.countup-entry-value')).toHaveText('100');
+    await keypad.locator('button[aria-label="1文字削除"]').click();
+    await expect(page.locator('.countup-entry-value')).toHaveText('10');
+    await keypad.locator('button', { hasText: /^0$/ }).click();
+    await keypad.locator('button.enter').click();
+    await expect(total(page)).toContainText('100');
+  });
+});
+
 test.describe('COUNT-UP awards', () => {
   const cases = [
     { score: 100, label: 'LOW TON', bull: 'separate' as const },
@@ -193,6 +278,57 @@ test.describe('COUNT-UP awards', () => {
     await enterRound(page, 180);
     await expect(page.locator('.countup-award-card')).toHaveCount(1);
     await expect(page.locator('.countup-award-name')).toHaveText('TON 80');
+
+    // The replacement restarts the presentation from its own beginning rather than inheriting
+    // whatever was left of the first one's time on screen.
+    const elapsed = await page
+      .locator('.countup-award-card')
+      .evaluate((el) => el.getAnimations().map((animation) => Number(animation.currentTime ?? 0)));
+    expect(Math.min(...elapsed)).toBeLessThan(1500);
+  });
+
+  test('runs one entry-hold-exit animation and is gone after about 3 seconds', async ({ page }) => {
+    await startCountUp(page);
+    await enterRound(page, 180);
+    const card = page.locator('.countup-award-card');
+    await expect(card).toBeVisible();
+
+    const animation = await card.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        name: style.animationName,
+        seconds: parseFloat(style.animationDuration),
+        fill: style.animationFillMode,
+      };
+    });
+    // Entry, hold and exit are one run that spans the whole time the card is up, so the fade-out is
+    // actually played on screen instead of the card being cut off mid-animation at unmount.
+    expect(animation.name).toBe('countup-award-cycle');
+    expect(animation.seconds).toBeGreaterThan(2);
+    expect(animation.seconds).toBeLessThan(3);
+    expect(animation.fill).toBe('both');
+
+    // Comfortably inside the window it is still up; comfortably past it, it is gone.
+    await page.waitForTimeout(1200);
+    await expect(card).toBeVisible();
+    await expect(card).toHaveCount(0, { timeout: 6000 });
+  });
+});
+
+test.describe('COUNT-UP awards with reduced motion', () => {
+  test('the award is still readable with the motion switched off', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await startCountUp(page);
+    await enterRound(page, 180);
+    const card = page.locator('.countup-award-card');
+    await expect(card.locator('.countup-award-name')).toHaveText('TON 80');
+    await expect(card.locator('.countup-award-score')).toHaveText('180');
+    expect(await card.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
+    expect(await card.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+
+    // Still non-blocking: the next round goes in exactly as before.
+    await enterRound(page, 60);
+    await expect(total(page)).toContainText('240');
   });
 });
 

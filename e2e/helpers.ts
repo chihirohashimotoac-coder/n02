@@ -149,10 +149,26 @@ export async function startCountUp(
 }
 
 /**
- * Enters one COUNT-UP round total on its own keypad, which is offered at every viewport (desktop
- * players can type the same digits instead).
+ * Does this device get an on-screen keypad? Narrow screens and wide touch-first screens do; a
+ * mouse/keyboard desktop types instead. Mirrors the CSS capability test used by 01 and COUNT-UP.
+ */
+export const keypadExpected = (page: Page) =>
+  page.evaluate(
+    () => window.innerWidth <= 720 || window.matchMedia('(hover: none) and (pointer: coarse)').matches,
+  );
+
+/**
+ * Enters one COUNT-UP round total by whichever input route the current device actually offers:
+ * its own on-screen keypad where that exists, the physical keyboard otherwise.
  */
 export async function enterCountUpRound(page: Page, score: number | string) {
+  if (!(await page.locator('.countup-keypad').isVisible())) {
+    // Typed exactly as a player would, with no focus fix-ups: the screen itself has to leave the
+    // keyboard route usable after any button press.
+    await page.keyboard.type(String(score));
+    await page.keyboard.press('Enter');
+    return;
+  }
   for (const char of String(score)) {
     await page.locator('.countup-keypad button', { hasText: new RegExp(`^${char}$`) }).first().click();
   }

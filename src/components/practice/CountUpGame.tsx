@@ -223,7 +223,9 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
       </div>
 
       <div className="countup-board" ref={boardRef} tabIndex={0} aria-label="ラウンド履歴">
-        <table className="countup-table">
+        {/* `solo` narrows the sheet: one player means one score column, which must not be stretched
+            across a whole desktop screen. */}
+        <table className={`countup-table ${solo ? 'solo' : ''}`}>
           <thead>
             <tr>
               <th scope="col">R</th>
@@ -304,7 +306,19 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
           <button type="button" onClick={requestExit}>
             PRACTICE
           </button>
-          <button type="button" disabled={!canUndo(state)} onClick={undo}>
+          <button
+            type="button"
+            disabled={!canUndo(state)}
+            onClick={() => {
+              undo();
+              // This button stays mounted and would otherwise keep the focus, and the keydown
+              // handler below deliberately leaves a focused button its native Enter activation -
+              // so the next Enter would fire UNDO again instead of confirming the typed score.
+              // Hand the focus back to the score sheet, which is where typing belongs. Matters on
+              // a desktop especially, where Enter is the only way to confirm a round.
+              boardRef.current?.focus({ preventScroll: true });
+            }}
+          >
             UNDO
           </button>
           <button type="button" onClick={() => setModal('menu')} aria-label="メニュー">
@@ -312,6 +326,8 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
           </button>
         </nav>
 
+        {/* Touch input route. Rendered always, but shown by CSS only where the device has no
+            physical keyboard (see practice.css) - a desktop types the same digits instead. */}
         <div className="countup-keypad" aria-label="得点入力テンキー">
           {KEYPAD.map((key) => (
             <button key={key} type="button" onClick={() => pressKey(key)}>
