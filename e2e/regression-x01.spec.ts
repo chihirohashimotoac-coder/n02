@@ -42,13 +42,15 @@ test.describe('通常01', () => {
     await openFreshApp(page);
   });
 
-  test('main menu keeps 通常01 and チェックアウト練習 first, with both Pentathlon entries after', async ({ page }) => {
+  test('main menu keeps 通常01 and チェックアウト練習 first, with the other modes after', async ({ page }) => {
     const cards = page.locator('.mode-card');
-    await expect(cards).toHaveCount(4);
+    await expect(cards).toHaveCount(5);
     await expect(cards.nth(0)).toContainText('通常01');
     await expect(cards.nth(1)).toContainText('チェックアウト練習');
     await expect(cards.nth(2)).toContainText('ペンタスロン');
     await expect(cards.nth(3)).toContainText('ペンタスロン個別練習');
+    // PRACTICE is appended after the pre-existing modes, so nothing above it moves.
+    await expect(cards.nth(4)).toContainText('PRACTICE');
   });
 
   test('scores, busts, checks out and awards the leg', async ({ page }) => {

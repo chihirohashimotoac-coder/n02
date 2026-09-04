@@ -18,6 +18,7 @@ AI支援を活用して開発された独立したダーツ練習アプリです
 | 通常01 | 501 / 701 / 901 / 1101。ダブルアウト、Bust、Leg管理、COM対戦、ハンディキャップ、3DA等の統計 |
 | チェックアウト練習 | ランダムな残り点数を2人で攻略。01エンジンを共有。勝利条件の既定は「なし（Legを継続）」 |
 | ペンタスロン | 5種目の総合競技。JDA / n01・i-Pentathlon の2ルールセット、1人／2人プレイ対応 |
+| PRACTICE | 練習メニューのハブ。COUNT-UP（8ラウンド・1人／2人・アワード判定）をプレイ可能。CRICKET COUNT-UP / EAGLE'S EYE は COMING SOON |
 
 ペンタスロンで採用した各種目のルールと、その出典・未確定事項は
 [`docs/pentathlon-rules.md`](docs/pentathlon-rules.md) に記載しています。
@@ -46,6 +47,8 @@ src/
       session.ts       Session Controller（種目進行・先攻計算・Undo）
       presets.ts       JDA / n01 のプリセット定義
       engines/         種目ごとの独立したGame Engine
+    practice/
+      countUp.ts       COUNT-UP（8ラウンド集計・PPR・アワード判定）。既存01とは完全に独立
   components/        画面
   storage/           LocalStorage（既存キーと後方互換）
   share/             リザルト画像生成
@@ -64,3 +67,4 @@ GitHub Pagesがリポジトリ直下を配信するため、`npm run build` で�
 | `n02-history-v1` | 直近の成績履歴 |
 | `n02-theme-v1` | テーマ設定 |
 | `n02-pentathlon-v1` | 進行中のペンタスロン（既存キーとは独立） |
+| `n02-practice-countup-history-v1` | COUNT-UPの完走履歴（最新10件・既存キーとは独立） |
