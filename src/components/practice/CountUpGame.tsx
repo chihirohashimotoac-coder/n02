@@ -223,7 +223,9 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
       </div>
 
       <div className="countup-board" ref={boardRef} tabIndex={0} aria-label="ラウンド履歴">
-        <table className="countup-table">
+        {/* `solo` narrows the sheet: one player means one score column, which must not be stretched
+            across a whole desktop screen. */}
+        <table className={`countup-table ${solo ? 'solo' : ''}`}>
           <thead>
             <tr>
               <th scope="col">R</th>
@@ -312,6 +314,8 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
           </button>
         </nav>
 
+        {/* Touch input route. Rendered always, but shown by CSS only where the device has no
+            physical keyboard (see practice.css) - a desktop types the same digits instead. */}
         <div className="countup-keypad" aria-label="得点入力テンキー">
           {KEYPAD.map((key) => (
             <button key={key} type="button" onClick={() => pressKey(key)}>
