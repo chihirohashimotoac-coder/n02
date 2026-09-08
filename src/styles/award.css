@@ -39,7 +39,10 @@
   border-radius: var(--award-radius);
   overflow: hidden;
   box-shadow: var(--shadow-overlay);
-  animation: award-cycle 2.92s both;
+  animation: award-cycle 2.94s both;
+  /* Keeps the opacity/transform on the compositor, so animating over a playing <video> - a layer
+     the browser composites separately - does not step. */
+  will-change: opacity, transform;
 }
 
 .award-media {
@@ -145,25 +148,32 @@
 }
 
 /*
- * ~0.32s in, ~2.3s held, ~0.3s out, finishing a fraction before the 3s unmount so the fade-out is
- * actually seen. Deliberately small: opacity, a few percent of scale and a dozen pixels of travel -
- * no zoom, spin, bounce, flash or shake.
+ * Timed against the movies themselves, which are 3.000s and carry their own fade from and to black
+ * (see docs/award-movie-production-report.md): ~0.18s in, ~2.1s held, then a long ~0.66s out that
+ * lands a frame before the 3s unmount.
+ *
+ * The exit used to be 0.32s. On top of the movie's own darkening that read as a snap rather than a
+ * fade - the award was simply gone - which is what made it feel unnatural. Given real time, the two
+ * curves now read as one continuous departure, and there is no bright card left to cut away.
+ *
+ * Deliberately small otherwise: opacity, a few percent of scale and a dozen pixels of travel - no
+ * zoom, spin, bounce, flash or shake.
  */
 @keyframes award-cycle {
   0% {
     opacity: 0;
-    transform: translateY(16px) scale(0.94);
+    transform: translateY(14px) scale(0.95);
     animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   }
-  11% {
+  6% {
     opacity: 1;
     transform: none;
     animation-timing-function: linear;
   }
-  89% {
+  77.5% {
     opacity: 1;
     transform: none;
-    animation-timing-function: cubic-bezier(0.4, 0, 0.7, 1);
+    animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1);
   }
   100% {
     opacity: 0;

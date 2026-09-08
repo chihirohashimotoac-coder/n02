@@ -40,10 +40,13 @@ export function useAwardPreload(mode: 'count-up' | 'x01', enabled = true): void 
     const idle = (window as unknown as { requestIdleCallback?: RequestIdle }).requestIdleCallback;
     let handle: number;
     if (typeof idle === 'function') {
-      handle = idle(() => void warm(), { timeout: 4000 });
+      // Short deadline on purpose. The movies are 3.000s long and the overlay gives one about a
+      // second to produce a frame, so a warm-up that waits several seconds for a quiet moment is a
+      // warm-up that misses the first award of the game - which is the one a player notices.
+      handle = idle(() => void warm(), { timeout: 500 });
     } else {
-      // Safari has no requestIdleCallback; a plain delay keeps the warm-up off the critical path.
-      handle = window.setTimeout(() => void warm(), 2000);
+      // Safari has no requestIdleCallback; a short delay still keeps this off the critical path.
+      handle = window.setTimeout(() => void warm(), 300);
     }
 
     return () => {

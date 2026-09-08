@@ -304,6 +304,45 @@ test.describe('アワード演出は操作を妨げない', () => {
     await page.waitForTimeout(1500);
     await expect(name(page)).toHaveText('TON 80');
   });
+
+  /**
+   * The movies are 3.000s and carry their own fade to black. A short exit on top of that reads as a
+   * snap rather than a fade, so the card's own fade-out is given real time: still fully up well
+   * past the movie's midpoint, visibly on its way out before the end, and gone by the unmount.
+   */
+  test('フェードアウトは十分な長さをかけて滑らかに進む', async ({ page }) => {
+    await start01(page);
+    await enterGameScore(page, 180);
+    await expect(card(page)).toBeVisible();
+
+    // The animation is scrubbed rather than waited out: the curve is the contract, and sampling it
+    // by wall clock would only measure how loaded the machine is.
+    const curve = await card(page).evaluate((el) => {
+      const animation = el.getAnimations()[0];
+      animation.pause();
+      const at = (ms: number) => {
+        animation.currentTime = ms;
+        return Number(getComputedStyle(el as HTMLElement).opacity);
+      };
+      return {
+        duration: Number(animation.effect?.getTiming().duration ?? 0),
+        entered: at(200),
+        held: at(1500),
+        midway: at(2600),
+        end: at(2900),
+      };
+    });
+
+    // Long enough to read as a departure rather than a cut: still fully up past the movie's
+    // midpoint, visibly on its way out before the end, and gone by the 3000ms unmount.
+    expect(curve.duration).toBeGreaterThanOrEqual(2900);
+    expect(curve.duration).toBeLessThan(3000);
+    expect(curve.entered).toBeGreaterThan(0.99);
+    expect(curve.held).toBeGreaterThan(0.99);
+    expect(curve.midway).toBeLessThan(0.9);
+    expect(curve.midway).toBeGreaterThan(0.1);
+    expect(curve.end).toBeLessThan(0.1);
+  });
 });
 
 test.describe('アワードのメディア', () => {

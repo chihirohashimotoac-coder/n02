@@ -31,6 +31,21 @@ function stubPlay(result: Promise<void> = Promise.resolve()) {
   return play;
 }
 
+/** jsdom's readyState is always 0; the component branches on it, so let each test say what it is. */
+function setReadyState(value: number) {
+  Object.defineProperty(HTMLMediaElement.prototype, 'readyState', {
+    configurable: true,
+    get: () => value,
+  });
+}
+
+/** A refusal in the browser's own shape: a DOMException-like error that is not an AbortError. */
+function refusal() {
+  const error = new Error('play() failed because the user did not interact with the document first');
+  error.name = 'NotAllowedError';
+  return error;
+}
+
 function setReducedMotion(reduced: boolean) {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: reduced && query.includes('prefers-reduced-motion'),
@@ -46,6 +61,7 @@ function setReducedMotion(reduced: boolean) {
 
 beforeEach(() => {
   setReducedMotion(false);
+  setReadyState(0);
   stubPlay();
   // jsdom implements none of the media pipeline and logs a warning for each of these; the cleanup
   // path in the component calls them, so stub them out rather than let every test print noise.
@@ -80,7 +96,10 @@ describe('AwardOverlay', () => {
     expect(video).not.toHaveAttribute('loop');
     expect(video).not.toHaveAttribute('controls');
     expect(video.getAttribute('src')).toContain('award-ton80.mp4');
-    expect(video.getAttribute('poster')).toContain('award-ton80-poster.webp');
+    // No poster attribute, on purpose: every movie opens on a pure-black frame, so a poster here
+    // would paint the bright middle of the award and then snap to black as playback started. The
+    // poster is the fallback element below, not a placeholder over the movie.
+    expect(video).not.toHaveAttribute('poster');
     // The movie carries no words; it is decoration over which the text is drawn.
     expect(container.querySelector('.award-media')).toHaveAttribute('aria-hidden', 'true');
     // Played from the very start, exactly once.
@@ -126,12 +145,85 @@ describe('AwardOverlay', () => {
     expect(screen.getByText('TON 80')).toBeInTheDocument();
   });
 
-  it('falls back to the poster when autoplay is refused', async () => {
-    stubPlay(Promise.reject(new Error('NotAllowedError')));
+  it('falls back to the poster when autoplay is refused on a movie that had data to play', async () => {
+    setReadyState(4);
+    stubPlay(Promise.reject(refusal()));
     const { container } = render(<AwardOverlay award={award()} onExpire={vi.fn()} />);
     await act(async () => {});
     expect(container.querySelector('video')).toBeNull();
     expect(container.querySelector('img.award-poster')).toBeInTheDocument();
+  });
+
+  /**
+   * The first play() lands before the element has anything to play, which some browsers reject
+   * outright. Giving up there used to drop a movie that was about to be perfectly playable.
+   */
+  it('retries once when play() is refused before the movie has any data', async () => {
+    setReadyState(0);
+    const play = stubPlay(Promise.reject(refusal()));
+    const { container } = render(<AwardOverlay award={award()} onExpire={vi.fn()} />);
+    await act(async () => {});
+    // Still the movie: nothing has proved it cannot play.
+    const video = container.querySelector('video') as HTMLVideoElement;
+    expect(video).toBeInTheDocument();
+    expect(play).toHaveBeenCalledTimes(1);
+
+    setReadyState(4);
+    stubPlay(Promise.resolve());
+    await act(async () => {
+      fireEvent(video, new Event('canplay'));
+    });
+    expect(container.querySelector('video')).toBeInTheDocument();
+  });
+
+  it('falls back to the poster when the retry is refused as well', async () => {
+    setReadyState(0);
+    stubPlay(Promise.reject(refusal()));
+    const { container } = render(<AwardOverlay award={award()} onExpire={vi.fn()} />);
+    await act(async () => {});
+    const video = container.querySelector('video') as HTMLVideoElement;
+
+    await act(async () => {
+      fireEvent(video, new Event('canplay'));
+    });
+    expect(container.querySelector('video')).toBeNull();
+    expect(container.querySelector('img.award-poster')).toBeInTheDocument();
+  });
+
+  /**
+   * An AbortError is the browser's own autoplay taking the play over, or the element going away -
+   * neither means the movie failed, and treating it as a failure threw away good movies.
+   */
+  it('keeps the movie when play() rejects with AbortError', async () => {
+    setReadyState(4);
+    const error = new Error('interrupted');
+    error.name = 'AbortError';
+    stubPlay(Promise.reject(error));
+    const { container } = render(<AwardOverlay award={award()} onExpire={vi.fn()} />);
+    await act(async () => {});
+    expect(container.querySelector('video')).toBeInTheDocument();
+    expect(container.querySelector('img.award-poster')).toBeNull();
+  });
+
+  it('shows the poster when the movie has produced no frame within its budget', () => {
+    vi.useFakeTimers();
+    setReadyState(0);
+    const { container } = render(<AwardOverlay award={award()} onExpire={vi.fn()} />);
+    expect(container.querySelector('video')).toBeInTheDocument();
+
+    act(() => void vi.advanceTimersByTime(1199));
+    expect(container.querySelector('video')).toBeInTheDocument();
+    act(() => void vi.advanceTimersByTime(2));
+    expect(container.querySelector('video')).toBeNull();
+    expect(container.querySelector('img.award-poster')).toBeInTheDocument();
+  });
+
+  it('leaves a movie that is playing alone once its budget passes', () => {
+    vi.useFakeTimers();
+    setReadyState(4);
+    const { container } = render(<AwardOverlay award={award()} onExpire={vi.fn()} />);
+    act(() => void vi.advanceTimersByTime(1500));
+    expect(container.querySelector('video')).toBeInTheDocument();
   });
 
   it('plays no movie at all under prefers-reduced-motion, showing the poster and the text', () => {
@@ -195,13 +287,33 @@ describe('AwardOverlay', () => {
     expect(video.getAttribute('src')).toContain('award-low-ton.mp4');
   });
 
-  it('releases the media resource when it goes away', () => {
+  /**
+   * Stopping it is the whole cleanup. Clearing src here would be React's own attribute mutated
+   * behind its back, and React does not put it back on a re-mount - under StrictMode's double
+   * invoke that left the element permanently source-less and the movie was lost for good.
+   */
+  it('stops the movie when it goes away, without clearing the source React owns', () => {
     const { container, rerender } = render(<AwardOverlay award={award()} onExpire={vi.fn()} />);
     const video = container.querySelector('video') as HTMLVideoElement;
     const pause = vi.spyOn(video, 'pause');
 
     rerender(<AwardOverlay award={null} onExpire={vi.fn()} />);
     expect(pause).toHaveBeenCalled();
-    expect(video.hasAttribute('src')).toBe(false);
+    expect(video.getAttribute('src')).toContain('award-ton80.mp4');
+  });
+
+  it('survives being mounted, cleaned up and mounted again with its movie intact', async () => {
+    // Exactly what StrictMode does in development, and what used to strip the source.
+    setReadyState(0);
+    const { container, unmount } = render(<AwardOverlay award={award()} onExpire={vi.fn()} />);
+    const first = container.querySelector('video') as HTMLVideoElement;
+    unmount();
+    expect(first.getAttribute('src')).toContain('award-ton80.mp4');
+
+    const second = render(<AwardOverlay award={award()} onExpire={vi.fn()} />);
+    await act(async () => {});
+    const video = second.container.querySelector('video') as HTMLVideoElement;
+    expect(video).toBeInTheDocument();
+    expect(video.getAttribute('src')).toContain('award-ton80.mp4');
   });
 });

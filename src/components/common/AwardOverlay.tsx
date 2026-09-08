@@ -84,35 +84,83 @@ export default function AwardOverlay({ award, onExpire }: Props) {
  * is simply slow all land on the poster, and the poster failing lands on the CSS presentation. The
  * 3-second timer in the parent runs independently of every one of them.
  */
+/**
+ * How long the movie is given to produce its first frame before the poster takes over.
+ *
+ * The movies open on a pure-black frame and are only 3 seconds long, so a card that is still
+ * waiting on the network at this point would spend most of its life as a black square. Past this,
+ * the still is simply the better presentation - and if the movie does arrive later it has already
+ * missed the moment it was for.
+ */
+const FIRST_FRAME_BUDGET_MS = 1200;
+
 function AwardCard({ award }: { award: AwardPresentation }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  /** 'movie' until this award's movie proves it cannot play, then 'poster'. */
+  /** 'movie' until this award's movie proves it cannot play in time, then 'poster'. */
   const [media, setMedia] = useState<'movie' | 'poster'>('movie');
   const [posterFailed, setPosterFailed] = useState(false);
   const reduceMotion = useReducedMotion();
 
   /**
-   * Play from the first frame, once. play() rejects when autoplay is refused or the source is
-   * unusable; either way the poster takes over.
+   * Play once, from the top. The element is mounted fresh for every award (see the key above), so
+   * it is already at frame 0 - assigning currentTime here would only risk a seek against metadata
+   * that has not arrived yet.
+   *
+   * muted and playsInline are set on the element itself as well as in JSX: inline autoplay on iOS
+   * is granted on what the element reports, and a video that is not demonstrably muted is refused.
    */
   useEffect(() => {
     if (reduceMotion) return;
     const video = videoRef.current;
     if (!video) return;
     let cancelled = false;
-    video.currentTime = 0;
-    const started = video.play();
-    if (started && typeof started.catch === 'function') {
-      started.catch(() => {
-        if (!cancelled) setMedia('poster');
+    video.muted = true;
+    video.playsInline = true;
+
+    const attempt = () => {
+      const started = video.play();
+      if (!started || typeof started.catch !== 'function') return;
+      started.catch((error: unknown) => {
+        if (cancelled) return;
+        // An AbortError is the browser's own autoplay taking the play over, or the element being
+        // torn down - neither is a failure to play, and treating it as one used to drop a perfectly
+        // good movie onto the poster. Only a refusal or an unusable source counts.
+        if ((error as { name?: string } | null)?.name === 'AbortError') return;
+        // One retry once there is something to play: the first attempt can land before the element
+        // has any data at all, which some browsers reject outright.
+        if (video.readyState >= 2) {
+          setMedia('poster');
+          return;
+        }
+        video.addEventListener(
+          'canplay',
+          () => {
+            if (cancelled) return;
+            const retried = video.play();
+            if (retried && typeof retried.catch === 'function') {
+              retried.catch(() => {
+                if (!cancelled) setMedia('poster');
+              });
+            }
+          },
+          { once: true },
+        );
       });
-    }
+    };
+    attempt();
+
+    // Nothing on screen yet and the window is a third gone: show the still instead.
+    const budget = window.setTimeout(() => {
+      if (!cancelled && video.readyState < 2) setMedia('poster');
+    }, FIRST_FRAME_BUDGET_MS);
+
     return () => {
       cancelled = true;
-      // Release the decoder and drop any in-flight fetch on unmount, navigation or game reset.
+      window.clearTimeout(budget);
+      // Just stop it. The element is being removed from the document, which is what releases the
+      // decoder and the fetch; clearing src here would be React's own attribute mutated behind its
+      // back, and on a re-mount React does not put it back - the movie would be lost for good.
       video.pause();
-      video.removeAttribute('src');
-      video.load();
     };
   }, [reduceMotion]);
 
@@ -129,7 +177,13 @@ function AwardCard({ award }: { award: AwardPresentation }) {
             ref={videoRef}
             className="award-video"
             src={asset.movie}
-            poster={asset.poster}
+            /*
+             * Deliberately NO poster attribute. Every movie opens on a pure-black frame, so a
+             * poster here would paint the bright middle of the award first and then snap to black
+             * the instant playback began - which reads as the movie not being the delivered one at
+             * all. The card's own near-black ground is that first frame; the poster is the
+             * FALLBACK, rendered below only once the movie is out of the running.
+             */
             muted
             playsInline
             autoPlay
