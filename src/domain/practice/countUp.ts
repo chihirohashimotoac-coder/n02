@@ -1,3 +1,5 @@
+import { classifyAward, type BullMode, type CountUpAwardKind } from '../awards';
+
 /**
  * COUNT-UP domain logic for the PRACTICE hub.
  *
@@ -21,12 +23,21 @@ export const MAX_ROUND_SCORE = 180;
 /**
  * SEPARATE BULL (inner 50 / outer 25) vs FAT BULL (both 50). Round totals are entered directly, so
  * this setting does not change any arithmetic - it only decides which award a 150 round is.
+ *
+ * Re-exported from domain/awards.ts, which is where the classification now lives so 通常01 and
+ * チェックアウト練習 can share it. COUNT-UP's own five award kinds, their labels and its stored
+ * history shape are all unchanged.
  */
-export type BullMode = 'separate' | 'fat';
+export type { BullMode } from '../awards';
+export { AWARD_LABELS } from '../awards';
+export type { CountUpAwardKind as AwardKind } from '../awards';
 
-export type AwardKind = 'LOW_TON' | 'HIGH_TON' | 'TON_80' | 'HAT_TRICK' | 'THREE_IN_THE_BLACK';
-
-export const AWARD_KINDS: readonly AwardKind[] = [
+/**
+ * The five COUNT-UP records. BIG FISH belongs to 通常01・チェックアウト練習 and is deliberately not
+ * here: this list is what storage/practiceStorage.ts keys its per-game award counts by, so adding
+ * to it would change the stored schema.
+ */
+export const AWARD_KINDS: readonly CountUpAwardKind[] = [
   'LOW_TON',
   'HIGH_TON',
   'TON_80',
@@ -34,15 +45,7 @@ export const AWARD_KINDS: readonly AwardKind[] = [
   'THREE_IN_THE_BLACK',
 ] as const;
 
-export const AWARD_LABELS: Record<AwardKind, string> = {
-  LOW_TON: 'LOW TON',
-  HIGH_TON: 'HIGH TON',
-  TON_80: 'TON 80',
-  HAT_TRICK: 'HAT TRICK',
-  THREE_IN_THE_BLACK: 'THREE IN THE BLACK',
-};
-
-export type AwardCounts = Record<AwardKind, number>;
+export type AwardCounts = Record<CountUpAwardKind, number>;
 
 export type PlayerIndex = 0 | 1;
 
@@ -156,14 +159,14 @@ export function formatPpr(value: number): string {
 /**
  * The single award a round total earns, or null. At most one category per round: a 150 is only ever
  * the bull award for the configured BULL setting, never also a LOW TON.
+ *
+ * Delegates to the shared classifier. COUNT-UP can never produce BIG FISH (that needs an x01
+ * remaining and a checkout), so the narrowing below is a type guarantee, not a behaviour change.
  */
-export function awardForScore(score: number, bullMode: BullMode): AwardKind | null {
+export function awardForScore(score: number, bullMode: BullMode): CountUpAwardKind | null {
   if (!isValidRoundScore(score)) return null;
-  if (score === MAX_ROUND_SCORE) return 'TON_80';
-  if (score === 150) return bullMode === 'fat' ? 'HAT_TRICK' : 'THREE_IN_THE_BLACK';
-  if (score >= 151) return 'HIGH_TON';
-  if (score >= 100) return 'LOW_TON';
-  return null;
+  const award = classifyAward(score, { mode: 'count-up', bullMode });
+  return award === 'BIG_FISH' ? null : award;
 }
 
 export function emptyAwardCounts(): AwardCounts {
