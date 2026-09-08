@@ -6,7 +6,9 @@ import {
   disciplineCount,
   isSingleGameSession,
 } from '../../domain/pentathlon/session';
-import { InvalidVisitError } from '../../domain/x01Core';
+import { InvalidVisitError, resolveVisit } from '../../domain/x01Core';
+import { classifyAward } from '../../domain/awards';
+import type { AwardPresentation } from '../common/AwardOverlay';
 import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../../domain/darts';
 import { DISCIPLINE_RULE_TEXT } from '../../domain/pentathlon/ruleText';
 import type { X01SoloState, X01SoloInput } from '../../domain/pentathlon/engines/x01Solo';
@@ -23,6 +25,11 @@ interface Props {
   onExit: () => void;
   error: string | null;
   onError: (message: string | null) => void;
+  /** The shared アワード表示 setting, owned by PentathlonFlow so it survives a discipline change. */
+  awardsEnabled: boolean;
+  onToggleAwards: () => void;
+  /** Hands a just-earned award up to the flow, which presents it. */
+  onAward: (award: Omit<AwardPresentation, 'id'>) => void;
 }
 
 type Modal = 'none' | 'finish-darts' | 'menu' | 'stats' | 'rules' | 'edit';
@@ -46,6 +53,9 @@ export default function PentathlonX01Play({
   onExit,
   error,
   onError,
+  awardsEnabled,
+  onToggleAwards,
+  onAward,
 }: Props) {
   const [entry, setEntry] = useState('');
   const [modal, setModal] = useState<Modal>('none');
@@ -71,6 +81,42 @@ export default function PentathlonX01Play({
   const solo = session.playerCount === 1;
   const players: PlayerIndex[] = solo ? [0] : [0, 1];
 
+  /**
+   * Presents the award a just-committed visit earned, if any - the same six awards, the same
+   * classifier and the same SEPARATE BULL reading 通常01・チェックアウト練習 use, because 301/501 here
+   * take a visit total too.
+   *
+   * Called only from the one place a visit is appended, right after the turn is accepted, so an
+   * undo, a past-score correction or a discipline replay can never fire one. `resolveVisit` is the
+   * very function the engine itself just ran, called again purely to read back whether the visit
+   * busted or checked out; it is pure, and nothing here is written to the session.
+   */
+  const announceAward = useCallback(
+    (score: number, remainingBefore: number, finishDarts?: number) => {
+      if (!awardsEnabled) return;
+      let checkout: boolean;
+      try {
+        const resolution = resolveVisit(remainingBefore, score, finishDarts);
+        // A bust scores nothing, so it earns nothing.
+        if (resolution.bust) return;
+        checkout = resolution.checkout;
+      } catch {
+        // The engine would have rejected the same visit; there is no award for a throw not made.
+        return;
+      }
+      const kind = classifyAward(score, {
+        mode: 'x01',
+        // A visit total, so 150 is THREE IN THE BLACK here; HAT TRICK stays COUNT-UP's.
+        bullMode: 'separate',
+        remainingBefore,
+        checkout,
+      });
+      if (!kind) return;
+      onAward({ kind, score, playerName: session.names[active] });
+    },
+    [active, awardsEnabled, onAward, session.names],
+  );
+
   const submitVisit = useCallback(
     (rawValue: string, finishDarts?: number) => {
       const score = Number(rawValue);
@@ -87,6 +133,7 @@ export default function PentathlonX01Play({
         return;
       }
 
+      const remainingBefore = activeState.remaining;
       try {
         onTurn({ score, finishDarts });
         setEntry('');
@@ -96,9 +143,12 @@ export default function PentathlonX01Play({
       } catch (caught) {
         if (caught instanceof InvalidVisitError) onError(caught.message);
         else throw caught;
+        return;
       }
+      // After the turn is committed, and never in its place.
+      announceAward(score, remainingBefore, finishDarts);
     },
-    [activeState.remaining, onError, onTurn],
+    [activeState.remaining, announceAward, onError, onTurn],
   );
 
   const pressKey = useCallback(
@@ -378,6 +428,16 @@ export default function PentathlonX01Play({
           </button>
           <button type="button" onClick={() => setModal('rules')}>
             ルール説明
+          </button>
+          <button
+            type="button"
+            aria-pressed={awardsEnabled}
+            onClick={() => {
+              onToggleAwards();
+              setModal('none');
+            }}
+          >
+            アワード表示：{awardsEnabled ? 'ON' : 'OFF'}
           </button>
           <button
             type="button"
