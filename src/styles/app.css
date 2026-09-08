@@ -2553,3 +2553,179 @@ select:focus-visible {
   width: 100%;
   margin-top: 10px;
 }
+
+/* ================================================================ smartphone landscape (01 / checkout / Pentathlon X01)
+
+   A phone held sideways is ~390-430px tall and ~844-932px wide. Stacked vertically the fixed
+   footer alone (360px + safe area) is taller than the whole viewport, so before this block the
+   84px header, the score sheet and the footer could not coexist: .n01-score-area collapsed to 0px
+   - no history, no live entry cell, no remaining score visible - and the keypad ran off the bottom
+   edge while the footer painted over the header.
+
+   The screen is short but very wide, so the controls move BESIDE the sheet instead of under it.
+   Purely a CSS re-placement of the same elements in the same DOM order: nothing here changes what
+   any control does, only where it sits. Scoped to a short landscape viewport with a coarse pointer,
+   so desktop, tablet and portrait phone layouts are untouched.
+
+   Pentathlon X01 (301/501) renders the same .n01-* shell, so it is covered by the same rules. */
+@media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
+  .n01-game-shell {
+    /* Width of the control rail on the right. The keypad needs three comfortable columns. */
+    --rail: clamp(268px, 33vw, 340px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+
+  .n01-game-header {
+    height: 46px;
+    padding-inline: var(--safe-l) var(--safe-r);
+  }
+  .n01-player-name {
+    gap: 8px;
+    padding: 0 12px;
+  }
+  .n01-player-name strong {
+    font-size: clamp(17px, 2.1vw, 24px);
+  }
+  .n01-player-name span {
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+  .n01-player-name em {
+    padding: 4px 7px;
+    font-size: 8px;
+  }
+  .n01-game-header {
+    grid-template-columns: minmax(0, 1fr) 108px minmax(0, 1fr);
+  }
+  .n01-leg-center small {
+    font-size: 9px;
+  }
+  .n01-leg-center strong {
+    font-size: 21px;
+  }
+
+  /* The sheet takes the whole height it is given, with the rail carved off the right. */
+  .n01-score-area {
+    inset: 46px calc(var(--rail) + var(--safe-r)) 0 var(--safe-l);
+  }
+  .n01-game-meta {
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 10px;
+  }
+  .n01-game-meta strong {
+    font-size: 12px;
+  }
+  .n01-notice {
+    min-height: 26px;
+    padding: 4px 10px;
+    font-size: 10px;
+  }
+  /* Rows sized so three or four rounds read at once in the height that is left. */
+  .n01-score-table td {
+    height: clamp(56px, 20vh, 92px);
+  }
+  .n01-score-table th {
+    height: 30px;
+    font-size: 11px;
+  }
+  .n01-score-table td.scored button {
+    font-size: clamp(24px, 3.2vw, 40px);
+  }
+  .n01-score-table td.scored input {
+    font-size: clamp(26px, 3.6vw, 44px);
+  }
+  .n01-score-table td.to-go {
+    font-size: clamp(26px, 3.6vw, 44px);
+  }
+  .n01-score-table td.darts {
+    font-size: clamp(18px, 2.4vw, 28px);
+  }
+  /* The one thing that has to give: a hint sentence cannot outrank the score sheet here. The
+     gestures it describes are all still available, and the ☰ menu still lists the shortcuts. */
+  .n01-table-hint {
+    display: none;
+  }
+
+  /* The rail: remaining scores, the menu bar and the keypad, stacked down the right-hand side. */
+  .n01-game-footer {
+    inset: 46px 0 0 auto;
+    width: calc(var(--rail) + var(--safe-r));
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    border-top: 0;
+    border-left: 2px solid var(--green-dark);
+    padding-right: var(--safe-r);
+    /* A minimum even where the browser reports no inset, so repeated taps on the bottom key row
+       never land on the home indicator / gesture area. */
+    padding-bottom: max(12px, var(--safe-b));
+    box-shadow: -8px 0 30px #19241e14;
+  }
+  .n01-left-table {
+    flex: none;
+    height: clamp(72px, 22vh, 96px);
+  }
+  .n01-left-table strong {
+    font-size: clamp(38px, 11vh, 56px);
+  }
+  .n01-left-table span {
+    min-height: 12px;
+    margin-top: 2px;
+    font-size: 10px;
+  }
+  .n01-left-table span.checkout-route {
+    font-size: clamp(12px, 1.6vw, 17px);
+  }
+  .n01-menu-table {
+    flex: none;
+    height: 40px;
+  }
+  .n01-menu-table button {
+    font-size: 12px;
+  }
+  .n01-menu-table button:last-child {
+    font-size: 16px;
+  }
+  /* Fills whatever is left, so the bottom key row always ends above the gesture area. */
+  .n01-key-table {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    padding-bottom: 0;
+    background: #354239;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .n01-key-table button {
+    color: #fff;
+    cursor: pointer;
+    touch-action: manipulation;
+    background: 0 0;
+    border-top: 1px solid #ffffff24;
+    border-bottom: 0;
+    border-left: 0;
+    border-right: 1px solid #ffffff24;
+    font-size: 20px;
+    font-weight: 650;
+  }
+  .n01-key-table button:active {
+    background: var(--green);
+  }
+  .n01-key-table button.enter {
+    background: var(--green);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  /* Dialogs and result cards get the same short-viewport treatment: they must scroll inside
+     themselves rather than run off a 390px-tall screen. */
+  .n01-modal-card,
+  .result-card {
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  }
+}

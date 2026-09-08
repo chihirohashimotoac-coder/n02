@@ -17,6 +17,16 @@ interface Options {
    * screen behind the dialog still never sees it.
    */
   onKeyDown?: (event: KeyboardEvent) => void;
+  /**
+   * Where focus goes when the dialog closes, when the trigger is the wrong answer.
+   *
+   * 通常01・チェックアウト練習 and COUNT-UP leave a focused button its native Enter activation, so
+   * parking focus back on the ☰ button that opened a dialog would turn the next Enter - the key
+   * that commits a score - into "open the menu again". Those screens point this at their score
+   * sheet instead, which is where typing belongs; it is the same call CountUpGame already makes
+   * after UNDO. Falls back to the trigger when the element is missing.
+   */
+  returnFocusTo?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -33,7 +43,7 @@ interface Options {
  * チェックアウト練習 and COUNT-UP now share the same behaviour through this hook while keeping
  * their own existing markup and styles.
  */
-export function useDialogFocus({ cardRef, onClose, onKeyDown }: Options): void {
+export function useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo }: Options): void {
   // Captured on mount so focus can go back exactly where it came from - usually the trigger button.
   const returnFocusRef = useRef<HTMLElement | null>(null);
   // Callers pass these as inline closures, so keeping them in refs lets the key listener be
@@ -53,6 +63,9 @@ export function useDialogFocus({ cardRef, onClose, onKeyDown }: Options): void {
   useEffect(() => {
     returnFocusRef.current = document.activeElement as HTMLElement | null;
     const card = cardRef.current;
+    // Read once, here, rather than in the cleanup: the screens that pass this point at their score
+    // sheet, which is already mounted and outlives every dialog on it.
+    const preferredReturn = returnFocusTo?.current ?? null;
     // A dialog whose first control is an autoFocus <input> has already claimed focus by the time
     // this runs; moving it to the first button would take the caret out of the field the player is
     // meant to type in. Otherwise focus goes to the first focusable, or to the card itself when the
@@ -61,16 +74,16 @@ export function useDialogFocus({ cardRef, onClose, onKeyDown }: Options): void {
       (card?.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE)[0] ?? card)?.focus();
     }
     return () => {
-      const target = returnFocusRef.current;
+      const target = preferredReturn?.isConnected ? preferredReturn : returnFocusRef.current;
       if (!target?.isConnected) return;
       // Deferred, and only when nothing else has claimed focus: closing this dialog to open another
       // one must not yank focus back out of the replacement.
       queueMicrotask(() => {
         const active = document.activeElement;
-        if (active === null || active === document.body) target.focus();
+        if (active === null || active === document.body) target.focus({ preventScroll: true });
       });
     };
-  }, [cardRef]);
+  }, [cardRef, returnFocusTo]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {

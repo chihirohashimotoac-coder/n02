@@ -9,14 +9,6 @@ import { enterCountUpRound, enterGameScore, openFreshApp, startCountUp } from '.
  * screens here now share the same implementation (components/common/useDialogFocus.ts).
  */
 
-/** The accessible name of whatever currently has focus. */
-const focusedLabel = (page: Page) =>
-  page.evaluate(() => {
-    const el = document.activeElement as HTMLElement | null;
-    if (!el) return null;
-    return (el.getAttribute('aria-label') ?? el.textContent ?? '').replace(/\s+/g, ' ').trim();
-  });
-
 /** Is focus inside the open dialog card? */
 const focusInsideDialog = (page: Page, cardSelector: string) =>
   page.evaluate(
@@ -41,8 +33,14 @@ test.describe('通常01・チェックアウト練習のダイアログ', () => 
 
     await page.keyboard.press('Escape');
     await expect(page.locator('.n01-modal-card')).toHaveCount(0);
-    // Focus is handed back to the ☰ button that opened it, not left on <body>.
-    expect(await focusedLabel(page)).toBe('メニュー');
+    // Focus lands on the score sheet, not on <body> and not back on the ☰ button: this screen
+    // leaves a focused button its native Enter activation, so parking focus on ☰ would turn the
+    // next Enter - the key that commits a score - into "open the menu again".
+    await expect(page.locator('.n01-score-scroll')).toBeFocused();
+
+    // Which is to say: typing still confirms a visit straight after closing a dialog.
+    await enterGameScore(page, 60);
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('441');
   });
 
   test('Tab / Shift+Tab はメニュー内を循環し、背後のゲームへ抜けない', async ({ page }) => {
@@ -151,7 +149,12 @@ test.describe('COUNT-UPのダイアログ', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('.countup-modal-card')).toHaveCount(0);
-    expect(await focusedLabel(page)).toBe('メニュー');
+    // The score sheet, for the same reason 01 does it: the next Enter has to confirm a round, not
+    // re-open the menu it just closed.
+    await expect(page.locator('.countup-board')).toBeFocused();
+
+    await enterCountUpRound(page, 60);
+    await expect(page.locator('.countup-total-value').first()).toContainText('60');
   });
 
   test('Tab はメニュー内を循環する', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type RefObject } from 'react';
 import DialogShell from '../common/DialogShell';
 import {
   MAX_ROUND_SCORE,
@@ -19,6 +19,8 @@ interface Props {
   target: EditTarget;
   onCommit: (score: number) => void;
   onCancel: () => void;
+  /** Where focus goes on close - the score sheet, so the next Enter still confirms a round. */
+  returnFocusTo?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -26,7 +28,7 @@ interface Props {
  * are all derived from the round history, so committing here is enough - and a correction never
  * replays the award presentation.
  */
-export default function CountUpEditDialog({ target, onCommit, onCancel }: Props) {
+export default function CountUpEditDialog({ target, onCommit, onCancel, returnFocusTo }: Props) {
   const [value, setValue] = useState(String(target.currentScore));
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +47,7 @@ export default function CountUpEditDialog({ target, onCommit, onCancel }: Props)
       backdropClassName="countup-modal-backdrop"
       cardClassName="countup-modal-card"
       onClose={onCancel}
+      returnFocusTo={returnFocusTo}
     >
       <h2>ラウンド得点を修正</h2>
       <p className="countup-edit-target">

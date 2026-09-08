@@ -407,6 +407,7 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
         <DialogShell
           label="COUNT-UPメニュー"
           backdropClassName="countup-modal-backdrop"
+          returnFocusTo={boardRef}
           cardClassName="countup-modal-card menu-list"
           onClose={() => setModal('none')}
         >
@@ -447,6 +448,7 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
         <DialogShell
           label="COUNT-UPの終了確認"
           backdropClassName="countup-modal-backdrop"
+          returnFocusTo={boardRef}
           cardClassName="countup-modal-card"
           onClose={() => setModal('none')}
         >
@@ -464,6 +466,7 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
       {modal === 'edit' && editTarget && (
         <CountUpEditDialog
           target={editTarget}
+          returnFocusTo={boardRef}
           onCommit={commitEdit}
           onCancel={() => {
             setModal('none');

@@ -1292,3 +1292,111 @@
     font-size: 13px;
   }
 }
+
+/* ================================================================ smartphone landscape (COUNT-UP)
+
+   Same problem 01 has at this size, and the same answer. Stacked vertically the totals, the menu
+   bar and the keypad left the sheet 18-58px tall - fewer than one full round visible - so on a
+   short landscape viewport the footer becomes a rail down the right and the sheet takes the height.
+
+   CSS only: the DOM order (header, progress, board, footer) is unchanged, so tab order, the
+   keyboard route and the scroll-the-current-round-into-view behaviour all still work as they did.
+   The existing landscape-tablet rules above stay for taller landscape screens (an iPad). */
+@media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
+  .countup-shell {
+    --cu-rail: clamp(264px, 32vw, 336px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) calc(var(--cu-rail) + env(safe-area-inset-right, 0px));
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      'head head'
+      'prog prog'
+      'board rail';
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .countup-header {
+    grid-area: head;
+    height: 42px;
+  }
+  .countup-identity strong {
+    font-size: 17px;
+  }
+  .countup-identity span {
+    font-size: 8px;
+  }
+  .countup-round-badge strong {
+    font-size: 17px;
+  }
+
+  .countup-progress {
+    grid-area: prog;
+    padding-block: 3px;
+  }
+
+  .countup-board {
+    grid-area: board;
+  }
+  /* Five rounds at a time in the height the rail leaves, instead of well under one. */
+  .countup-table td {
+    height: clamp(52px, 15vh, 76px);
+  }
+  .countup-table td.scored button {
+    font-size: clamp(20px, 2.9vw, 34px);
+  }
+  .countup-table td.running-total {
+    font-size: clamp(17px, 2.4vw, 28px);
+  }
+  .countup-cell-entry {
+    font-size: clamp(21px, 3.1vw, 36px);
+  }
+
+  .countup-footer {
+    grid-area: rail;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-top: 0;
+    border-left: 3px solid var(--cu-accent);
+    padding-right: env(safe-area-inset-right, 0px);
+    /* Matches the rail in 01: a minimum even where the browser reports no inset, so repeated taps
+       on the bottom key row never reach the home indicator / gesture area. */
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    box-shadow: -8px 0 30px #19241e14;
+  }
+  .countup-totals {
+    flex: none;
+  }
+  .countup-total-card {
+    padding: 5px 8px;
+  }
+  .countup-total-value {
+    font-size: clamp(30px, 13vh, 54px);
+  }
+  .countup-notice {
+    flex: none;
+  }
+  .countup-menu {
+    flex: none;
+    height: 40px;
+  }
+  .countup-menu button {
+    font-size: 13px;
+  }
+  /* Fills the rest of the rail, so the bottom key row always clears the gesture area. */
+  .countup-keypad {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
+  }
+  .countup-keypad button {
+    font-size: 19px;
+  }
+
+  .countup-modal-card {
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  }
+}

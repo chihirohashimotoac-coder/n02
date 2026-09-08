@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react';
+import { useRef, type ReactNode, type RefObject } from 'react';
 import { useDialogFocus } from './useDialogFocus';
 
 interface Props {
@@ -14,6 +14,12 @@ interface Props {
    */
   backdropClassName: string;
   cardClassName: string;
+  /**
+   * Where focus goes when this dialog closes, instead of the control that opened it. See
+   * useDialogFocus - the gameplay screens point it at their score sheet so the next Enter still
+   * commits a score rather than re-opening the menu.
+   */
+  returnFocusTo?: RefObject<HTMLElement | null>;
   children: ReactNode;
 }
 
@@ -30,10 +36,11 @@ export default function DialogShell({
   onKeyDown,
   backdropClassName,
   cardClassName,
+  returnFocusTo,
   children,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
-  useDialogFocus({ cardRef, onClose, onKeyDown });
+  useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo });
 
   return (
     <div className={backdropClassName}>

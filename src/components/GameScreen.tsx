@@ -538,6 +538,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         <DialogShell
           label="上がり本数を選択"
           backdropClassName="n01-modal-backdrop"
+          returnFocusTo={scrollRef}
           cardClassName="n01-modal-card menu-list"
           onClose={closeFinishDialog}
           onKeyDown={(event) => {
@@ -576,6 +577,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         <DialogShell
           label="Legの勝敗を選択"
           backdropClassName="n01-modal-backdrop"
+          returnFocusTo={scrollRef}
           cardClassName="n01-modal-card menu-list"
           // A round-limit leg has to be resolved before play can continue, so there is nothing for
           // Escape to close to - it keeps the prompt up, exactly as before.
@@ -624,6 +626,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         <DialogShell
           label="ゲームメニュー"
           backdropClassName="n01-modal-backdrop"
+          returnFocusTo={scrollRef}
           cardClassName="n01-modal-card menu-list"
           onClose={() => setModal('none')}
           onKeyDown={(event) => {
@@ -759,6 +762,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         <DialogShell
           label="対戦成績"
           backdropClassName="n01-modal-backdrop"
+          returnFocusTo={scrollRef}
           cardClassName="n01-modal-card n01-stats-modal"
           onClose={() => setModal('none')}
           onKeyDown={(event) => {
@@ -796,6 +800,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         <DialogShell
           label="過去得点の修正"
           backdropClassName="n01-modal-backdrop"
+          returnFocusTo={scrollRef}
           cardClassName="n01-modal-card"
           onClose={() => setModal('none')}
         >
@@ -850,6 +855,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         <DialogShell
           label="Leg結果"
           backdropClassName="result-backdrop"
+          returnFocusTo={scrollRef}
           cardClassName="result-card"
           // ESC / 戻る: un-finish the leg so the checkout can be re-declared.
           onClose={() => onChange(undoLastAction(state))}
