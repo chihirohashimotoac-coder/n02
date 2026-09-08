@@ -35,8 +35,28 @@ has to be authorised, in the Vercel dashboard:
    framework `null`, install `npm ci`, build `npm run build:preview` and output `web/dist`.
 4. Deploy. Vercel then builds every branch and every pull request automatically.
 
-After that each pushed commit gets a deployment URL, and each branch keeps a stable alias that
-always points at that branch's newest successful build.
+The first deployment is of the repository's default branch. That is expected, and it does not
+touch the GitHub Pages site: Vercel serves from its own domain and never writes to this repo.
+
+## Getting a branch preview
+
+Vercel builds in response to a push it receives, and does not go back and build branches that
+already existed when the connection was made. **A branch pushed before the Vercel project was
+created therefore has no deployment until the next push to it.** One further commit is enough.
+
+Each build produces two URLs, both on the project's **Deployments** tab, filtered by branch:
+
+- a **branch alias** — `n02-git-<branch>-<scope>.vercel.app` — which always points at that
+  branch's newest successful build, and is the one to hand round for review;
+- a **commit URL** — `n02-<hash>-<scope>.vercel.app` — which is immutable and names exactly the
+  commit it was built from. Quote this one when a review has to be pinned to a known revision.
 
 `"github": { "silent": true }` keeps Vercel from commenting on pull requests; the deployment
 URLs are still listed on the PR's checks and in the Vercel dashboard.
+
+## If the preview asks you to log in
+
+Vercel can put its own authentication in front of preview deployments, which makes them
+unreachable for anyone reviewing without a Vercel account. Turn it off under
+**Project → Settings → Deployment Protection → Vercel Authentication → Disabled**, or issue a
+share link with Protection Bypass. Nothing in this repository controls that setting.
