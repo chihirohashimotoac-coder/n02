@@ -115,8 +115,15 @@
   --player-active-bg: #dff36d;
   --player-active-ink: #083c2c;
   --player-active-edge: #a8cc1d;
-  --entry-bg: #fff8bb;
-  --entry-edge: #e5c928;
+  /* The live entry cell. Green - the colour of input throughout the app - so it never competes
+     with the lime that means "whose throw it is". */
+  --entry-bg: #eaf6ee;
+  --entry-edge: var(--green);
+  --entry-ink: var(--green-dark);
+  /* The 1st-round starter-pick gesture keeps the amber it always had: it is a one-off prompt, not
+     an input state, and it must stay visibly different from the live entry cell beside it. */
+  --pick-bg: #fff8bb;
+  --pick-edge: #e5c928;
 
   /* ---- modal / overlay */
   --modal-scrim: #09120d8f;
@@ -1426,19 +1433,29 @@ select:focus-visible {
   outline-offset: -3px;
 }
 .n01-score-table {
-  border-collapse: collapse;
+  /* `separate`, so a scrolled row can never paint over the sticky header - the same fix COUNT-UP's
+     sheet already carries. Cells now hold only their right and bottom edge, so the sheet reads as
+     ruled lines rather than a grid of boxed cells. */
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
   text-align: center;
-  background: #fff;
+  background: var(--sheet-bg);
   width: 100%;
 }
 .n01-score-table th {
   height: 44px;
   color: var(--muted);
   background: var(--sheet-head-bg);
-  border: 1px solid var(--sheet-line);
-  font-size: 13px;
-  font-weight: 700;
+  border: 0;
+  border-right: 1px solid var(--sheet-line);
+  border-bottom: 1px solid var(--sheet-line);
+  font-size: 12px;
+  font-weight: var(--weight-heavy);
+  letter-spacing: 0.08em;
+}
+.n01-score-table th:last-child {
+  border-right: 0;
 }
 .n01-score-table thead th {
   z-index: 2;
@@ -1460,16 +1477,24 @@ select:focus-visible {
 .n01-score-table td {
   vertical-align: middle;
   font-variant-numeric: var(--numeric);
-  border: 1px solid var(--sheet-line);
+  border: 0;
+  border-right: 1px solid var(--sheet-line);
+  border-bottom: 1px solid var(--sheet-line);
   height: clamp(110px, 15vh, 150px);
 }
+.n01-score-table td:last-child {
+  border-right: 0;
+}
 .n01-score-table td.scored {
-  background: #fff;
+  background: var(--sheet-bg);
   padding: 0;
 }
 .n01-score-table td.scored.current {
   background: var(--entry-bg);
   box-shadow: inset 0 0 0 3px var(--entry-edge);
+}
+.n01-score-table td.scored.current input {
+  color: var(--entry-ink);
 }
 .n01-score-table td.scored button {
   cursor: pointer;
@@ -1492,8 +1517,8 @@ select:focus-visible {
 .n01-score-table td.scored button.starter-picker:hover,
 .n01-score-table td.scored button.starter-picker:focus-visible {
   color: var(--ink);
-  background: var(--entry-bg);
-  box-shadow: inset 0 0 0 3px var(--entry-edge);
+  background: var(--pick-bg);
+  box-shadow: inset 0 0 0 3px var(--pick-edge);
 }
 .n01-score-table td.scored > span {
   color: var(--muted);
@@ -1512,14 +1537,19 @@ select:focus-visible {
 }
 .n01-score-table td.to-go {
   background: var(--history-alt-bg);
-  font-size: clamp(44px, 6vw, 80px);
-  font-weight: 700;
+  color: var(--muted);
+  /* 残り点数 > 入力中得点 > active player > round履歴 > 補助stats. The per-round 残り was set
+     LARGER than the score that produced it, which put a supporting number above the headline one.
+     The two are peers now, and the footer's live remaining is unmistakably the biggest thing. */
+  font-size: clamp(34px, 4.4vw, 58px);
+  font-weight: var(--weight-medium);
 }
 .n01-score-table td.darts {
   color: var(--muted);
   background: var(--sheet-head-bg);
-  font-size: clamp(28px, 4vw, 50px);
-  font-weight: 650;
+  /* A scale down the middle of the sheet, not a third headline number. */
+  font-size: clamp(18px, 2.4vw, 30px);
+  font-weight: var(--weight-bold);
 }
 .n01-table-hint {
   text-align: center;
@@ -1530,9 +1560,9 @@ select:focus-visible {
   font-size: 11px;
 }
 .n01-game-footer {
-  border-top: 2px solid var(--green-dark);
+  border-top: var(--border-strong);
   z-index: 4;
-  background: #fff;
+  background: var(--surface);
   height: 252px;
   position: absolute;
   inset: auto 0 0;
@@ -1545,23 +1575,29 @@ select:focus-visible {
 }
 .n01-left-table > div {
   border-right: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   flex-direction: column;
   justify-content: center;
   align-items: center;
   display: flex;
+  transition: background 0.16s;
 }
 .n01-left-table > div:last-child {
   border: 0;
 }
 .n01-left-table > div.active {
   box-shadow: inset 0 5px 0 var(--green);
-  background: linear-gradient(#edf4ef, #fff);
+  background: linear-gradient(180deg, var(--green-soft), var(--surface));
+}
+/* The inactive side steps back rather than sitting at equal weight beside the live one. */
+.n01-left-table > div:not(.active) strong {
+  color: var(--muted);
 }
 .n01-left-table strong {
   letter-spacing: -0.06em;
   font-variant-numeric: var(--numeric);
   font-size: clamp(82px, 10vw, 148px);
+  font-weight: var(--weight-heavy);
   line-height: 0.9;
 }
 .n01-left-table span {
@@ -1607,6 +1643,17 @@ select:focus-visible {
 .n01-menu-table button:disabled {
   color: #ffffff59;
   cursor: not-allowed;
+}
+/* Drawn inside the element: an outline outside a table cell or a flush-fitted bar is clipped. */
+.n01-score-table td.scored button:focus-visible,
+.n01-menu-table button:focus-visible,
+.n01-key-table button:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 0 3px var(--green);
+}
+.n01-menu-table button:focus-visible,
+.n01-key-table button:focus-visible {
+  box-shadow: inset 0 0 0 3px #ffffffd9;
 }
 .n01-score-table .ton-score {
   border: 0.07em solid #c8cbc9;
@@ -2183,6 +2230,11 @@ select:focus-visible {
   --accent-text: #1a9b5c;
   --accent-fill: var(--green-dark);
   --on-accent-fill: #fff;
+  --entry-bg: #12301f;
+  --entry-edge: #2ee58a;
+  --entry-ink: #2ee58a;
+  --pick-bg: #31300f;
+  --pick-edge: #cbb51e;
   --panel-inset: #ffffff0f;
   --sheet-gutter: #101512;
 }
@@ -2249,18 +2301,11 @@ select:focus-visible {
 }
 [data-theme="neon"] .n01-score-table td.to-go {
   background: #0d1410;
-  color: #2ee58a;
+  /* Muted like the other themes: the per-round 残り is a supporting number, and a bright accent
+     here would outrank the score that produced it. */
+  color: var(--muted);
 }
-[data-theme="neon"] .n01-score-table td.scored.current,
-[data-theme="neon"] .n01-score-table td.scored button.starter-picker:hover,
-[data-theme="neon"]
-  .n01-score-table
-  td.scored
-  button.starter-picker:focus-visible {
-  background: #31300f;
-  box-shadow: inset 0 0 0 3px #cbb51e;
-  color: var(--ink);
-}
+
 [data-theme="neon"] .n01-score-table .ton-score {
   border-color: #3f584a;
 }
@@ -2345,6 +2390,11 @@ select:focus-visible {
   --shadow: 0 18px 50px #131a2a14;
   --panel-inset: #ffffffb0;
   --sheet-gutter: #f7f8fb;
+  --entry-bg: #e7edf9;
+  --entry-edge: var(--green);
+  --entry-ink: var(--green);
+  --pick-bg: #f7ecce;
+  --pick-edge: #d4af4e;
 }
 [data-theme="navy"] body {
   background:
@@ -2366,15 +2416,7 @@ select:focus-visible {
 [data-theme="navy"] .n01-score-table td.to-go {
   background: #f9fafc;
 }
-[data-theme="navy"] .n01-score-table td.scored.current,
-[data-theme="navy"] .n01-score-table td.scored button.starter-picker:hover,
-[data-theme="navy"]
-  .n01-score-table
-  td.scored
-  button.starter-picker:focus-visible {
-  background: #f7ecce;
-  box-shadow: inset 0 0 0 3px #d4af4e;
-}
+
 [data-theme="navy"] .n01-player-name.active {
   background: #f0d98a;
   color: #14224a;
