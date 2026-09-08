@@ -63,7 +63,7 @@
 .pent-preset-card {
   border: 1px solid var(--line);
   cursor: pointer;
-  background: #ffffffb8;
+  background: var(--panel-card);
   border-radius: 16px;
   padding: 20px;
   text-align: left;
@@ -157,7 +157,7 @@
 .pent-progress-head span {
   color: var(--muted);
   font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .pent-progress-list {
@@ -199,7 +199,7 @@
 }
 
 .pent-progress-item .pent-score {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -223,17 +223,13 @@
 
 .pent-player {
   border: 1px solid var(--line);
-  background: #ffffffb8;
+  background: var(--panel-card);
   border-radius: 14px;
   padding: 14px;
   display: grid;
   gap: 6px;
   position: relative;
   overflow: hidden;
-}
-
-[data-theme='neon'] .pent-player {
-  background: #17231bb8;
 }
 
 .pent-player::before {
@@ -297,7 +293,7 @@
 .pent-player-value {
   font-size: clamp(34px, 11vw, 52px);
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   letter-spacing: -0.04em;
   line-height: 1;
   color: var(--ink);
@@ -357,7 +353,7 @@
   padding: 6px 10px;
   font-size: 13px;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .pent-pending-chip.empty {
@@ -416,7 +412,7 @@
   min-height: 48px;
   font-size: 16px;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   cursor: pointer;
   touch-action: manipulation;
 }
@@ -559,7 +555,7 @@
   touch-action: manipulation;
   min-height: 38px;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .pent-cricket-ring {
@@ -729,7 +725,7 @@
   align-self: center;
   text-align: center;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--muted);
   font-size: 13px;
 }
@@ -761,7 +757,7 @@
   place-items: center;
   color: #fff;
   font-size: clamp(28px, 5vw, 40px);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   letter-spacing: -0.03em;
   line-height: 1;
 }
@@ -882,7 +878,7 @@
 }
 
 .pent-result-row > span.value {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-weight: 700;
 }
 
@@ -1219,7 +1215,7 @@
   font-weight: 800;
   letter-spacing: 0.08em;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 [data-theme='neon'] .pent-round-chip,
@@ -1446,7 +1442,7 @@
   color: var(--green-dark);
   font-size: 13px;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 .pent-typing em {
   font-style: normal;
@@ -1733,7 +1729,7 @@
 }
 .pent-result-stat b {
   font-size: 1.15em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 .pent-result-stat em {
   color: var(--muted);

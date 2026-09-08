@@ -49,6 +49,10 @@
   /* An inset panel inside a card (the per-player block on the setup screens). Themed, so it can
      never strand a light box inside a dark theme. */
   --panel-inset: #ffffff94;
+  /* A card that sits directly on the canvas (Pentathlon's preset cards and player panels), as
+     opposed to --panel-inset, which is a block inside an existing panel. Both are themed so a card
+     can never be left as a light box in a dark theme. */
+  --panel-card: #ffffffb8;
   --border: var(--line);
   --warning: var(--amber);
   --negative: var(--danger);
@@ -2236,6 +2240,7 @@ select:focus-visible {
   --pick-bg: #31300f;
   --pick-edge: #cbb51e;
   --panel-inset: #ffffff0f;
+  --panel-card: #17231bb8;
   --sheet-gutter: #101512;
 }
 [data-theme="neon"] body {
@@ -2389,6 +2394,7 @@ select:focus-visible {
   --danger: #a43a32;
   --shadow: 0 18px 50px #131a2a14;
   --panel-inset: #ffffffb0;
+  --panel-card: #ffffffb8;
   --sheet-gutter: #f7f8fb;
   --entry-bg: #e7edf9;
   --entry-edge: var(--green);

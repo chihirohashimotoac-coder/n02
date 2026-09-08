@@ -268,7 +268,7 @@
 
 .countup-history-row b {
   font-size: 20px;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--cu-accent-strong);
 }
 
@@ -349,7 +349,7 @@
 
 .countup-round-badge strong {
   font-size: clamp(18px, 4.4vw, 24px);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   line-height: 1;
 }
 
@@ -484,7 +484,7 @@
   height: clamp(72px, 14vh, 132px);
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 /* The climbing total, next to the score that produced it - COUNT-UP's answer to 01's 「残り」. */
@@ -515,7 +515,7 @@
   /* A headline number in its cell, the way 01's 得点 is in its own. */
   font-size: clamp(26px, 4vw, 68px);
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: inherit;
 }
 
@@ -537,7 +537,7 @@
   font-size: clamp(28px, 4.4vw, 72px);
   font-weight: 900;
   color: var(--cu-accent-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 /* ---------------------------------------------------------------- COUNT-UP footer */
@@ -618,7 +618,7 @@
   font-weight: 900;
   line-height: 1;
   letter-spacing: -0.04em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--cu-accent-strong);
 }
 
@@ -640,7 +640,7 @@
   font-weight: 800;
   letter-spacing: 0.06em;
   color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .countup-notice {
@@ -888,7 +888,7 @@
   font-weight: 900;
   line-height: 1;
   letter-spacing: -0.04em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--cu-accent-strong);
 }
 
@@ -909,7 +909,7 @@
 .countup-result-ppr b {
   font-size: 18px;
   color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .countup-award-list {
@@ -934,7 +934,7 @@
 }
 
 .countup-award-list li b {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--cu-accent-strong);
 }
 
@@ -976,7 +976,7 @@
 .countup-round-list button span {
   font-size: 16px;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .countup-result-hint {
