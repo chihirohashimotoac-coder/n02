@@ -8,6 +8,12 @@ export const CURRENT_MATCH_KEY = 'n02-current-v1';
 export const HISTORY_KEY = 'n02-history-v1';
 export const THEME_KEY = 'n02-theme-v1';
 
+/**
+ * How many finished legs the history keeps. Exported so the 成績 panel can name the range it is
+ * actually summarising instead of restating a number that has to be kept in sync by hand.
+ */
+export const HISTORY_LIMIT = 50;
+
 export interface HistoryEntry {
   date: string;
   mode: '01' | 'checkout';
@@ -56,7 +62,7 @@ export function loadHistory(): HistoryEntry[] {
 }
 
 export function appendHistory(entry: HistoryEntry): HistoryEntry[] {
-  const next = [entry, ...loadHistory()].slice(0, 50);
+  const next = [entry, ...loadHistory()].slice(0, HISTORY_LIMIT);
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
   } catch {

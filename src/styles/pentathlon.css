@@ -749,7 +749,9 @@
 }
 
 .pent-cricket-row.total .pent-cricket-num {
-  color: #ffffffab;
+  /* Was #ffffffab, which reads fine on the clean and navy fills (6.4:1 / 7.7:1) but only 3.89:1 on
+     neon's lighter --green-dark. */
+  color: #ffffffc8;
   font-size: 10px;
   letter-spacing: 0.16em;
 }

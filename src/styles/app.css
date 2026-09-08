@@ -17,7 +17,10 @@
   --surface: #fff;
   --surface-soft: #f0f3ee;
   --ink: #171a18;
-  --muted: #69716c;
+  /* Nudged from #69716c: that cleared 4.5:1 on white but only reached 4.49 on --surface-soft and
+     4.22 on the score sheet's header fill, so every small label on a tinted surface sat just under
+     AA. This value clears 4.5:1 on all four surfaces it is used over. */
+  --muted: #646c67;
   --line: #d9ddd7;
   --green: #0d503a;
   --green-dark: #083c2c;
@@ -35,6 +38,17 @@
   --text: var(--ink);
   --text-muted: var(--muted);
   --text-on-brand: #fff;
+  /* The brand colour has to do two different jobs, and one value cannot do both in a dark theme:
+     --accent-text is brand-coloured TEXT drawn on a surface, --accent-fill is a brand-coloured
+     FILL with --on-accent-fill written on it. They coincide in the light themes and part company
+     in neon, where the fill has to stay dark enough to carry white while the text has to lift off
+     a near-black panel. */
+  --accent-text: var(--green);
+  --accent-fill: var(--green);
+  --on-accent-fill: #fff;
+  /* An inset panel inside a card (the per-player block on the setup screens). Themed, so it can
+     never strand a light box inside a dark theme. */
+  --panel-inset: #ffffff94;
   --border: var(--line);
   --warning: var(--amber);
   --negative: var(--danger);
@@ -95,6 +109,8 @@
   --sheet-bg: #fff;
   --sheet-line: #cfd4d0;
   --sheet-head-bg: #e9ece8;
+  /* Behind the score sheet: shows through the scrollbar gutter and under the hint line. */
+  --sheet-gutter: #f7f7f3;
   --history-alt-bg: #fbfbf8;
   --player-active-bg: #dff36d;
   --player-active-ink: #083c2c;
@@ -262,7 +278,7 @@ select:focus-visible {
 }
 .status-chip {
   background: var(--green-soft);
-  color: var(--green);
+  color: var(--accent-text);
   border: 1px solid #cfd8d1;
   border-radius: 999px;
   padding: 7px 11px;
@@ -328,8 +344,8 @@ select:focus-visible {
   color: var(--muted);
 }
 .checkmark {
-  background: var(--green);
-  color: #fff;
+  background: var(--accent-fill);
+  color: var(--on-accent-fill);
   border-radius: 50%;
   place-items: center;
   width: 28px;
@@ -429,7 +445,7 @@ select:focus-visible {
 }
 .player-config {
   border: 1px solid var(--line);
-  background: #ffffff94;
+  background: var(--panel-inset);
   border-radius: 14px;
   align-content: start;
   gap: 12px;
@@ -452,7 +468,7 @@ select:focus-visible {
   display: flex;
 }
 .name-input i {
-  color: #9aa19d;
+  color: var(--muted);
   font-size: 11px;
   font-style: normal;
 }
@@ -534,7 +550,7 @@ select:focus-visible {
   background: var(--green-soft);
   width: 48px;
   height: 48px;
-  color: var(--green);
+  color: var(--accent-text);
   border-radius: 50%;
   flex: none;
   place-items: center;
@@ -547,7 +563,7 @@ select:focus-visible {
   font-weight: 700;
 }
 .metric-card strong {
-  color: var(--green-dark);
+  color: var(--accent-text);
   font-variant-numeric: var(--numeric);
   font-size: 40px;
   line-height: 1.1;
@@ -601,7 +617,7 @@ select:focus-visible {
   background: var(--green-soft);
   width: 24px;
   height: 24px;
-  color: var(--green);
+  color: var(--accent-text);
   border-radius: 50%;
   place-items: center;
   font-weight: 800;
@@ -1345,7 +1361,8 @@ select:focus-visible {
 }
 .n01-leg-center small {
   letter-spacing: 0.14em;
-  opacity: 0.72;
+  /* Was 0.72, which left this label at 4.24:1 on the neon header. */
+  opacity: 0.85;
   font-size: 11px;
 }
 .n01-leg-center strong {
@@ -1353,7 +1370,7 @@ select:focus-visible {
   font-size: 30px;
 }
 .n01-score-area {
-  background: #f7f7f3;
+  background: var(--sheet-gutter);
   flex-direction: column;
   display: flex;
   position: absolute;
@@ -1374,7 +1391,7 @@ select:focus-visible {
   display: grid;
 }
 .n01-game-meta strong {
-  color: var(--green);
+  color: var(--accent-text);
   text-align: center;
   font-size: 15px;
 }
@@ -1479,7 +1496,7 @@ select:focus-visible {
   box-shadow: inset 0 0 0 3px var(--entry-edge);
 }
 .n01-score-table td.scored > span {
-  color: #a8aeaa;
+  color: var(--muted);
   font-size: 26px;
 }
 .n01-score-table td.scored input {
@@ -2160,6 +2177,14 @@ select:focus-visible {
   --amber: #e8b021;
   --danger: #ff6a60;
   --shadow: 0 18px 50px #00000073;
+  /* --green (#0f8f52) reaches only 3.9:1 as text on this theme's panels, and carries white at just
+     4.1:1 as a fill. So the two roles split here: a lighter green for text, the darker green for
+     fills that white is written on (6.6:1). */
+  --accent-text: #1a9b5c;
+  --accent-fill: var(--green-dark);
+  --on-accent-fill: #fff;
+  --panel-inset: #ffffff0f;
+  --sheet-gutter: #101512;
 }
 [data-theme="neon"] body {
   background:
@@ -2318,6 +2343,8 @@ select:focus-visible {
   --amber: #8a6d24;
   --danger: #a43a32;
   --shadow: 0 18px 50px #131a2a14;
+  --panel-inset: #ffffffb0;
+  --sheet-gutter: #f7f8fb;
 }
 [data-theme="navy"] body {
   background:
