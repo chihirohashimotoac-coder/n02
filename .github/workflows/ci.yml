@@ -39,6 +39,14 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The preview host builds with this script. It must compile, and - unlike `npm run build` -
+      # it must never rewrite the tracked root artifacts GitHub Pages publishes, so a preview
+      # deployment can never leak into production.
+      - name: Preview build leaves production artifacts untouched
+        run: |
+          npm run build:preview
+          git diff --exit-code --stat
+
       # Chromium covers the desktop and Android viewports; WebKit is what backs the iPhone
       # projects in playwright.config.ts, which are skipped when it isn't installed.
       - name: Install Playwright browsers
