@@ -31,11 +31,35 @@ export default defineConfig({
         icons: [{ src: 'n02-icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,webmanifest}'],
+        // webp is in here for the award posters: they are the fallback the presentation lands on
+        // when a movie cannot play, so they have to be available on a first offline run. The
+        // movies themselves are deliberately NOT precached - 2.7MB is far too much to hold up a
+        // service-worker install for something the poster already covers.
+        globPatterns: ['**/*.{js,css,html,svg,webmanifest,webp}'],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
         navigateFallback: './index.html',
+        // ...and the navigation fallback must not swallow them: an award asset request is not a
+        // navigation, and answering it with index.html would break the <video> rather than let it
+        // fall back cleanly.
+        navigateFallbackDenylist: [/\/awards\//],
+        runtimeCaching: [
+          {
+            // Award movies: cached the first time they are actually fetched (the idle warm-up on
+            // entering a mode, or the overlay itself), then served from the cache offline. Opaque
+            // range requests are what a <video> issues, so the range plugin is what makes seeking
+            // and replay work from the cache.
+            urlPattern: ({ url }: { url: URL }) => url.pathname.includes('/awards/') && url.pathname.endsWith('.mp4'),
+            handler: 'CacheFirst' as const,
+            options: {
+              cacheName: 'n02-award-movies-v1',
+              rangeRequests: true,
+              expiration: { maxEntries: 6, maxAgeSeconds: 60 * 60 * 24 * 180 },
+              cacheableResponse: { statuses: [0, 200, 206] },
+            },
+          },
+        ],
       },
       devOptions: { enabled: false },
     }),
