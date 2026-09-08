@@ -1,4 +1,18 @@
+/*
+ * n02 design tokens.
+ *
+ * The palette below (--canvas ... --shadow) is the pre-existing set and is NOT renamed: every rule
+ * that already used it keeps working, and the theme blocks at the bottom of this file keep
+ * overriding exactly what they always did. Everything after it is added, and every added token is
+ * defined as the value that was already in use at the places it replaces - so introducing them
+ * changes no pixel. They exist so the screens can be made to agree with each other without each
+ * one re-inventing its own spacing scale, radius or button treatment.
+ *
+ * Scope note: --cu-* (COUNT-UP amber) stays in practice.css and stays PRACTICE-only. It is that
+ * mode's accent, not the product's; nothing outside PRACTICE should reach for it.
+ */
 :root {
+  /* ---- palette (pre-existing; also the theme override surface) */
   --canvas: #f5f4ef;
   --surface: #fff;
   --surface-soft: #f0f3ee;
@@ -11,6 +25,95 @@
   --amber: #a96505;
   --danger: #a43a32;
   --shadow: 0 18px 50px #19241e12;
+
+  /* ---- semantic roles
+     Named by what they mean, so a screen asks for "the colour of a heading" rather than for green.
+     Each is an alias of the palette above, so themes keep working through one indirection. */
+  --brand: var(--green);
+  --brand-strong: var(--green-dark);
+  --brand-soft: var(--green-soft);
+  --text: var(--ink);
+  --text-muted: var(--muted);
+  --text-on-brand: #fff;
+  --border: var(--line);
+  --warning: var(--amber);
+  --negative: var(--danger);
+
+  /* ---- spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 26px;
+  --space-7: 34px;
+  --space-8: 44px;
+
+  /* ---- radius */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+
+  /* ---- elevation */
+  --shadow-card: var(--shadow);
+  --shadow-raised: 0 8px 24px #19241e14;
+  --shadow-overlay: 0 24px 70px #000000a6;
+  --shadow-footer: 0 -8px 30px #19241e14;
+
+  /* ---- borders */
+  --border-hairline: 1px solid var(--line);
+  --border-strong: 2px solid var(--green-dark);
+
+  /* ---- focus
+     One ring, used everywhere, so "what has focus" never has to be guessed at. */
+  --focus-ring: 3px solid #0d503a40;
+  --focus-ring-strong: 3px solid var(--green);
+  --focus-offset: 2px;
+
+  /* ---- typography
+     Numbers are tabular everywhere they are compared down a column: score sheets, remaining
+     scores, totals, stats tables. --font-num is the one place that decides it. */
+  --font-ui:
+    'Noto Sans JP', 'Yu Gothic UI', system-ui, -apple-system, sans-serif;
+  --font-num: var(--font-ui);
+  --numeric: tabular-nums;
+  --weight-regular: 400;
+  --weight-medium: 650;
+  --weight-bold: 700;
+  --weight-heavy: 800;
+  --weight-black: 900;
+
+  /* ---- controls
+     44px is the minimum comfortable touch target and the floor for every tappable control. */
+  --control-min: 44px;
+  --control-radius: var(--radius-md);
+
+  /* ---- gameplay surfaces */
+  --panel-bg: #ffffffc7;
+  --sheet-bg: #fff;
+  --sheet-line: #cfd4d0;
+  --sheet-head-bg: #e9ece8;
+  --history-alt-bg: #fbfbf8;
+  --player-active-bg: #dff36d;
+  --player-active-ink: #083c2c;
+  --player-active-edge: #a8cc1d;
+  --entry-bg: #fff8bb;
+  --entry-edge: #e5c928;
+
+  /* ---- modal / overlay */
+  --modal-scrim: #09120d8f;
+  --modal-blur: 6px;
+  --modal-radius: var(--radius-xl);
+
+  /* ---- award presentation
+     Shared by COUNT-UP, 通常01 and チェックアウト練習 so one award looks the same in every mode. */
+  --award-duration: 3000ms;
+  --award-radius: 20px;
+  --award-z: 70;
+  --award-ink: #fff;
+  --award-sub: #ffd489;
 }
 * {
   box-sizing: border-box;
@@ -23,8 +126,7 @@ body {
     radial-gradient(circle at 10% -10%, #0d503a0d, transparent 34%),
     var(--canvas);
   color: var(--ink);
-  font-family:
-    "Noto Sans JP", "Yu Gothic UI", system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ui);
   margin: 0;
 }
 button,
@@ -38,8 +140,8 @@ button {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline-offset: 2px;
-  outline: 3px solid #0d503a40;
+  outline-offset: var(--focus-offset);
+  outline: var(--focus-ring);
 }
 .loading-screen {
   min-height: 100vh;
@@ -116,7 +218,7 @@ select:focus-visible {
 .panel {
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
-  background: #ffffffc7;
+  background: var(--panel-bg);
   border-radius: 18px;
 }
 .setup-layout {
@@ -446,7 +548,7 @@ select:focus-visible {
 }
 .metric-card strong {
   color: var(--green-dark);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 40px;
   line-height: 1.1;
   display: block;
@@ -557,7 +659,7 @@ select:focus-visible {
 }
 .leg-score strong {
   color: var(--green);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 25px;
 }
 .leg-score i {
@@ -623,7 +725,7 @@ select:focus-visible {
 .remaining {
   text-align: center;
   letter-spacing: -0.06em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   margin-top: 26px;
   font-size: clamp(72px, 8vw, 116px);
   line-height: 0.95;
@@ -724,7 +826,7 @@ select:focus-visible {
   height: 82px;
   color: var(--green-dark);
   text-align: center;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   background: #fff;
   border-radius: 12px;
   font-size: 48px;
@@ -825,7 +927,7 @@ select:focus-visible {
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   background: #f7f7f4;
-  border: 1px solid #cfd4d0;
+  border: 1px solid var(--sheet-line);
   border-bottom-width: 2px;
   border-radius: 4px;
   padding: 2px 5px;
@@ -973,7 +1075,7 @@ select:focus-visible {
   color: var(--green-dark);
 }
 .round-history-row button strong {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 15px;
 }
 .round-history-row button small {
@@ -1204,8 +1306,8 @@ select:focus-visible {
 .n01-player-name.active {
   opacity: 1;
   color: #083c2c;
-  background: #dff36d;
-  box-shadow: inset 0 -5px #a8cc1d;
+  background: var(--player-active-bg);
+  box-shadow: inset 0 -5px var(--player-active-edge);
 }
 .n01-player-name span {
   border: 1px solid #ffffff47;
@@ -1247,7 +1349,7 @@ select:focus-visible {
   font-size: 11px;
 }
 .n01-leg-center strong {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 30px;
 }
 .n01-score-area {
@@ -1303,7 +1405,7 @@ select:focus-visible {
   overflow-y: auto;
 }
 .n01-score-scroll:focus-visible {
-  outline: 3px solid var(--green);
+  outline: var(--focus-ring-strong);
   outline-offset: -3px;
 }
 .n01-score-table {
@@ -1316,8 +1418,8 @@ select:focus-visible {
 .n01-score-table th {
   height: 44px;
   color: var(--muted);
-  background: #e9ece8;
-  border: 1px solid #cfd4d0;
+  background: var(--sheet-head-bg);
+  border: 1px solid var(--sheet-line);
   font-size: 13px;
   font-weight: 700;
 }
@@ -1325,7 +1427,7 @@ select:focus-visible {
   z-index: 2;
   position: sticky;
   top: 0;
-  box-shadow: inset 0 -1px #cfd4d0;
+  box-shadow: inset 0 -1px var(--sheet-line);
 }
 .n01-score-table th:first-child,
 .n01-score-table th:nth-child(4) {
@@ -1340,8 +1442,8 @@ select:focus-visible {
 }
 .n01-score-table td {
   vertical-align: middle;
-  font-variant-numeric: tabular-nums;
-  border: 1px solid #cfd4d0;
+  font-variant-numeric: var(--numeric);
+  border: 1px solid var(--sheet-line);
   height: clamp(110px, 15vh, 150px);
 }
 .n01-score-table td.scored {
@@ -1349,8 +1451,8 @@ select:focus-visible {
   padding: 0;
 }
 .n01-score-table td.scored.current {
-  background: #fff8bb;
-  box-shadow: inset 0 0 0 3px #e5c928;
+  background: var(--entry-bg);
+  box-shadow: inset 0 0 0 3px var(--entry-edge);
 }
 .n01-score-table td.scored button {
   cursor: pointer;
@@ -1373,8 +1475,8 @@ select:focus-visible {
 .n01-score-table td.scored button.starter-picker:hover,
 .n01-score-table td.scored button.starter-picker:focus-visible {
   color: var(--ink);
-  background: #fff8bb;
-  box-shadow: inset 0 0 0 3px #e5c928;
+  background: var(--entry-bg);
+  box-shadow: inset 0 0 0 3px var(--entry-edge);
 }
 .n01-score-table td.scored > span {
   color: #a8aeaa;
@@ -1392,13 +1494,13 @@ select:focus-visible {
   font-weight: 700;
 }
 .n01-score-table td.to-go {
-  background: #fbfbf8;
+  background: var(--history-alt-bg);
   font-size: clamp(44px, 6vw, 80px);
   font-weight: 700;
 }
 .n01-score-table td.darts {
   color: var(--muted);
-  background: #e9ece8;
+  background: var(--sheet-head-bg);
   font-size: clamp(28px, 4vw, 50px);
   font-weight: 650;
 }
@@ -1417,7 +1519,7 @@ select:focus-visible {
   height: 252px;
   position: absolute;
   inset: auto 0 0;
-  box-shadow: 0 -8px 30px #19241e14;
+  box-shadow: var(--shadow-footer);
 }
 .n01-left-table {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1441,7 +1543,7 @@ select:focus-visible {
 }
 .n01-left-table strong {
   letter-spacing: -0.06em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: clamp(82px, 10vw, 148px);
   line-height: 0.9;
 }
@@ -1514,7 +1616,7 @@ select:focus-visible {
   z-index: 80;
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
-  background: #09120d8f;
+  background: var(--modal-scrim);
   place-items: center;
   padding: 20px;
   display: grid;
@@ -1691,7 +1793,7 @@ select:focus-visible {
   text-align: center;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  background: #e9ece8;
+  background: var(--sheet-head-bg);
   margin: 0;
   padding: 8px 12px;
   font-size: 10px;
@@ -1702,7 +1804,7 @@ select:focus-visible {
   min-height: 40px;
 }
 .n01-stats-row strong {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 17px;
 }
 .n01-stats-row span {
