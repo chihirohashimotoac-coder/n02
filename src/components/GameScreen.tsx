@@ -280,17 +280,34 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     setModal('none');
   }, []);
 
+  /**
+   * Leaves the past-score editor, whether the correction was committed or abandoned.
+   *
+   * Clearing the parked cell is the point. openEditor() parks the arrow-key selection on whatever
+   * cell is being corrected - including when the editor was opened by tapping a cell rather than by
+   * arrowing to it - and while a cell is parked, every digit is routed into a correction of THAT
+   * cell instead of the keypad. Leaving it parked after the dialog closes meant the current round
+   * could no longer be entered at all: each digit just re-opened the editor.
+   *
+   * Arrow-key navigation is unaffected. Parking on a cell and typing over it still opens the
+   * editor; it is only the exit from the editor that now unparks.
+   */
+  const closeEditor = useCallback(() => {
+    setModal('none');
+    setSelectedVisit(null);
+  }, []);
+
   const commitEdit = useCallback(() => {
     if (editIndex === null) return;
     try {
       onChange(editVisit(state, editIndex, Number(editScore), editDarts));
-      setModal('none');
+      closeEditor();
       showNotice(`${editIndex + 1}件目の得点を修正し、以降の残り点数を再計算しました。`);
     } catch (error) {
       if (error instanceof InvalidVisitError) showNotice(error.message, 'warning');
       else throw error;
     }
-  }, [editDarts, editIndex, editScore, onChange, showNotice, state]);
+  }, [closeEditor, editDarts, editIndex, editScore, onChange, showNotice, state]);
 
   const goToNextLeg = useCallback(() => {
     onChange(advanceLeg(state));
@@ -879,7 +896,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
           backdropClassName="n01-modal-backdrop"
           returnFocusTo={scrollRef}
           cardClassName="n01-modal-card"
-          onClose={() => setModal('none')}
+          onClose={closeEditor}
         >
           <h2>過去得点を修正</h2>
           <label>
@@ -897,7 +914,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
                   commitEdit();
                 } else if (event.key === 'Escape') {
                   event.preventDefault();
-                  setModal('none');
+                  closeEditor();
                 }
               }}
             />
@@ -922,7 +939,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
           >
             修正して再計算
           </button>
-          <button type="button" className="n01-modal-cancel" onClick={() => setModal('none')}>
+          <button type="button" className="n01-modal-cancel" onClick={closeEditor}>
             キャンセル
           </button>
         </DialogShell>
