@@ -212,7 +212,7 @@ test.describe('COUNT-UP input route', () => {
 
     // 1 → 0 → 0 → Enter confirms ROUND SCORE 100.
     await page.keyboard.type('100');
-    await expect(page.locator('.countup-entry-value')).toHaveText('100');
+    await expect(page.locator('.countup-cell-entry')).toHaveText('100');
     await page.keyboard.press('Enter');
     await expect(page.locator('.countup-table td.scored button').first()).toHaveText('100');
     await expect(total(page)).toContainText('100');
@@ -221,12 +221,12 @@ test.describe('COUNT-UP input route', () => {
     // Backspace and Delete both drop the last digit typed; Escape clears the whole entry.
     await page.keyboard.type('12');
     await page.keyboard.press('Backspace');
-    await expect(page.locator('.countup-entry-value')).toHaveText('1');
+    await expect(page.locator('.countup-cell-entry')).toHaveText('1');
     await page.keyboard.type('4');
     await page.keyboard.press('Delete');
-    await expect(page.locator('.countup-entry-value')).toHaveText('1');
+    await expect(page.locator('.countup-cell-entry')).toHaveText('1');
     await page.keyboard.press('Escape');
-    await expect(page.locator('.countup-entry-value')).toHaveText('–');
+    await expect(page.locator('.countup-cell-entry')).toHaveText('–');
 
     await page.keyboard.type('140');
     await page.keyboard.press('Enter');
@@ -252,7 +252,7 @@ test.describe('COUNT-UP input route', () => {
     await expect(total(page)).toContainText('100');
 
     await page.keyboard.type('40');
-    await expect(page.locator('.countup-entry-value')).toHaveText('40');
+    await expect(page.locator('.countup-cell-entry')).toHaveText('40');
     await page.keyboard.press('Enter');
     await expect(total(page)).toContainText('140');
     await expect(page.locator('.countup-round-badge strong')).toContainText('3');
@@ -267,9 +267,9 @@ test.describe('COUNT-UP input route', () => {
     for (const digit of ['1', '0', '0']) {
       await keypad.locator('button', { hasText: new RegExp(`^${digit}$`) }).first().click();
     }
-    await expect(page.locator('.countup-entry-value')).toHaveText('100');
+    await expect(page.locator('.countup-cell-entry')).toHaveText('100');
     await keypad.locator('button[aria-label="1文字削除"]').click();
-    await expect(page.locator('.countup-entry-value')).toHaveText('10');
+    await expect(page.locator('.countup-cell-entry')).toHaveText('10');
     await keypad.locator('button', { hasText: /^0$/ }).click();
     await keypad.locator('button.enter').click();
     await expect(total(page)).toContainText('100');

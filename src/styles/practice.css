@@ -644,34 +644,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.countup-entry-strip {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 4px clamp(12px, 3vw, 20px);
-  border-bottom: 1px solid var(--line);
-}
-
-.countup-entry-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.countup-entry-value {
-  min-width: 3ch;
-  text-align: right;
-  font-size: clamp(24px, 6.4vw, 34px);
-  font-weight: 900;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-}
-
 .countup-notice {
   margin: 0;
   padding: 4px 12px;
