@@ -333,10 +333,10 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     expect(await hasVerticalScroll(page)).toBe(false);
     expect(await hasHorizontalScroll(page)).toBe(false);
 
-    // ROUND, the active player, TOTAL and the input are all on screen at once, unscrolled.
+    // ROUND, the active player, TOTAL and the entry cell are all on screen at once, unscrolled.
     await expect(page.locator('.countup-round-badge')).toBeInViewport();
     await expect(page.locator('.countup-total-card.active')).toBeInViewport();
-    await expect(page.locator('.countup-entry-value')).toBeInViewport();
+    await expect(page.locator('.countup-cell-entry')).toBeInViewport();
 
     const viewport = page.viewportSize()!;
     const footer = (await page.locator('.countup-footer').boundingBox())!;
@@ -470,9 +470,10 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     } else {
       await page.keyboard.type('140');
     }
-    await expect(page.locator('.countup-entry-value')).toHaveText('140');
-    await expect(page.locator('.countup-entry-value')).toBeInViewport();
+    // The sheet's own entry cell is the only read-out of the score being typed.
     await expect(page.locator('.countup-cell-entry')).toHaveText('140');
+    await expect(page.locator('.countup-cell-entry')).toBeInViewport();
+    await expect(page.locator('.countup-entry-value')).toHaveCount(0);
   });
 
   test('the award presentation covers neither the entry nor the input route', async ({ page }) => {
@@ -482,7 +483,7 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     await expect(page.locator('.countup-award-card')).toBeVisible();
 
     // The overlay takes no pointer events, so every control underneath stays live.
-    expect(await isUnobstructed(page, '.countup-entry-value')).toBe(true);
+    expect(await isUnobstructed(page, '.countup-cell-entry')).toBe(true);
     if (await keypadExpected(page)) {
       expect(await isUnobstructed(page, '.countup-keypad button.enter')).toBe(true);
     }

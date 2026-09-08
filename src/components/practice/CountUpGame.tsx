@@ -349,12 +349,8 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
           ))}
         </div>
 
-        <div className="countup-entry-strip">
-          <span className="countup-entry-label">{state.players[active].name} の3投合計</span>
-          <output className="countup-entry-value" aria-live="off">
-            {entry || '–'}
-          </output>
-        </div>
+        {/* No separate read-out of the score being typed: it already appears in the sheet's own
+            entry cell above, so a second copy down here only cost the sheet height. */}
 
         {notice && (
           <p className="countup-notice" role="status">
