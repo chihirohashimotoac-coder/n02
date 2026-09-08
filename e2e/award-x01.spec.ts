@@ -12,6 +12,11 @@ import { confirmFinish, enterGameScore, openFreshApp } from './helpers';
  * What this file covers is what the player gets: which award appears, that the presentation blocks
  * nothing, that the ON/OFF setting is shared and remembered, and that a bust, an undo or a past
  * correction never fires one.
+ *
+ * Note on the media tests below: whether the movie loads at all is an environment property here
+ * (codec support, and a service worker that answers requests page.route never sees), so nothing in
+ * this file asserts that a movie failed. The one media case that IS a product guarantee - offline
+ * with nothing cached - is driven through real offline instead.
  */
 
 const card = (page: Page) => page.locator('.award-card');
@@ -314,27 +319,33 @@ test.describe('アワードのメディア', () => {
     await expect(text.locator('.award-score')).toHaveText('180');
   });
 
-  test('動画が読み込めないときはポスターへ落ちる', async ({ page }) => {
-    await page.route('**/awards/*.mp4', (route) => route.abort());
-    await start01(page);
+  test('動画が未キャッシュのままオフラインでも、ポスターとテキストでアワードが出る', async ({
+    page,
+    context,
+  }) => {
+    // The requirement this pins: a first offline run, with no movie cached at all, must still
+    // present the award. The posters are precached at service-worker install for exactly that.
+    //
+    // Deliberately driven with real offline rather than page.route(): a request from a page under
+    // a service worker is issued BY the worker, which page.route does not intercept, so blocking
+    // at that layer proves nothing. Going offline before the mode is even entered also means the
+    // idle warm-up cannot have cached the movie first.
+    await openFreshApp(page);
+    await page.waitForFunction(() => navigator.serviceWorker?.controller != null, null, {
+      timeout: 20_000,
+    });
+    await context.setOffline(true);
+
+    await page.getByLabel('勝利条件').selectOption({ label: 'なし（Legを継続）' });
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await expect(page.locator('.n01-game-shell')).toBeVisible();
     await enterGameScore(page, 180);
 
     await expect(page.locator('.award-poster')).toBeVisible();
-    // The award is still fully readable, and still clears on time.
+    // Still fully readable, and still clears on time.
     await expect(name(page)).toHaveText('TON 80');
     await expect(card(page)).toHaveCount(0, { timeout: 6000 });
-  });
-
-  test('ポスターは Service Worker のプリキャッシュから出るので、通信を止めても出る', async ({ page }) => {
-    // Every award request blocked at the network. The posters are precached at install, so the
-    // presentation still has a picture - which is the whole point of precaching them.
-    await page.route('**/awards/*', (route) => route.abort());
-    await start01(page);
-    await enterGameScore(page, 180);
-
-    await expect(page.locator('.award-poster')).toBeVisible();
-    await expect(name(page)).toHaveText('TON 80');
-    await expect(card(page)).toHaveCount(0, { timeout: 6000 });
+    await context.setOffline(false);
   });
 
   test('prefers-reduced-motion では動画を再生せずポスターとテキストを出す', async ({ page }) => {
