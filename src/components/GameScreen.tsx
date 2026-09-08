@@ -18,6 +18,7 @@ import {
 import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../domain/darts';
 import { appendHistory, removeLatestHistory } from '../storage/matchStorage';
 import MatchResultCard from './MatchResultCard';
+import DialogShell from './common/DialogShell';
 
 interface Props {
   state: X01MatchState;
@@ -203,6 +204,11 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     setModal('finish-darts');
   }, [activePlayer.remaining, showNotice]);
 
+  const closeFinishDialog = useCallback(() => {
+    setModal('none');
+    setPendingFinish(null);
+  }, []);
+
   const closeMenuWith = useCallback((run: () => void) => {
     run();
     setModal('none');
@@ -249,87 +255,23 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
 
       const target = event.target as HTMLElement | null;
       const onButton = target?.tagName === 'BUTTON';
-      // ESC and BackSpace are the shared "cancel / go back" pair on every dialog.
-      const closeKey = event.key === 'Escape' || event.key === 'Backspace';
 
-      // The leg-result dialog and the match-result card are driven by state.legResult/matchWinner,
-      // not by `modal`, so they need their own branch here - without it the <kbd>Enter</kbd> badge on
-      // 「次のLegへ」 promises a shortcut that no listener implements. Claim every key while one is up
-      // so nothing queues into the keypad behind the dialog, and leave a focused button to the
-      // browser's own Enter-activates-button handling so 「戻る」 cannot fire twice (or fire at all
-      // when 「次のLegへ」 was meant).
-      if ((state.legResult !== null || state.matchWinner !== null) && !awaitingRoundLimit) {
+      // The match-result card is driven by state.matchWinner rather than by `modal`, and it replaces
+      // this whole screen (GameScreen returns MatchResultCard before its own markup), so this
+      // listener is the only thing that can implement the <kbd>Enter</kbd> badge on 「新しい対戦を
+      // 始める」. Claim every key while it is up so nothing queues into the keypad behind it, and
+      // leave a focused button to the browser's own Enter-activates-button handling.
+      //
+      // Every other dialog on this screen now carries its own DialogShell, which swallows keystrokes
+      // in the capture phase before this listener runs.
+      if (state.matchWinner !== null) {
         if (onButton) return;
         if (event.key === 'Enter') {
           event.preventDefault();
-          if (state.matchWinner === null) goToNextLeg();
-          else onExit({ clearSave: true });
-        } else if (closeKey) {
-          event.preventDefault();
-          onChange(undoLastAction(state)); // 戻る: un-finish the leg to re-declare the checkout.
+          onExit({ clearSave: true });
         }
         return;
       }
-
-      if (effectiveModal === 'round-limit') {
-        if (/^[1-3]$/.test(event.key)) {
-          event.preventDefault();
-          onChange(resolveRoundLimit(state, event.key === '1' ? 0 : event.key === '3' ? 1 : 'draw'));
-          setModal('none');
-        }
-        return;
-      }
-
-      if (effectiveModal === 'finish-darts') {
-        const counts = pendingFinish !== null ? validFinishDartCounts(activePlayer.remaining) : [];
-        const digit = Number(event.key);
-        if (/^[1-3]$/.test(event.key) && counts.includes(digit)) {
-          event.preventDefault();
-          submitScore(String(pendingFinish), digit);
-        } else if (closeKey) {
-          event.preventDefault();
-          setModal('none');
-          setPendingFinish(null);
-        }
-        return;
-      }
-
-      if (effectiveModal === 'menu') {
-        if (event.key === '1' && !isComTurn) {
-          event.preventDefault();
-          closeMenuWith(() => {
-            setRemainingEntryMode((value) => !value);
-            setEntry('');
-          });
-        } else if (event.key === '2' && !state.settings.comEnabled.some(Boolean)) {
-          event.preventDefault();
-          closeMenuWith(() => {
-            onChange(swapCurrentLegScores(state));
-            showNotice('このLegのプレイヤー別スコア履歴を入れ替えました。');
-          });
-        } else if (event.key === '3' && state.completed.length > 0) {
-          event.preventDefault();
-          closeMenuWith(() => rewindToPreviousLeg());
-        } else if (event.key === '4') {
-          event.preventDefault();
-          closeMenuWith(() => onChange(declareDraw(state)));
-        } else if (closeKey) {
-          event.preventDefault();
-          setModal('none');
-        }
-        return;
-      }
-
-      if (effectiveModal === 'stats') {
-        if (closeKey) {
-          event.preventDefault();
-          setModal('none');
-        }
-        return;
-      }
-
-      // The edit dialog owns its own keys through its focused <input>.
-      if (effectiveModal !== 'none') return;
 
       // Gameplay keys. Never steal a key from a real text field, and leave a focused button its
       // native Enter/Space/Tab activation.
@@ -413,10 +355,6 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [
-    activePlayer.remaining,
-    awaitingRoundLimit,
-    closeMenuWith,
-    effectiveModal,
     entry,
     isComTurn,
     moveSelection,
@@ -424,14 +362,10 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     onExit,
     openEditor,
     openFinishDialog,
-    pendingFinish,
     pressKey,
-    rewindToPreviousLeg,
     activeSelection,
-    goToNextLeg,
     showNotice,
     state,
-    submitScore,
   ]);
 
   const pickStarter = useCallback(
@@ -601,281 +535,363 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
       </footer>
 
       {effectiveModal === 'finish-darts' && pendingFinish !== null && (
-        <div className="n01-modal-backdrop" role="dialog" aria-modal="true" aria-label="上がり本数を選択">
-          <div className="n01-modal-card menu-list">
-            <h2>上がり本数</h2>
-            {finishCounts.map((count) => (
-              <button key={count} type="button" onClick={() => submitScore(String(pendingFinish), count)}>
-                <kbd>{count}</kbd>{'\u3000'}{count}本目で終了
-              </button>
-            ))}
-            <p>
-              残り{activePlayer.remaining}は最短{finishCounts[0]}本で上がれます。ボタンまたは数字キーで選択してください。
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setModal('none');
-                setPendingFinish(null);
-              }}
-            >
-              戻る
+        <DialogShell
+          label="上がり本数を選択"
+          backdropClassName="n01-modal-backdrop"
+          cardClassName="n01-modal-card menu-list"
+          onClose={closeFinishDialog}
+          onKeyDown={(event) => {
+            const digit = Number(event.key);
+            if (/^[1-3]$/.test(event.key) && finishCounts.includes(digit)) {
+              event.preventDefault();
+              submitScore(String(pendingFinish), digit);
+            } else if (event.key === 'Backspace') {
+              event.preventDefault();
+              closeFinishDialog();
+            }
+          }}
+        >
+          <h2>上がり本数</h2>
+          {finishCounts.map((count) => (
+            <button key={count} type="button" onClick={() => submitScore(String(pendingFinish), count)}>
+              <kbd>{count}</kbd>{'\u3000'}{count}本目で終了
             </button>
-          </div>
-        </div>
+          ))}
+          <p>
+            残り{activePlayer.remaining}は最短{finishCounts[0]}本で上がれます。ボタンまたは数字キーで選択してください。
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setModal('none');
+              setPendingFinish(null);
+            }}
+          >
+            戻る
+          </button>
+        </DialogShell>
       )}
 
       {effectiveModal === 'round-limit' && (
-        <div className="n01-modal-backdrop" role="dialog" aria-modal="true" aria-label="Legの勝敗を選択">
-          <div className="n01-modal-card menu-list">
-            <h2>{state.settings.maxRounds}ラウンド終了</h2>
-            <p>このLegの結果を選択してください。</p>
-            <button
-              type="button"
-              onClick={() => {
-                onChange(resolveRoundLimit(state, 0));
-                setModal('none');
-              }}
-            >
-              <kbd>1</kbd>{'\u3000'}{state.players[0].name} の勝ち
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onChange(resolveRoundLimit(state, 'draw'));
-                setModal('none');
-              }}
-            >
-              <kbd>2</kbd>{'\u3000'}引き分け
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onChange(resolveRoundLimit(state, 1));
-                setModal('none');
-              }}
-            >
-              <kbd>3</kbd>{'\u3000'}{state.players[1].name} の勝ち
-            </button>
-          </div>
-        </div>
+        <DialogShell
+          label="Legの勝敗を選択"
+          backdropClassName="n01-modal-backdrop"
+          cardClassName="n01-modal-card menu-list"
+          // A round-limit leg has to be resolved before play can continue, so there is nothing for
+          // Escape to close to - it keeps the prompt up, exactly as before.
+          onClose={() => {}}
+          onKeyDown={(event) => {
+            if (/^[1-3]$/.test(event.key)) {
+              event.preventDefault();
+              onChange(resolveRoundLimit(state, event.key === '1' ? 0 : event.key === '3' ? 1 : 'draw'));
+              setModal('none');
+            }
+          }}
+        >
+          <h2>{state.settings.maxRounds}ラウンド終了</h2>
+          <p>このLegの結果を選択してください。</p>
+          <button
+            type="button"
+            onClick={() => {
+              onChange(resolveRoundLimit(state, 0));
+              setModal('none');
+            }}
+          >
+            <kbd>1</kbd>{'\u3000'}{state.players[0].name} の勝ち
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onChange(resolveRoundLimit(state, 'draw'));
+              setModal('none');
+            }}
+          >
+            <kbd>2</kbd>{'\u3000'}引き分け
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onChange(resolveRoundLimit(state, 1));
+              setModal('none');
+            }}
+          >
+            <kbd>3</kbd>{'\u3000'}{state.players[1].name} の勝ち
+          </button>
+        </DialogShell>
       )}
 
       {effectiveModal === 'menu' && (
-        <div className="n01-modal-backdrop" role="dialog" aria-modal="true" aria-label="ゲームメニュー">
-          <div className="n01-modal-card menu-list">
-            <h2>メニュー</h2>
-            <div className="n01-darts-inline">
-              <span>使用ダーツ</span>
-              {[1, 2, 3].map((count) => (
-                <button
-                  key={count}
-                  type="button"
-                  className={dartsUsed === count ? 'selected' : ''}
-                  onClick={() => setDartsUsed(count)}
-                >
-                  {count}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              disabled={isComTurn}
-              onClick={() =>
-                closeMenuWith(() => {
-                  setRemainingEntryMode((value) => !value);
-                  setEntry('');
-                })
-              }
-            >
-              <kbd>1</kbd>{'　'}{remainingEntryMode ? '得点入力に戻す' : '残り点数で入力'}
-            </button>
-            <button
-              type="button"
-              disabled={state.settings.comEnabled.some(Boolean)}
-              onClick={() =>
-                closeMenuWith(() => {
-                  onChange(swapCurrentLegScores(state));
-                  showNotice('このLegのプレイヤー別スコア履歴を入れ替えました。');
-                })
-              }
-            >
-              <kbd>2</kbd>{'　'}プレイヤーのスコアを入れ替え
-            </button>
-            <button
-              type="button"
-              disabled={state.undo.length === 0}
-              onClick={() =>
-                closeMenuWith(() => {
-                  onChange(undoLastAction(state));
-                  showNotice('直前の入力を取り消しました。');
-                })
-              }
-            >
-              <kbd>U</kbd>{'　'}直前の入力を戻す
-            </button>
-            <button
-              type="button"
-              disabled={state.completed.length === 0}
-              onClick={() => closeMenuWith(rewindToPreviousLeg)}
-            >
-              <kbd>3</kbd>{'　'}前のLegをやり直す
-            </button>
-            <button type="button" onClick={() => closeMenuWith(() => onChange(declareDraw(state)))}>
-              <kbd>4</kbd>{'　'}Legを終了・引き分け
-            </button>
-            <div className="keyboard-help" aria-label="キーボード操作">
-              <span>
-                <kbd>0–9</kbd>入力
-              </span>
-              <span>
-                <kbd>Enter / Tab</kbd>確定
-              </span>
-              <span>
-                <kbd>BackSpace / Delete</kbd>1文字削除
-              </span>
-              <span>
-                <kbd>ESC</kbd>クリア・戻る
-              </span>
-              <span>
-                <kbd>U</kbd>直前の入力を取消
-              </span>
-              <span>
-                <kbd>矢印</kbd>履歴
-              </span>
-              <span>
-                <kbd>R</kbd>選択中を修正
-              </span>
-              <span>
-                <kbd>+ / -</kbd>使用ダーツ
-              </span>
-              <span>
-                <kbd>F</kbd>Finish
-              </span>
-              <span>
-                <kbd>M</kbd>メニュー
-              </span>
-              <span>
-                <kbd>S</kbd>Stats
-              </span>
-              <span>
-                <kbd>N</kbd>New
-              </span>
-            </div>
-            <button type="button" onClick={() => setModal('none')}>
-              戻る
-            </button>
+        <DialogShell
+          label="ゲームメニュー"
+          backdropClassName="n01-modal-backdrop"
+          cardClassName="n01-modal-card menu-list"
+          onClose={() => setModal('none')}
+          onKeyDown={(event) => {
+            if (event.key === '1' && !isComTurn) {
+              event.preventDefault();
+              closeMenuWith(() => {
+                setRemainingEntryMode((value) => !value);
+                setEntry('');
+              });
+            } else if (event.key === '2' && !state.settings.comEnabled.some(Boolean)) {
+              event.preventDefault();
+              closeMenuWith(() => {
+                onChange(swapCurrentLegScores(state));
+                showNotice('このLegのプレイヤー別スコア履歴を入れ替えました。');
+              });
+            } else if (event.key === '3' && state.completed.length > 0) {
+              event.preventDefault();
+              closeMenuWith(() => rewindToPreviousLeg());
+            } else if (event.key === '4') {
+              event.preventDefault();
+              closeMenuWith(() => onChange(declareDraw(state)));
+            } else if (event.key === 'Backspace') {
+              event.preventDefault();
+              setModal('none');
+            }
+          }}
+        >
+          <h2>メニュー</h2>
+          <div className="n01-darts-inline">
+            <span>使用ダーツ</span>
+            {[1, 2, 3].map((count) => (
+              <button
+                key={count}
+                type="button"
+                className={dartsUsed === count ? 'selected' : ''}
+                onClick={() => setDartsUsed(count)}
+              >
+                {count}
+              </button>
+            ))}
           </div>
-        </div>
+          <button
+            type="button"
+            disabled={isComTurn}
+            onClick={() =>
+              closeMenuWith(() => {
+                setRemainingEntryMode((value) => !value);
+                setEntry('');
+              })
+            }
+          >
+            <kbd>1</kbd>{'　'}{remainingEntryMode ? '得点入力に戻す' : '残り点数で入力'}
+          </button>
+          <button
+            type="button"
+            disabled={state.settings.comEnabled.some(Boolean)}
+            onClick={() =>
+              closeMenuWith(() => {
+                onChange(swapCurrentLegScores(state));
+                showNotice('このLegのプレイヤー別スコア履歴を入れ替えました。');
+              })
+            }
+          >
+            <kbd>2</kbd>{'　'}プレイヤーのスコアを入れ替え
+          </button>
+          <button
+            type="button"
+            disabled={state.undo.length === 0}
+            onClick={() =>
+              closeMenuWith(() => {
+                onChange(undoLastAction(state));
+                showNotice('直前の入力を取り消しました。');
+              })
+            }
+          >
+            <kbd>U</kbd>{'　'}直前の入力を戻す
+          </button>
+          <button
+            type="button"
+            disabled={state.completed.length === 0}
+            onClick={() => closeMenuWith(rewindToPreviousLeg)}
+          >
+            <kbd>3</kbd>{'　'}前のLegをやり直す
+          </button>
+          <button type="button" onClick={() => closeMenuWith(() => onChange(declareDraw(state)))}>
+            <kbd>4</kbd>{'　'}Legを終了・引き分け
+          </button>
+          <div className="keyboard-help" aria-label="キーボード操作">
+            <span>
+              <kbd>0–9</kbd>入力
+            </span>
+            <span>
+              <kbd>Enter / Tab</kbd>確定
+            </span>
+            <span>
+              <kbd>BackSpace / Delete</kbd>1文字削除
+            </span>
+            <span>
+              <kbd>ESC</kbd>クリア・戻る
+            </span>
+            <span>
+              <kbd>U</kbd>直前の入力を取消
+            </span>
+            <span>
+              <kbd>矢印</kbd>履歴
+            </span>
+            <span>
+              <kbd>R</kbd>選択中を修正
+            </span>
+            <span>
+              <kbd>+ / -</kbd>使用ダーツ
+            </span>
+            <span>
+              <kbd>F</kbd>Finish
+            </span>
+            <span>
+              <kbd>M</kbd>メニュー
+            </span>
+            <span>
+              <kbd>S</kbd>Stats
+            </span>
+            <span>
+              <kbd>N</kbd>New
+            </span>
+          </div>
+          <button type="button" onClick={() => setModal('none')}>
+            戻る
+          </button>
+        </DialogShell>
       )}
 
       {effectiveModal === 'stats' && (
-        <div className="n01-modal-backdrop" role="dialog" aria-modal="true" aria-label="対戦成績">
-          <div className="n01-modal-card n01-stats-modal">
-            <h2>対戦成績</h2>
-            <div className="n01-stats-table">
-              <div className="n01-stats-head">
-                <strong>{state.players[0].name}</strong>
-                <span>STATS</span>
-                <strong>{state.players[1].name}</strong>
-              </div>
-              <StatsRow label="3DA" values={([0, 1] as const).map((i) => threeDartAverage(state.players[i]).toFixed(2))} />
-              <StatsRow label="LEGS" values={([0, 1] as const).map((i) => String(state.players[i].legs))} />
-              <StatsRow label="DARTS" values={([0, 1] as const).map((i) => String(state.players[i].totalDarts))} />
-              <StatsRow label="100+" values={([0, 1] as const).map((i) => String(state.players[i].ton00Count))} />
-              <StatsRow label="140+" values={([0, 1] as const).map((i) => String(state.players[i].ton40Count))} />
-              <StatsRow label="180" values={([0, 1] as const).map((i) => String(state.players[i].ton80Count))} />
-              <StatsRow
-                label="HIGH OUT"
-                values={([0, 1] as const).map((i) => String(state.players[i].highestFinish || '—'))}
-              />
+        <DialogShell
+          label="対戦成績"
+          backdropClassName="n01-modal-backdrop"
+          cardClassName="n01-modal-card n01-stats-modal"
+          onClose={() => setModal('none')}
+          onKeyDown={(event) => {
+            if (event.key === 'Backspace') {
+              event.preventDefault();
+              setModal('none');
+            }
+          }}
+        >
+          <h2>対戦成績</h2>
+          <div className="n01-stats-table">
+            <div className="n01-stats-head">
+              <strong>{state.players[0].name}</strong>
+              <span>STATS</span>
+              <strong>{state.players[1].name}</strong>
             </div>
-            <button type="button" className="n01-modal-primary" onClick={() => setModal('none')}>
-              閉じる
-            </button>
+            <StatsRow label="3DA" values={([0, 1] as const).map((i) => threeDartAverage(state.players[i]).toFixed(2))} />
+            <StatsRow label="LEGS" values={([0, 1] as const).map((i) => String(state.players[i].legs))} />
+            <StatsRow label="DARTS" values={([0, 1] as const).map((i) => String(state.players[i].totalDarts))} />
+            <StatsRow label="100+" values={([0, 1] as const).map((i) => String(state.players[i].ton00Count))} />
+            <StatsRow label="140+" values={([0, 1] as const).map((i) => String(state.players[i].ton40Count))} />
+            <StatsRow label="180" values={([0, 1] as const).map((i) => String(state.players[i].ton80Count))} />
+            <StatsRow
+              label="HIGH OUT"
+              values={([0, 1] as const).map((i) => String(state.players[i].highestFinish || '—'))}
+            />
           </div>
-        </div>
+          <button type="button" className="n01-modal-primary" onClick={() => setModal('none')}>
+            閉じる
+          </button>
+        </DialogShell>
       )}
 
       {effectiveModal === 'edit' && editIndex !== null && (
-        <div className="n01-modal-backdrop" role="dialog" aria-modal="true" aria-label="過去得点の修正">
-          <div className="n01-modal-card">
-            <h2>過去得点を修正</h2>
-            <label>
-              <span>得点</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                autoFocus
-                value={editScore}
-                onChange={(event) => setEditScore(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    commitEdit();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    setModal('none');
-                  }
-                }}
-              />
-            </label>
-            <div className="n01-darts-inline">
-              <span>使用ダーツ</span>
-              {[1, 2, 3].map((count) => (
-                <button
-                  key={count}
-                  type="button"
-                  className={editDarts === count ? 'selected' : ''}
-                  onClick={() => setEditDarts(count)}
-                >
-                  {count}本
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              className="n01-modal-primary"
-              onClick={commitEdit}
-            >
-              修正して再計算
-            </button>
-            <button type="button" className="n01-modal-cancel" onClick={() => setModal('none')}>
-              キャンセル
-            </button>
+        <DialogShell
+          label="過去得点の修正"
+          backdropClassName="n01-modal-backdrop"
+          cardClassName="n01-modal-card"
+          onClose={() => setModal('none')}
+        >
+          <h2>過去得点を修正</h2>
+          <label>
+            <span>得点</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              autoFocus
+              value={editScore}
+              onChange={(event) => setEditScore(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitEdit();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setModal('none');
+                }
+              }}
+            />
+          </label>
+          <div className="n01-darts-inline">
+            <span>使用ダーツ</span>
+            {[1, 2, 3].map((count) => (
+              <button
+                key={count}
+                type="button"
+                className={editDarts === count ? 'selected' : ''}
+                onClick={() => setEditDarts(count)}
+              >
+                {count}本
+              </button>
+            ))}
           </div>
-        </div>
+          <button
+            type="button"
+            className="n01-modal-primary"
+            onClick={commitEdit}
+          >
+            修正して再計算
+          </button>
+          <button type="button" className="n01-modal-cancel" onClick={() => setModal('none')}>
+            キャンセル
+          </button>
+        </DialogShell>
       )}
 
       {state.legResult && !awaitingRoundLimit && (
-        <div className="result-backdrop" role="dialog" aria-modal="true" aria-label="Leg結果">
-          <div className="result-card">
-            <div className="result-icon" aria-hidden="true">
-              ✓
-            </div>
-            <p>LEG {state.leg} WINNER</p>
-            <h2>
-              {state.legResult.winner === null ? '引き分け' : state.players[state.legResult.winner].name}
-            </h2>
-            <div className="result-numbers">
-              <span>
-                <strong>{state.startScore}</strong>
-                開始点
-              </span>
-              <span>
-                <strong>{state.legResult.darts || '—'}</strong>
-                使用ダーツ
-              </span>
-            </div>
-            <button type="button" className="primary-button" onClick={goToNextLeg}>
-              次のLegへ <kbd>Enter</kbd>
-            </button>
-            <button type="button" className="text-button" onClick={() => onChange(undoLastAction(state))}>
-              戻る（本数を選び直す） <kbd>ESC</kbd>
-            </button>
+        <DialogShell
+          label="Leg結果"
+          backdropClassName="result-backdrop"
+          cardClassName="result-card"
+          // ESC / 戻る: un-finish the leg so the checkout can be re-declared.
+          onClose={() => onChange(undoLastAction(state))}
+          onKeyDown={(event) => {
+            // Never act on the Enter that merely commits an IME conversion, and never let a held
+            // key repeat-fire. A focused button keeps the browser's own Enter activation, so
+            // 「次のLegへ」 cannot fire twice.
+            if (event.isComposing || event.keyCode === 229 || event.repeat) return;
+            if ((event.target as HTMLElement | null)?.tagName === 'BUTTON') return;
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              goToNextLeg();
+            } else if (event.key === 'Backspace') {
+              event.preventDefault();
+              onChange(undoLastAction(state));
+            }
+          }}
+        >
+          <div className="result-icon" aria-hidden="true">
+            ✓
           </div>
-        </div>
+          <p>LEG {state.leg} WINNER</p>
+          <h2>
+            {state.legResult.winner === null ? '引き分け' : state.players[state.legResult.winner].name}
+          </h2>
+          <div className="result-numbers">
+            <span>
+              <strong>{state.startScore}</strong>
+              開始点
+            </span>
+            <span>
+              <strong>{state.legResult.darts || '—'}</strong>
+              使用ダーツ
+            </span>
+          </div>
+          <button type="button" className="primary-button" onClick={goToNextLeg}>
+            次のLegへ <kbd>Enter</kbd>
+          </button>
+          <button type="button" className="text-button" onClick={() => onChange(undoLastAction(state))}>
+            戻る（本数を選び直す） <kbd>ESC</kbd>
+          </button>
+        </DialogShell>
       )}
     </section>
   );
