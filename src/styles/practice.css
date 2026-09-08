@@ -11,7 +11,8 @@
 .practice-hub,
 .countup-setup {
   --cu-accent: #d97706;
-  --cu-accent-strong: #b45309;
+  /* Was #b45309, which reached only 4.47:1 on --cu-accent-soft. */
+  --cu-accent-strong: #a54c08;
   --cu-accent-soft: #fdf0dc;
   --cu-on-accent: #2a1a06;
   --cu-header-a: #241703;
@@ -128,7 +129,7 @@
 
 .practice-card.playable .practice-card-badge {
   background: var(--cu-accent);
-  color: #fff;
+  color: var(--cu-on-accent);
 }
 
 @media (hover: hover) {
@@ -496,7 +497,6 @@
 
 .countup-table td.running-total span {
   color: var(--muted);
-  opacity: 0.55;
   font-size: 16px;
   font-weight: 400;
 }
@@ -525,7 +525,6 @@
 
 .countup-table td.empty span {
   color: var(--muted);
-  opacity: 0.55;
   font-size: 16px;
 }
 
@@ -606,7 +605,7 @@
   padding: 2px 6px;
   border-radius: 999px;
   background: var(--cu-accent);
-  color: #fff;
+  color: var(--cu-on-accent);
 }
 
 .countup-total-value {
@@ -758,7 +757,7 @@
 
 .countup-keypad button.enter {
   background: var(--cu-accent);
-  color: #fff;
+  color: var(--cu-on-accent);
   font-size: 14px;
   font-weight: 900;
   letter-spacing: 0.08em;
