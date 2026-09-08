@@ -489,7 +489,7 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     await openFreshApp(page);
     await startCountUp(page);
     await enterCountUpRound(page, 180);
-    await expect(page.locator('.countup-award-card')).toBeVisible();
+    await expect(page.locator('.award-card')).toBeVisible();
 
     // The overlay takes no pointer events, so every control underneath stays live.
     expect(await isUnobstructed(page, '.countup-cell-entry')).toBe(true);

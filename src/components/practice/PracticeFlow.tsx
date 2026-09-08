@@ -5,7 +5,8 @@ import PracticeHub from './PracticeHub';
 import CountUpSetup from './CountUpSetup';
 import CountUpGame from './CountUpGame';
 import CountUpResult from './CountUpResult';
-import CountUpAwardOverlay, { type AwardPresentation } from './CountUpAwardOverlay';
+import AwardOverlay, { type AwardPresentation } from '../common/AwardOverlay';
+import { useAwardPreload } from '../common/useAwardPreload';
 import {
   awardCounts,
   createCountUpGame,
@@ -98,7 +99,10 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
   // be recreated on every score entry.
   const clearAward = useCallback(() => setAward(null), []);
 
-  const overlay = <CountUpAwardOverlay award={award} onExpire={clearAward} />;
+  // Warm this mode's award movies once a game is actually under way, during idle time.
+  useAwardPreload('count-up', game !== null);
+
+  const overlay = <AwardOverlay award={award} onExpire={clearAward} />;
 
   if (game && !isFinished(game)) {
     return (

@@ -19,6 +19,10 @@ import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../domai
 import { appendHistory, removeLatestHistory } from '../storage/matchStorage';
 import MatchResultCard from './MatchResultCard';
 import DialogShell from './common/DialogShell';
+import AwardOverlay, { type AwardPresentation } from './common/AwardOverlay';
+import { useAwardPreload } from './common/useAwardPreload';
+import { classifyAward } from '../domain/awards';
+import { loadAwardDisplay, saveAwardDisplay } from '../storage/awardSettings';
 
 interface Props {
   state: X01MatchState;
@@ -44,6 +48,10 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   const [selectedVisit, setSelectedVisit] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const historyRecorded = useRef<Set<number>>(new Set());
+  /** アワード表示 - shared with チェックアウト練習 and persisted; ON unless explicitly turned off. */
+  const [awardsEnabled, setAwardsEnabled] = useState(loadAwardDisplay);
+  const [award, setAward] = useState<AwardPresentation | null>(null);
+  const awardId = useRef(0);
 
   const activePlayer = state.players[state.active];
   // A round-limit leg must be resolved before anything else, so that prompt is derived from
@@ -64,6 +72,59 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     setNoticeKind(kind);
   }, []);
 
+  /**
+   * Presents the award a just-committed visit earned, if any.
+   *
+   * Reads only what the engine already recorded on that visit (score, the remaining it was thrown
+   * at, whether it checked out) and never writes anything back: the score is committed and the next
+   * player is already up by the time this runs. Called at the two places a visit is appended - the
+   * player's own entry and the COM's turn - rather than from an effect watching the state, so an
+   * undo, a past-score correction or a leg rewind can never replay an award.
+   */
+  const announceAward = useCallback(
+    (next: X01MatchState, previous: X01MatchState) => {
+      if (!awardsEnabled) return;
+      // A visit was appended - not an undo, not an edit, not a no-op.
+      if (next.visits.length !== previous.visits.length + 1) return;
+      const visit = next.visits[next.visits.length - 1];
+      // A bust scores nothing, so it earns nothing.
+      if (!visit || visit.bust) return;
+      const kind = classifyAward(visit.score, {
+        mode: 'x01',
+        // 通常01・チェックアウト練習 take a visit total, so they always classify on the SEPARATE
+        // BULL side: a 150 is THREE IN THE BLACK here, and HAT TRICK stays COUNT-UP's.
+        bullMode: 'separate',
+        remainingBefore: visit.before,
+        checkout: visit.checkout,
+      });
+      if (!kind) return;
+      awardId.current += 1;
+      // A new award replaces whatever is showing and restarts its timer, never queues behind it.
+      setAward({
+        id: awardId.current,
+        kind,
+        score: visit.score,
+        playerName: next.players[visit.player].name,
+      });
+    },
+    [awardsEnabled],
+  );
+
+  const clearAward = useCallback(() => setAward(null), []);
+
+  const toggleAwards = useCallback(() => {
+    setAwardsEnabled((enabled) => {
+      const next = !enabled;
+      saveAwardDisplay(next);
+      // Turning it off takes down anything already on screen; it never touches game state.
+      if (!next) setAward(null);
+      return next;
+    });
+  }, []);
+
+  // Only once a game is under way, only this mode's awards, and only when idle.
+  useAwardPreload('x01', awardsEnabled);
+
   // Record a completed leg into the persistent history exactly once.
   useEffect(() => {
     const index = state.completed.length - 1;
@@ -83,9 +144,13 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   // COM opponents take their turn automatically.
   useEffect(() => {
     if (!isComTurn || state.legResult || state.matchWinner !== null) return;
-    const timer = setTimeout(() => onChange(maybePlayComTurn(state)), 700);
+    const timer = setTimeout(() => {
+      const next = maybePlayComTurn(state);
+      onChange(next);
+      announceAward(next, state);
+    }, 700);
     return () => clearTimeout(timer);
-  }, [isComTurn, state, onChange]);
+  }, [announceAward, isComTurn, state, onChange]);
 
   const submitScore = useCallback(
     (rawValue: string, finishDarts?: number) => {
@@ -114,6 +179,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
       try {
         const next = applyVisit(state, scored, finishDarts, dartsUsed);
         onChange(next);
+        announceAward(next, state);
         setEntry('');
         setPendingFinish(null);
         setModal('none');
@@ -127,7 +193,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         else throw error;
       }
     },
-    [activePlayer.remaining, dartsUsed, onChange, remainingEntryMode, showNotice, state],
+    [activePlayer.remaining, announceAward, dartsUsed, onChange, remainingEntryMode, showNotice, state],
   );
 
   const pressKey = useCallback(
@@ -648,6 +714,9 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
             } else if (event.key === '4') {
               event.preventDefault();
               closeMenuWith(() => onChange(declareDraw(state)));
+            } else if (event.key.toLowerCase() === 'a') {
+              event.preventDefault();
+              closeMenuWith(toggleAwards);
             } else if (event.key === 'Backspace') {
               event.preventDefault();
               setModal('none');
@@ -668,6 +737,11 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
               </button>
             ))}
           </div>
+          {/* A display preference, not a gameplay action: it lives in the menu so gameplay keeps
+              every pixel it had, and it is shared with チェックアウト練習 and remembered. */}
+          <button type="button" aria-pressed={awardsEnabled} onClick={() => closeMenuWith(toggleAwards)}>
+            <kbd>A</kbd>{'\u3000'}アワード表示：{awardsEnabled ? 'ON' : 'OFF'}
+          </button>
           <button
             type="button"
             disabled={isComTurn}
@@ -750,6 +824,9 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
             </span>
             <span>
               <kbd>N</kbd>New
+            </span>
+            <span>
+              <kbd>A</kbd>アワード表示
             </span>
           </div>
           <button type="button" onClick={() => setModal('none')}>
@@ -899,6 +976,9 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
           </button>
         </DialogShell>
       )}
+
+      {/* Never a dialog: pointer-events: none, takes no focus, and blocks nothing underneath. */}
+      <AwardOverlay award={award} onExpire={clearAward} />
     </section>
   );
 
