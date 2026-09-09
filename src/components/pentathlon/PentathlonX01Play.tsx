@@ -502,9 +502,6 @@ export default function PentathlonX01Play({
             </tbody>
           </table>
         </div>
-        <p className="n01-table-hint">
-          得点表をスクロールすると1ラウンド目から確認できます。得点セルを選択すると過去ラウンドを修正できます。
-        </p>
       </div>
 
       <footer className="n01-game-footer">

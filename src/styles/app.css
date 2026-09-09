@@ -1555,14 +1555,6 @@ select:focus-visible {
   font-size: clamp(18px, 2.4vw, 30px);
   font-weight: var(--weight-bold);
 }
-.n01-table-hint {
-  text-align: center;
-  color: var(--muted);
-  flex: none;
-  margin: 0;
-  padding: 12px 18px;
-  font-size: 11px;
-}
 .n01-game-footer {
   border-top: var(--border-strong);
   z-index: 4;
@@ -2135,9 +2127,6 @@ select:focus-visible {
   }
   .n01-score-table td.darts {
     font-size: 24px;
-  }
-  .n01-table-hint {
-    display: none;
   }
   .n01-game-footer {
     height: 360px;
@@ -2820,12 +2809,6 @@ select:focus-visible {
   .n01-score-table td.darts {
     font-size: clamp(18px, 2.4vw, 28px);
   }
-  /* The one thing that has to give: a hint sentence cannot outrank the score sheet here. The
-     gestures it describes are all still available, and the ☰ menu still lists the shortcuts. */
-  .n01-table-hint {
-    display: none;
-  }
-
   /* The rail: remaining scores, the menu bar and the keypad, stacked down the right-hand side. */
   .n01-game-footer {
     inset: 46px 0 0 auto;

@@ -564,10 +564,6 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
             </tbody>
           </table>
         </div>
-        <p className="n01-table-hint">
-          得点表をスクロールすると1ラウンド目から確認できます。得点セルを選択すると過去ラウンドを修正できます。
-          {canPickStarter && '1ラウンド目の未入力の間は、相手側の「—」セルを選択すると先攻を入れ替えられます。'}
-        </p>
       </div>
 
       <footer className="n01-game-footer">
