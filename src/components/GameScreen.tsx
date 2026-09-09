@@ -41,6 +41,12 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   const [editIndex, setEditIndex] = useState<number | null>(null);
   const [editScore, setEditScore] = useState('');
   const [editDarts, setEditDarts] = useState(3);
+  /**
+   * Why a correction was refused, shown inside the 修正 dialog itself. The dialog stays open on a
+   * rejection so the score or the 上がり本数 can be fixed, and the ordinary notice bar sits behind
+   * its backdrop where the player cannot read it.
+   */
+  const [editError, setEditError] = useState<string | null>(null);
   const [remainingEntryMode, setRemainingEntryMode] = useState(false);
   /** 使用ダーツ for the visit being entered - 3 unless the player says otherwise, reset after each visit. */
   const [dartsUsed, setDartsUsed] = useState(3);
@@ -255,6 +261,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
       setEditIndex(index);
       setEditScore(seedDigit ?? String(visit.score));
       setEditDarts(visit.darts);
+      setEditError(null);
       setModal('edit');
     },
     [state.visits],
@@ -295,17 +302,28 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   const closeEditor = useCallback(() => {
     setModal('none');
     setSelectedVisit(null);
+    setEditError(null);
   }, []);
 
   const commitEdit = useCallback(() => {
     if (editIndex === null) return;
     try {
-      onChange(editVisit(state, editIndex, Number(editScore), editDarts));
+      const next = editVisit(state, editIndex, Number(editScore), editDarts);
+      onChange(next);
       closeEditor();
-      showNotice(`${editIndex + 1}件目の得点を修正し、以降の残り点数を再計算しました。`);
+      // A correction can itself finish the leg (the Leg結果 dialog comes up behind this notice), so
+      // say which of the two happened rather than always promising a recalculated remaining.
+      showNotice(
+        next.legResult !== null
+          ? `${editIndex + 1}件目の得点を修正し、このLegの上がりとして確定しました。`
+          : `${editIndex + 1}件目の得点を修正し、以降の残り点数を再計算しました。`,
+      );
     } catch (error) {
-      if (error instanceof InvalidVisitError) showNotice(error.message, 'warning');
-      else throw error;
+      if (error instanceof InvalidVisitError) {
+        // Keep the dialog open on the value that was refused, so it can be corrected in place.
+        setEditError(error.message);
+        showNotice(error.message, 'warning');
+      } else throw error;
     }
   }, [closeEditor, editDarts, editIndex, editScore, onChange, showNotice, state]);
 
@@ -928,6 +946,11 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
               </button>
             ))}
           </div>
+          {editError && (
+            <p className="n01-notice warning" role="alert">
+              {editError}
+            </p>
+          )}
           <button
             type="button"
             className="n01-modal-primary"
