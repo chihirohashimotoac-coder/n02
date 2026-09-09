@@ -250,6 +250,124 @@ test.describe('チェックアウト練習', () => {
 });
 
 /**
+ * The reported P0, driven exactly as it was reported on production: CHECKOUT 41, both players
+ * score 0, then プレイヤー1's 0 is tapped and corrected to 41.
+ *
+ * Before the fix the engine credited the leg and put the winner on 0 but never raised the Leg結果
+ * dialog, leaving the game on a screen whose next input was refused as 「残り0は上がれない数字」.
+ */
+test.describe('P0: 過去得点の修正がチェックアウトになる', () => {
+  /** Starts a deterministic CHECKOUT 41 game, optionally as a 1 Leg先取 match. */
+  async function startCheckout41(page: Page, options: { targetLegs?: string } = {}) {
+    await openFreshApp(page);
+    await page.locator('.mode-card', { hasText: 'チェックアウト練習' }).click();
+    await page.getByLabel('出題下限').fill('41');
+    await page.getByLabel('出題上限').fill('41');
+    if (options.targetLegs) {
+      await page.getByLabel('勝利条件').selectOption({ label: options.targetLegs });
+    }
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('41');
+  }
+
+  /** Taps プレイヤー1's first played cell and commits `score` as its correction. */
+  async function correctFirstCellTo(page: Page, score: number) {
+    await page.locator('.n01-score-table td.scored button').first().click();
+    await expect(page.locator('.n01-modal-card')).toContainText('過去得点を修正');
+    await page.locator('.n01-modal-card input[type="number"]').fill(String(score));
+    await page.getByRole('button', { name: '修正して再計算' }).click();
+  }
+
+  test('Leg結果に到達し、残り0の入力画面に取り残されない', async ({ page }) => {
+    await startCheckout41(page);
+    await enterGameScore(page, 0); // プレイヤー1
+    await enterGameScore(page, 0); // プレイヤー2
+
+    await correctFirstCellTo(page, 41);
+
+    // The whole point: the leg ends on screen instead of stranding the game on remaining 0.
+    await expect(page.locator('.result-card')).toBeVisible();
+    await expect(page.locator('.result-card')).toContainText('LEG 1 WINNER');
+    await expect(page.locator('.result-card h2')).toHaveText('プレイヤー1');
+    // 41 off 3 darts: the editor keeps the visit's own dart count, which is a legal finish for 41.
+    await expect(page.locator('.result-card .result-numbers strong').nth(0)).toHaveText('41');
+    await expect(page.locator('.result-card .result-numbers strong').nth(1)).toHaveText('3');
+
+    // The leg is recorded once, not twice and not zero times.
+    const history = await page.evaluate(() => JSON.parse(localStorage.getItem('n02-history-v1') ?? '[]'));
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ mode: 'checkout', winner: 'プレイヤー1', startScore: 41, reason: 'checkout' });
+
+    // And play carries on normally: next leg, both players back on the challenge, input accepted.
+    await page.getByRole('button', { name: /次のLegへ/ }).click();
+    await expect(page.locator('.result-card')).toHaveCount(0);
+    await expect(page.locator('.n01-game-header .n01-leg-center')).toContainText('LEG 2');
+    const remaining = page.locator('.n01-left-table strong');
+    await expect(remaining.nth(0)).toHaveText('41');
+    await expect(remaining.nth(1)).toHaveText('41');
+    await enterGameScore(page, 20);
+    await expect(page.locator('.n01-notice')).toHaveCount(0); // no rejection, no bust
+    await expect(remaining.nth(1)).toHaveText('21'); // 交互先攻: プレイヤー2 opens leg 2
+  });
+
+  test('1 Leg先取ならマッチ結果に到達する', async ({ page }) => {
+    await startCheckout41(page, { targetLegs: '1 Leg先取' });
+    await enterGameScore(page, 0);
+    await enterGameScore(page, 0);
+
+    await correctFirstCellTo(page, 41);
+
+    await expect(page.locator('.result-card.match-summary')).toContainText('MATCH WINNER');
+    await expect(page.locator('.result-card.match-summary')).toContainText('プレイヤー1');
+  });
+
+  test('戻るでチェックアウト直前に戻り、その場から投げ直せる', async ({ page }) => {
+    await startCheckout41(page);
+    await enterGameScore(page, 0);
+    await enterGameScore(page, 0);
+    await correctFirstCellTo(page, 41);
+    await expect(page.locator('.result-card')).toBeVisible();
+
+    await page.getByRole('button', { name: /戻る（本数を選び直す）/ }).click();
+    await expect(page.locator('.result-card')).toHaveCount(0);
+    // Back on the throw that won it: プレイヤー1 on 41, nothing played, no leg awarded.
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('41');
+    await expect(page.locator('.n01-leg-center strong')).toHaveText('0 - 0');
+    // Nothing played: the only cell buttons left are the 1st-round 先攻 pickers of an empty leg.
+    await expect(page.locator('.n01-score-table td.scored button:not(.starter-picker)')).toHaveCount(0);
+
+    await enterGameScore(page, 41);
+    await confirmFinish(page);
+    await expect(page.locator('.result-card')).toBeVisible();
+  });
+
+  test('有効なダブルアウトでない上がり本数は拒否される', async ({ page }) => {
+    await startCheckout41(page);
+    await enterGameScore(page, 0);
+    await enterGameScore(page, 0);
+
+    await page.locator('.n01-score-table td.scored button').first().click();
+    await page.locator('.n01-modal-card input[type="number"]').fill('41');
+    await page.locator('.n01-modal-card .n01-darts-inline button', { hasText: '1本' }).click();
+    await page.getByRole('button', { name: '修正して再計算' }).click();
+
+    // 41 cannot be finished with a single dart, so the correction is refused and nothing changes.
+    // The reason has to be readable inside the dialog, which stays open on the refused value.
+    await expect(page.locator('.n01-modal-card .n01-notice.warning')).toContainText(
+      '1本で上がることはできません',
+    );
+    await expect(page.locator('.result-card')).toHaveCount(0);
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('41');
+
+    // Choosing a count that can finish 41 then goes through.
+    await page.locator('.n01-modal-card .n01-darts-inline button', { hasText: '2本' }).click();
+    await page.getByRole('button', { name: '修正して再計算' }).click();
+    await expect(page.locator('.result-card')).toBeVisible();
+    await expect(page.locator('.result-card .result-numbers strong').nth(1)).toHaveText('2');
+  });
+});
+
+/**
  * 先攻の交代・Leg結果ダイアログのEnter・1ラウンド目の先攻入れ替え。
  * All three regressed when 通常01/チェックアウト練習 were re-implemented alongside Pentathlon.
  */

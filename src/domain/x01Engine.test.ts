@@ -511,6 +511,194 @@ describe('editVisit', () => {
   });
 });
 
+/**
+ * P0 regression: a correction that reaches 0 has to end the leg exactly the way a normally entered
+ * checkout does. Rebuilding only the remaining numbers left the winner sitting on 0 with the leg
+ * credited but no Leg結果, no `completed` entry and the throw handed to a player who could not play.
+ */
+describe('editVisit - a correction that checks the leg out', () => {
+  const checkout41 = (overrides: Partial<X01Settings> = {}) =>
+    baseSettings({ mode: 'checkout', checkoutMin: 41, checkoutMax: 41, targetLegs: 0, ...overrides });
+
+  /** Production repro: CHECKOUT 41, both players score 0, then P1's 0 is corrected to 41. */
+  function editP0ZeroTo41(overrides: Partial<X01Settings> = {}): X01MatchState {
+    let state = createX01Match(checkout41(overrides));
+    state = applyVisit(state, 0); // P1 (index 0)
+    state = applyVisit(state, 0); // P2 (index 1)
+    return editVisit(state, 0, 41, 2); // 41 = S1 + D20, so 2 darts is a legal finish
+  }
+
+  it('produces the same leg-completion state as a normally entered checkout', () => {
+    const state = editP0ZeroTo41();
+    expect(state.players[0].remaining).toBe(0);
+    expect(state.legResult).toEqual({ winner: 0, darts: 2, reason: 'checkout' });
+    expect(state.completed).toHaveLength(1);
+    expect(state.completed[0]).toMatchObject({ winner: 0, startScore: 41, darts: 2, reason: 'checkout' });
+    expect(state.players[0].legs).toBe(1);
+    expect(state.players[0].checkouts).toBe(1);
+    expect(state.players[0].finishDarts).toEqual([2]);
+    expect(state.players[0].highestFinish).toBe(41);
+    expect(state.active).toBe(1); // exactly as applyVisit hands the throw over on a checkout
+    expect(state.visits[0]).toMatchObject({ score: 41, after: 0, bust: false, checkout: true, darts: 2 });
+  });
+
+  it('sets matchWinner when the corrected checkout reaches targetLegs', () => {
+    const state = editP0ZeroTo41({ targetLegs: 1 });
+    expect(state.matchWinner).toBe(0);
+    expect(state.players[0].legs).toBe(1);
+  });
+
+  it('leaves targetLegs=0 on a leg result the players can carry on from', () => {
+    let state = editP0ZeroTo41({ targetLegs: 0 });
+    expect(state.matchWinner).toBeNull();
+    expect(state.legResult?.winner).toBe(0);
+    state = advanceLeg(state);
+    expect(state.leg).toBe(2);
+    expect(state.legResult).toBeNull();
+    expect(state.legStarter).toBe(1); // 交互先攻 is untouched by the correction
+    expect(state.players[0].remaining).toBe(41);
+    expect(state.players[1].remaining).toBe(41);
+  });
+
+  it('rejects a correction that reaches 0 on a number no double-out can finish', () => {
+    let state = createX01Match(baseSettings({ startScore: 159 })); // 159 is reachable but a bogey
+    state = applyVisit(state, 0);
+    state = applyVisit(state, 0);
+    expect(() => editVisit(state, 0, 159, 3)).toThrow(InvalidVisitError);
+    // ...and the rejected correction changes nothing.
+    expect(state.players[0].remaining).toBe(159);
+    expect(state.legResult).toBeNull();
+  });
+
+  it('rejects a finish count that is not in validFinishDartCounts()', () => {
+    let state = createX01Match(checkout41());
+    state = applyVisit(state, 0);
+    state = applyVisit(state, 0);
+    // 41 is a 2- or 3-dart finish; there is no single dart worth 41.
+    expect(() => editVisit(state, 0, 41, 1)).toThrow(InvalidVisitError);
+    expect(editVisit(state, 0, 41, 3).legResult).toEqual({ winner: 0, darts: 3, reason: 'checkout' });
+  });
+
+  it('drops the visits after a correction that checks out mid-leg', () => {
+    let state = createX01Match(checkout41());
+    state = applyVisit(state, 0); // v0 P1
+    state = applyVisit(state, 0); // v1 P2
+    state = applyVisit(state, 0); // v2 P1
+    state = applyVisit(state, 0); // v3 P2
+    expect(state.visits).toHaveLength(4);
+
+    state = editVisit(state, 1, 41, 2); // P2's first visit becomes the checkout
+    expect(state.visits).toHaveLength(2); // v2/v3 could not have been thrown
+    expect(state.visits[1]).toMatchObject({ player: 1, checkout: true, after: 0 });
+    expect(state.players[1].remaining).toBe(0);
+    expect(state.players[0].remaining).toBe(41); // P1's own 0 stands
+    expect(state.legResult).toEqual({ winner: 1, darts: 2, reason: 'checkout' });
+    expect(state.active).toBe(0);
+  });
+
+  it('rewinds to the throw before the corrected checkout via UNDO and via 前のLeg', () => {
+    const state = editP0ZeroTo41({ targetLegs: 1 });
+
+    const undone = undoLastAction(state);
+    expect(undone.legResult).toBeNull();
+    expect(undone.matchWinner).toBeNull();
+    expect(undone.completed).toHaveLength(0);
+    expect(undone.visits).toHaveLength(0);
+    expect(undone.players[0].remaining).toBe(41);
+    expect(undone.players[0].legs).toBe(0);
+    expect(undone.players[0].checkouts).toBe(0);
+    expect(undone.players[0].highestFinish).toBe(0);
+    expect(undone.active).toBe(0); // back on the player whose correction won it
+
+    // The same snapshot backs 前のLegをやり直す, reached after the leg has been advanced past.
+    const rewound = resumePreviousLeg(advanceLeg(editP0ZeroTo41({ targetLegs: 0 })));
+    expect(rewound.leg).toBe(1);
+    expect(rewound.legResult).toBeNull();
+    expect(rewound.completed).toHaveLength(0);
+    expect(rewound.players[0].remaining).toBe(41);
+    expect(rewound.players[0].legs).toBe(0);
+  });
+
+  it('keeps every earlier leg intact when the correction wins leg 2', () => {
+    let state = createX01Match(baseSettings({ startScore: 121, targetLegs: 5 }));
+    state = applyVisit(state, 100); // P1 ton00 -> 21
+    state = applyVisit(state, 0); // P2
+    state = applyVisit(state, 21, 2); // P1 checks out leg 1 in 5 darts
+    state = advanceLeg(state);
+    expect(state.leg).toBe(2);
+    expect(state.legStarter).toBe(1);
+
+    state = applyVisit(state, 60); // P2's leg-2 visit -> 61
+    state = applyVisit(state, 21); // P1's leg-2 visit -> 100
+    state = editVisit(state, 1, 121, 3); // corrected into a 121 checkout (T20 T11 D14)
+
+    expect(state.legResult).toEqual({ winner: 0, darts: 3, reason: 'checkout' });
+    expect(state.completed).toHaveLength(2);
+    // Leg 1's contribution survives the leg-2 replay.
+    expect(state.players[0].legs).toBe(2);
+    expect(state.players[0].checkouts).toBe(2);
+    expect(state.players[0].finishDarts).toEqual([5, 3]);
+    // Leg 1's 100 and leg 2's 121 checkout: a checkout counts in its ton band here exactly as
+    // applyVisit() counts it.
+    expect(state.players[0].ton00Count).toBe(2);
+    expect(state.players[0].totalDarts).toBe(5 + 3);
+    expect(state.players[0].highestFinish).toBe(121);
+  });
+
+  it('replays a save written before `entered` existed, falling back to score', () => {
+    let state = createX01Match(checkout41());
+    state = applyVisit(state, 0);
+    state = applyVisit(state, 0);
+    // Exactly what an older build persisted: no `entered` key at all, no migration on load.
+    const legacy: X01MatchState = {
+      ...state,
+      visits: state.visits.map(({ entered: _entered, ...rest }) => rest),
+    };
+    const edited = editVisit(legacy, 0, 41, 2);
+    expect(edited.players[0].remaining).toBe(0);
+    expect(edited.legResult).toEqual({ winner: 0, darts: 2, reason: 'checkout' });
+  });
+
+  it('re-evaluates a previously busted visit from its entered score, not from 0', () => {
+    let state = createX01Match(baseSettings({ startScore: 100 }));
+    state = applyVisit(state, 40); // P1 -> 60
+    state = applyVisit(state, 0); // P2
+    state = applyVisit(state, 59); // P1: 60-59 leaves 1 -> bust, score recorded as 0
+    expect(state.visits[2]).toMatchObject({ score: 0, entered: 59, bust: true });
+
+    // 40 was really 41, so that visit was a 59 checkout all along.
+    state = editVisit(state, 0, 41, 3);
+    expect(state.visits).toHaveLength(3);
+    expect(state.visits[2]).toMatchObject({ score: 59, before: 59, after: 0, bust: false, checkout: true });
+    expect(state.players[0].remaining).toBe(0);
+    expect(state.legResult).toEqual({ winner: 0, darts: 6, reason: 'checkout' });
+    expect(state.players[0].highestFinish).toBe(59);
+  });
+
+  it('leaves a bust as a bust when the legacy shape cannot restore the entered score', () => {
+    let state = createX01Match(baseSettings({ startScore: 100 }));
+    state = applyVisit(state, 40);
+    state = applyVisit(state, 0);
+    state = applyVisit(state, 59); // bust
+    const legacy: X01MatchState = {
+      ...state,
+      visits: state.visits.map(({ entered: _entered, ...rest }) => rest),
+    };
+    const edited = editVisit(legacy, 0, 41, 3);
+    expect(edited.legResult).toBeNull(); // the lost 59 replays as the 0 it was stored as
+    expect(edited.players[0].remaining).toBe(59);
+    expect(edited.visits[2]).toMatchObject({ score: 0, before: 59, after: 59, bust: false });
+  });
+
+  it('is a no-op once the leg has already been decided', () => {
+    let state = createX01Match(checkout41());
+    state = applyVisit(state, 0);
+    state = applyVisit(state, 41, 2); // P2 wins the leg normally
+    expect(state.completed).toHaveLength(1);
+    expect(editVisit(state, 0, 20, 3)).toBe(state);
+  });
+});
+
 describe('resolveRoundLimit / declareDraw', () => {
   it('resolves a round-limit leg with a manually chosen winner', () => {
     let state = createX01Match(baseSettings({ mode: 'checkout', roundLimit: true, maxRounds: 1, checkoutMin: 100, checkoutMax: 100, targetLegs: 3 }));

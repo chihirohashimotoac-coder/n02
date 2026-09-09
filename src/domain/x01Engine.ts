@@ -1,5 +1,5 @@
 import { resolveVisit, InvalidVisitError } from './x01Core';
-import { isCheckoutPossible, isReachableScore } from './darts';
+import { isCheckoutPossible, isReachableScore, validFinishDartCounts } from './darts';
 import { simulateComVisit } from './comPlayer';
 
 export { InvalidVisitError };
@@ -22,7 +22,17 @@ export interface X01PlayerStats {
 
 export interface X01Visit {
   player: 0 | 1;
+  /** What the visit actually counted for: the entered score, or 0 when it busted. */
   score: number;
+  /**
+   * The score as the player entered it, kept even when the visit busted (where `score` is forced to
+   * 0). editVisit() replays the leg from these values, so a bust can be re-evaluated against a new
+   * remaining instead of silently replaying as a 0.
+   *
+   * Optional purely for backward compatibility: a match saved by an earlier build has no `entered`,
+   * and the replay falls back to `score` for those visits. Nothing migrates or discards old saves.
+   */
+  entered?: number;
   before: number;
   after: number;
   darts: number;
@@ -262,6 +272,7 @@ export function applyVisit(
   const visit: X01Visit = {
     player,
     score: resolution.bust ? 0 : enteredScore,
+    entered: enteredScore,
     before,
     after: resolution.after,
     darts,
@@ -422,9 +433,65 @@ export function resumePreviousLeg(state: X01MatchState): X01MatchState {
   };
 }
 
-/** Edits a past visit's score/darts in place and recomputes everything after it. */
+/**
+ * Resolves one visit of an editVisit() replay under the ordinary X01 rules.
+ *
+ * The only difference between the corrected visit and the ones after it is what happens when the
+ * declared finish count no longer fits the (possibly changed) remaining:
+ *
+ * - On the corrected visit the count is the player's own choice in the 修正 dialog, so an
+ *   impossible one is rejected outright rather than quietly replaced.
+ * - On a later visit the count was declared against a different remaining and the player is not
+ *   being asked about it, so it is nudged up to the nearest count that can actually finish. That is
+ *   always possible: validFinishDartCounts() ends in 3 whenever it is non-empty.
+ */
+function resolveReplayedVisit(
+  before: number,
+  entered: number,
+  declaredDarts: number,
+  isEditedVisit: boolean,
+): { after: number; bust: boolean; checkout: boolean; darts: number } {
+  const isFinishClaim = entered === before && before > 0;
+  if (!isFinishClaim) return resolveVisit(before, entered);
+
+  const counts = validFinishDartCounts(before);
+  if (counts.length === 0) {
+    throw new InvalidVisitError(
+      `残り${before}は上がれない数字のため、${entered}を上がりとして記録できません。`,
+    );
+  }
+  if (isEditedVisit && !counts.includes(declaredDarts)) {
+    throw new InvalidVisitError(
+      `残り${before}を${declaredDarts}本で上がることはできません。上がり本数は${counts.join('・')}本のいずれかを選んでください。`,
+    );
+  }
+  const finishDarts = isEditedVisit
+    ? declaredDarts
+    : (counts.find((count) => count >= declaredDarts) ?? counts[counts.length - 1]);
+  return resolveVisit(before, entered, finishDarts);
+}
+
+/**
+ * Edits a past visit of the CURRENT leg and replays the leg from its start under the ordinary rules.
+ *
+ * The replay is the whole point: a correction can turn a later visit into a bust, or turn any visit
+ * - the corrected one included - into the checkout that ends the leg. Rebuilding only the remaining
+ * numbers used to leave a checked-out leg half-finished (winner on 0, leg credited, but no Leg結果,
+ * no `completed` entry, and the throw handed to a player who could no longer play), so the replay
+ * now reproduces exactly the state applyVisit() would have produced had the corrected score been
+ * entered in the first place:
+ *
+ * - double-out and finish-count validity are decided by the shared resolveVisit()/darts.ts rules,
+ *   never by "the arithmetic happens to reach 0";
+ * - visits after a checkout are dropped, because they could not have been thrown;
+ * - legResult / completed / matchWinner / active / the undo snapshot are set exactly as a normally
+ *   entered checkout sets them, so 戻る, UNDO and 前のLegをやり直す all land on the throw before it.
+ */
 export function editVisit(state: X01MatchState, visitIndex: number, newScore: number, newDarts: number): X01MatchState {
   if (visitIndex < 0 || visitIndex >= state.visits.length) return state;
+  // A finished leg is shown behind its own dialog and has already been written into `completed`;
+  // replaying it here would append a second entry. Mirrors applyVisit()'s guard.
+  if (state.legResult !== null || state.matchWinner !== null) return state;
   if (!Number.isInteger(newScore) || newScore < 0 || newScore > 180 || !isReachableScore(newScore)) {
     throw new InvalidVisitError('修正する得点は0～180、使用ダーツは1～3本で指定してください。');
   }
@@ -439,45 +506,93 @@ export function editVisit(state: X01MatchState, visitIndex: number, newScore: nu
     { ...clone(state.legStartStats[1]), remaining: state.playerStartScores[1] },
   ];
   const legDarts: [number, number] = [0, 0];
-  const visits = clone(state.visits);
-  visits[visitIndex] = { ...visits[visitIndex], score: newScore, darts: newDarts };
+  const source = clone(state.visits);
+  source[visitIndex] = { ...source[visitIndex], score: newScore, entered: newScore, darts: newDarts };
 
   const rebuilt: X01Visit[] = [];
-  for (const v of visits) {
-    const before = players[v.player].remaining;
-    const bust = newScoreIsBust(before, v.score, visitIndex, rebuilt.length, visits);
-    const after = bust ? before : before - v.score;
-    const stats = players[v.player];
-    const scored = bust ? 0 : v.score;
-    stats.totalDarts += v.darts;
+  /** The core state as it stood just before the visit that checked out, for UNDO / 前のLeg. */
+  let beforeCheckout: X01CoreState | null = null;
+  let winner: 0 | 1 | null = null;
+
+  for (const [index, v] of source.entries()) {
+    const player = v.player;
+    const before = players[player].remaining;
+    // A save written before `entered` existed has only `score`, which is 0 for a bust. That loses
+    // nothing a rebuild from 0 did not already lose, and never throws.
+    const entered = v.entered ?? v.score;
+    const resolution = resolveReplayedVisit(before, entered, v.darts, index === visitIndex);
+    const darts = resolution.checkout ? resolution.darts : clampDarts(v.darts);
+
+    if (resolution.checkout) {
+      beforeCheckout = {
+        players: clone(players),
+        active: player,
+        leg: state.leg,
+        legStarter: state.legStarter,
+        startScore: state.startScore,
+        playerStartScores: clone(state.playerStartScores),
+        visits: clone(rebuilt),
+        legDarts: clone(legDarts),
+        legStartStats: clone(state.legStartStats),
+      };
+    }
+
+    const stats = players[player];
+    const scored = resolution.bust ? 0 : entered;
+    stats.totalDarts += darts;
     stats.totalScored += scored;
-    if (!bust) {
+    if (!resolution.bust) {
       if (scored >= 180) stats.ton80Count += 1;
       else if (scored >= 140) stats.ton40Count += 1;
       else if (scored >= 100) stats.ton00Count += 1;
     }
     if (stats.first9Darts < 9) {
       const room = 9 - stats.first9Darts;
-      const d = Math.min(room, v.darts);
+      const d = Math.min(room, darts);
       stats.first9Darts += d;
-      if (d === v.darts) stats.first9Score += scored;
+      if (d === darts) stats.first9Score += scored;
     }
-    stats.remaining = after;
-    legDarts[v.player] += v.darts;
-    if (after === 0 && !bust) {
+    stats.remaining = resolution.after;
+    legDarts[player] += darts;
+
+    rebuilt.push({
+      player,
+      score: scored,
+      entered,
+      before,
+      after: resolution.after,
+      darts,
+      bust: resolution.bust,
+      checkout: resolution.checkout,
+    });
+
+    if (resolution.checkout) {
       stats.legs += 1;
       stats.checkouts += 1;
-      stats.finishDarts = [...stats.finishDarts, legDarts[v.player]];
-      stats.highestFinish = Math.max(stats.highestFinish, v.score);
+      stats.finishDarts = [...stats.finishDarts, legDarts[player]];
+      stats.highestFinish = Math.max(stats.highestFinish, entered);
+      winner = player;
+      // Everything after this could not have been thrown: the leg was already over.
+      break;
     }
-    rebuilt.push({ ...v, before, after, bust });
   }
 
-  return { ...state, players, visits: rebuilt, legDarts, undo: [] };
-}
+  const base = { ...state, players, visits: rebuilt, legDarts };
+  if (winner === null || beforeCheckout === null) return { ...base, undo: [] };
 
-function newScoreIsBust(before: number, score: number, _editIndex: number, _rebuiltIndex: number, _all: X01Visit[]): boolean {
-  return score > before || before - score === 1;
+  const darts = legDarts[winner];
+  return {
+    ...base,
+    active: winner === 0 ? 1 : 0,
+    undo: [beforeCheckout],
+    completed: [
+      ...state.completed,
+      { winner, startScore: state.startScore, darts, reason: 'checkout', restore: beforeCheckout },
+    ],
+    legResult: { winner, darts, reason: 'checkout' },
+    matchWinner:
+      state.settings.targetLegs > 0 && players[winner].legs >= state.settings.targetLegs ? winner : null,
+  };
 }
 
 /** Swaps the two players' current-leg progress (a manual correction tool for mis-entered players). */
