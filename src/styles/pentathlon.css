@@ -1288,7 +1288,8 @@
 .pent-x01-shell .n01-score-table td.scored > button {
   color: var(--ink);
 }
-.pent-x01-shell .n01-score-table td.scored > button:hover {
+.pent-x01-shell .n01-score-table td.scored > button:hover,
+.pent-x01-shell .n01-score-table td.scored > button.selected {
   color: var(--green-dark);
 }
 

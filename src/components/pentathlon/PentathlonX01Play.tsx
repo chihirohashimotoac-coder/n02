@@ -68,6 +68,13 @@ export default function PentathlonX01Play({
   } | null>(null);
   const [editScore, setEditScore] = useState('');
   const [editDarts, setEditDarts] = useState(3);
+  /**
+   * The score cell the arrow keys are parked on, exactly as 通常01・チェックアウト練習 park theirs.
+   *
+   * A pair rather than an index: 通常01 keeps one interleaved visit list, whereas each Pentathlon
+   * player has their own, so a cell is only identified by both halves.
+   */
+  const [selected, setSelected] = useState<{ player: PlayerIndex; visitIndex: number } | null>(null);
   // Shown inside the edit dialog: the play screen's own error banner sits behind it, where a
   // rejected correction would go unread.
   const [editError, setEditError] = useState<string | null>(null);
@@ -80,6 +87,58 @@ export default function PentathlonX01Play({
   const activeState = current.progress[active].state as X01SoloState;
   const solo = session.playerCount === 1;
   const players: PlayerIndex[] = solo ? [0] : [0, 1];
+
+  /**
+   * Every played cell in table order, so the arrow keys can walk the score sheet. Each player's
+   * attempt is its own list here, and the visit index IS the round, so a row is simply that index
+   * across the players.
+   */
+  const navCells = useMemo(() => {
+    const columns: PlayerIndex[] = solo ? [0] : [0, 1];
+    const counts = columns.map(
+      (player) => (current.progress[player].state as X01SoloState).visits.length,
+    );
+    const cells: Array<{ player: PlayerIndex; visitIndex: number; row: number }> = [];
+    for (let row = 0; row < Math.max(0, ...counts); row += 1) {
+      columns.forEach((player, column) => {
+        if (row < counts[column]) cells.push({ player, visitIndex: row, row });
+      });
+    }
+    return cells;
+  }, [current.progress, solo]);
+
+  /**
+   * The parked cell, but only while it still exists. An UNDO or a correction that drops later
+   * visits can take the selected cell away underneath it; treating a stale pair as "nothing
+   * selected" keeps every digit going to the keypad rather than to a cell that is no longer there.
+   */
+  const activeSelection = useMemo(() => {
+    if (selected === null) return null;
+    const state = current.progress[selected.player].state as X01SoloState;
+    return state.visits[selected.visitIndex] !== undefined ? selected : null;
+  }, [current.progress, selected]);
+
+  /** Arrow keys walk the played cells; the first press parks on the most recent visit. */
+  const moveSelection = useCallback(
+    (key: string) => {
+      if (navCells.length === 0) return;
+      const last = navCells[navCells.length - 1];
+      setSelected((cell) => {
+        const from = cell === null ? null : navCells.find(
+          (candidate) => candidate.player === cell.player && candidate.visitIndex === cell.visitIndex,
+        );
+        if (!from) return { player: last.player, visitIndex: last.visitIndex };
+        const rowDelta = key === 'ArrowUp' ? -1 : key === 'ArrowDown' ? 1 : 0;
+        const playerDelta = key === 'ArrowLeft' ? -1 : key === 'ArrowRight' ? 1 : 0;
+        const target = navCells.find(
+          (candidate) =>
+            candidate.row === from.row + rowDelta && candidate.player === from.player + playerDelta,
+        );
+        return target ? { player: target.player, visitIndex: target.visitIndex } : cell;
+      });
+    },
+    [navCells],
+  );
 
   /**
    * Presents the award a just-committed visit earned, if any - the same six awards, the same
@@ -166,32 +225,159 @@ export default function PentathlonX01Play({
     [entry, submitVisit],
   );
 
-  // Only ever the gameplay screen's own shortcuts: any open PentathlonModal swallows keystrokes
-  // before they reach this listener, and drives its own buttons natively (Enter/Space on the
-  // focused control), so there is no dialog-specific branch here to fall out of sync.
+  const openFinishModal = useCallback(() => {
+    const counts = validFinishDartCounts(activeState.remaining);
+    if (counts.length === 0) {
+      onError(`残り${activeState.remaining}は上がれない数字のため、上がり申告できません。`);
+      return;
+    }
+    setPendingFinish(activeState.remaining);
+    setModal('finish-darts');
+  }, [activeState.remaining, onError]);
+
+  const closeFinishModal = useCallback(() => {
+    setModal('none');
+    setPendingFinish(null);
+  }, []);
+
+  /** Opens the past-score editor. `seedDigit` starts a fresh number, for type-over-a-selected-cell. */
+  const openEditor = useCallback(
+    (player: PlayerIndex, visitIndex: number, seedDigit?: string) => {
+      const state = current.progress[player].state as X01SoloState;
+      const visit = state.visits[visitIndex];
+      if (!visit) return;
+      // Everything before the edited visit is untouched, so the score it was thrown at is exact.
+      const remainingBefore = state.visits
+        .slice(0, visitIndex)
+        .reduce((left, earlier) => left - earlier.score, state.startScore);
+      setSelected({ player, visitIndex });
+      setEdit({ player, visitIndex, remainingBefore });
+      setEditScore(seedDigit ?? String(visit.entered ?? visit.score));
+      setEditDarts(visit.darts);
+      setEditError(null);
+      setModal('edit');
+    },
+    [current.progress],
+  );
+
+  /**
+   * Leaves the past-score editor, whether the correction was committed or abandoned.
+   *
+   * Unparking the cell is the point, and the same fix 通常01・チェックアウト練習 carry: openEditor
+   * parks the arrow-key selection on the cell being corrected, and while a cell is parked every
+   * digit is routed into a correction of THAT cell instead of the keypad.
+   */
+  const closeEditor = useCallback(() => {
+    setModal('none');
+    setEdit(null);
+    setEditError(null);
+    setSelected(null);
+  }, []);
+
+  /*
+   * The gameplay keyboard, deliberately the same one 通常01・チェックアウト練習 answer to. Any open
+   * PentathlonModal swallows keystrokes in the capture phase before this listener runs, and drives
+   * its own buttons natively, so there is no dialog-specific branch here to fall out of sync.
+   *
+   * Not mapped, and not an oversight: 通常01's <kbd>+</kbd> / <kbd>-</kbd> 使用ダーツ. A Pentathlon
+   * X01 attempt is SCORED in darts - getResult() ranks by the dart count - so letting a visit
+   * declare fewer than three would not adjust a statistic, it would change who wins the discipline.
+   * The one visit where the count is real, the checkout, already asks for it in its own dialog.
+   */
   useEffect(() => {
     if (modal !== 'none') return;
     const handler = (event: KeyboardEvent) => {
-      if (event.key >= '0' && event.key <= '9') {
+      // Never act on the Enter that merely commits an IME conversion, and never let a held key
+      // repeat-fire an action (a held U would otherwise unwind the whole attempt).
+      if (event.isComposing || event.keyCode === 229 || event.repeat) return;
+
+      // Never steal a key from a real text field, and leave a focused button its native
+      // Enter/Space/Tab activation - otherwise Enter on the ☰ button would open the menu AND
+      // commit the score sitting in the entry.
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target?.tagName ?? '')) return;
+      if (target?.tagName === 'BUTTON' && ['Enter', ' ', 'Tab'].includes(event.key)) return;
+
+      if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
-        pressKey(event.key);
-      } else if (event.key === 'Enter') {
-        event.preventDefault();
-        pressKey('enter');
-      } else if (event.key === 'Backspace') {
-        event.preventDefault();
-        if (entry.length > 0) pressKey('delete');
-      } else if (event.key === 'Escape') {
-        event.preventDefault();
-        setEntry('');
-      } else if (event.key.toLowerCase() === 'u') {
-        event.preventDefault();
-        onUndoRound();
+        // Typing over a selected past cell starts correcting it, rather than feeding the keypad.
+        if (activeSelection !== null) openEditor(activeSelection.player, activeSelection.visitIndex, event.key);
+        else pressKey(event.key);
+        return;
+      }
+
+      switch (event.key) {
+        case 'Enter':
+        case 'Tab':
+          event.preventDefault();
+          if (activeSelection !== null) openEditor(activeSelection.player, activeSelection.visitIndex);
+          else pressKey('enter');
+          break;
+        case 'Backspace':
+        case 'Delete':
+          event.preventDefault();
+          if (activeSelection !== null) setSelected(null);
+          else if (entry.length > 0) pressKey('delete');
+          break;
+        case 'Escape':
+          event.preventDefault();
+          if (activeSelection !== null) setSelected(null);
+          else setEntry('');
+          break;
+        case 'ArrowLeft':
+        case 'ArrowRight':
+        case 'ArrowUp':
+        case 'ArrowDown':
+          event.preventDefault();
+          moveSelection(event.key);
+          break;
+        default:
+          switch (event.key.toLowerCase()) {
+            case 'f':
+              event.preventDefault();
+              openFinishModal();
+              break;
+            case 'm':
+              event.preventDefault();
+              setModal('menu');
+              break;
+            case 'n':
+              // 通常01's N abandons the match outright. Here it is the footer's 中断: the session
+              // is saved and can be resumed from the menu, so a stray press costs nothing.
+              event.preventDefault();
+              onExit();
+              break;
+            case 's':
+              event.preventDefault();
+              setModal('stats');
+              break;
+            case 'u':
+              event.preventDefault();
+              onUndoRound();
+              break;
+            case 'r': {
+              event.preventDefault();
+              const cell = activeSelection ?? navCells[navCells.length - 1];
+              if (cell) openEditor(cell.player, cell.visitIndex);
+              break;
+            }
+          }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [entry, modal, onUndoRound, pressKey]);
+  }, [
+    activeSelection,
+    entry,
+    modal,
+    moveSelection,
+    navCells,
+    onExit,
+    onUndoRound,
+    openEditor,
+    openFinishModal,
+    pressKey,
+  ]);
 
   const rows = useMemo(() => buildRows(current.progress, active, solo), [current.progress, active, solo]);
 
@@ -209,30 +395,27 @@ export default function PentathlonX01Play({
   const editFinishCounts = isEditFinish ? validFinishDartCounts(edit.remainingBefore) : [];
   const editEffectiveDarts = editFinishCounts.includes(editDarts) ? editDarts : (editFinishCounts[0] ?? 3);
 
-  const openFinishModal = () => {
-    const counts = validFinishDartCounts(activeState.remaining);
-    if (counts.length === 0) {
-      onError(`残り${activeState.remaining}は上がれない数字のため、上がり申告できません。`);
-      return;
-    }
-    setPendingFinish(activeState.remaining);
-    setModal('finish-darts');
-  };
-
-  const openEditor = (player: PlayerIndex, visitIndex: number) => {
-    const state = current.progress[player].state as X01SoloState;
-    const visit = state.visits[visitIndex];
-    if (!visit) return;
-    // Everything before the edited visit is untouched, so the score it was thrown at is exact.
-    const remainingBefore = state.visits
-      .slice(0, visitIndex)
-      .reduce((left, earlier) => left - earlier.score, state.startScore);
-    setEdit({ player, visitIndex, remainingBefore });
-    setEditScore(String(visit.entered ?? visit.score));
-    setEditDarts(visit.darts);
-    setEditError(null);
-    setModal('edit');
-  };
+  /**
+   * Applies the correction, on Enter in the field or on the 修正して再計算 button - the same two
+   * routes 通常01・チェックアウト練習 offer.
+   *
+   * The dart count is passed in rather than read from the render body: it only means anything on a
+   * correction that finishes, and both call sites already have it in hand.
+   */
+  const commitEdit = useCallback(
+    (darts: number) => {
+      if (edit === null) return;
+      try {
+        onEditVisit(edit.player, edit.visitIndex, Number(editScore), darts);
+        closeEditor();
+        onError(null);
+      } catch (caught) {
+        if (caught instanceof InvalidVisitError) setEditError(caught.message);
+        else throw caught;
+      }
+    },
+    [closeEditor, edit, editScore, onEditVisit, onError],
+  );
 
   const positionLabel = isSingleGameSession(session)
     ? '個別練習'
@@ -299,6 +482,7 @@ export default function PentathlonX01Play({
                     cell={row.cells[0]}
                     isCurrent={active === 0 && row.isCurrentRow}
                     entry={entry}
+                    selected={activeSelection?.player === 0 ? activeSelection.visitIndex : null}
                     onSelect={(visitIndex) => openEditor(0, visitIndex)}
                   />
                   <td className="to-go">{toGo(row, 0, active, current.progress)}</td>
@@ -308,6 +492,7 @@ export default function PentathlonX01Play({
                       cell={row.cells[1]}
                       isCurrent={active === 1 && row.isCurrentRow}
                       entry={entry}
+                      selected={activeSelection?.player === 1 ? activeSelection.visitIndex : null}
                       onSelect={(visitIndex) => openEditor(1, visitIndex)}
                     />
                   )}
@@ -380,15 +565,16 @@ export default function PentathlonX01Play({
         <PentathlonModal
           label="上がり本数を選択"
           variant="menu-list"
-          onClose={() => {
-            setModal('none');
-            setPendingFinish(null);
-          }}
+          returnFocusTo={scrollRef}
+          onClose={closeFinishModal}
           onKeyDown={(event) => {
             const digit = Number(event.key);
             if (finishCounts.includes(digit)) {
               event.preventDefault();
               submitVisit(String(pendingFinish), digit);
+            } else if (event.key === 'Backspace') {
+              event.preventDefault();
+              closeFinishModal();
             }
           }}
         >
@@ -401,20 +587,40 @@ export default function PentathlonX01Play({
           <p>
             残り{activeState.remaining}は最短{finishCounts[0]}本で上がれます。ボタンまたは数字キーで選択してください。
           </p>
-          <button
-            type="button"
-            onClick={() => {
-              setModal('none');
-              setPendingFinish(null);
-            }}
-          >
+          <button type="button" onClick={closeFinishModal}>
             戻る
           </button>
         </PentathlonModal>
       )}
 
       {modal === 'menu' && (
-        <PentathlonModal label="ゲームメニュー" variant="menu-list" onClose={() => setModal('none')}>
+        <PentathlonModal
+          label="ゲームメニュー"
+          variant="menu-list"
+          returnFocusTo={scrollRef}
+          onClose={() => setModal('none')}
+          onKeyDown={(event) => {
+            if (event.key === '1' && canUndoRound) {
+              event.preventDefault();
+              onUndoRound();
+              setModal('none');
+            } else if (event.key === '2') {
+              event.preventDefault();
+              setModal('rules');
+            } else if (event.key === '3') {
+              event.preventDefault();
+              setModal('none');
+              onExit();
+            } else if (event.key.toLowerCase() === 'a') {
+              event.preventDefault();
+              onToggleAwards();
+              setModal('none');
+            } else if (event.key === 'Backspace') {
+              event.preventDefault();
+              setModal('none');
+            }
+          }}
+        >
           <h2>メニュー</h2>
           <button
             type="button"
@@ -424,10 +630,10 @@ export default function PentathlonX01Play({
               setModal('none');
             }}
           >
-            前の確定ラウンドに戻す
+            <kbd>1</kbd>{'　'}前の確定ラウンドに戻す
           </button>
           <button type="button" onClick={() => setModal('rules')}>
-            ルール説明
+            <kbd>2</kbd>{'　'}ルール説明
           </button>
           <button
             type="button"
@@ -437,7 +643,7 @@ export default function PentathlonX01Play({
               setModal('none');
             }}
           >
-            アワード表示：{awardsEnabled ? 'ON' : 'OFF'}
+            <kbd>A</kbd>{'　'}アワード表示：{awardsEnabled ? 'ON' : 'OFF'}
           </button>
           <button
             type="button"
@@ -446,12 +652,48 @@ export default function PentathlonX01Play({
               onExit();
             }}
           >
-            中断してメニューへ
+            <kbd>3</kbd>{'　'}中断してメニューへ
           </button>
-          <p>
-            キーボード：<kbd>0</kbd>–<kbd>9</kbd> 得点入力・<kbd>Enter</kbd> 確定・
-            <kbd>Backspace</kbd> 1文字削除・<kbd>U</kbd> 前の確定ラウンドに戻す
-          </p>
+          {/* The same list 通常01・チェックアウト練習 show, minus the one key that cannot exist here:
+              使用ダーツ is the discipline's own result metric, not a per-visit statistic. */}
+          <div className="keyboard-help" aria-label="キーボード操作">
+            <span>
+              <kbd>0–9</kbd>入力
+            </span>
+            <span>
+              <kbd>Enter / Tab</kbd>確定
+            </span>
+            <span>
+              <kbd>BackSpace / Delete</kbd>1文字削除
+            </span>
+            <span>
+              <kbd>ESC</kbd>クリア・戻る
+            </span>
+            <span>
+              <kbd>U</kbd>前の確定ラウンドに戻す
+            </span>
+            <span>
+              <kbd>矢印</kbd>履歴
+            </span>
+            <span>
+              <kbd>R</kbd>選択中を修正
+            </span>
+            <span>
+              <kbd>F</kbd>Finish
+            </span>
+            <span>
+              <kbd>M</kbd>メニュー
+            </span>
+            <span>
+              <kbd>S</kbd>Stats
+            </span>
+            <span>
+              <kbd>N</kbd>中断
+            </span>
+            <span>
+              <kbd>A</kbd>アワード表示
+            </span>
+          </div>
           <button type="button" onClick={() => setModal('none')}>
             戻る
           </button>
@@ -472,13 +714,7 @@ export default function PentathlonX01Play({
       )}
 
       {modal === 'edit' && edit !== null && (
-        <PentathlonModal
-          label="過去得点の修正"
-          onClose={() => {
-            setModal('none');
-            setEdit(null);
-          }}
-        >
+        <PentathlonModal label="過去得点の修正" returnFocusTo={scrollRef} onClose={closeEditor}>
           <h2>過去得点を修正</h2>
           <p className="pent-edit-target">
             {session.names[edit.player]}・{edit.visitIndex + 1} ラウンド目
@@ -488,8 +724,19 @@ export default function PentathlonX01Play({
             <input
               type="number"
               inputMode="numeric"
+              autoFocus
               value={editScore}
               onChange={(event) => setEditScore(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitEdit(editEffectiveDarts);
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  closeEditor();
+                }
+              }}
             />
           </label>
           {/*
@@ -528,36 +775,28 @@ export default function PentathlonX01Play({
           <button
             type="button"
             className="n01-modal-primary"
-            onClick={() => {
-              try {
-                onEditVisit(edit.player, edit.visitIndex, Number(editScore), editEffectiveDarts);
-                setModal('none');
-                setEdit(null);
-                setEditError(null);
-                onError(null);
-              } catch (caught) {
-                if (caught instanceof InvalidVisitError) setEditError(caught.message);
-                else throw caught;
-              }
-            }}
+            onClick={() => commitEdit(editEffectiveDarts)}
           >
             修正して再計算
           </button>
-          <button
-            type="button"
-            className="n01-modal-cancel"
-            onClick={() => {
-              setModal('none');
-              setEdit(null);
-            }}
-          >
+          <button type="button" className="n01-modal-cancel" onClick={closeEditor}>
             キャンセル
           </button>
         </PentathlonModal>
       )}
 
       {modal === 'stats' && (
-        <PentathlonModal label="この種目の成績" onClose={() => setModal('none')}>
+        <PentathlonModal
+          label="この種目の成績"
+          returnFocusTo={scrollRef}
+          onClose={() => setModal('none')}
+          onKeyDown={(event) => {
+            if (event.key === 'Backspace') {
+              event.preventDefault();
+              setModal('none');
+            }
+          }}
+        >
           <h2>{engine.meta.name} 成績</h2>
           <div className={`n01-stats-table ${solo ? 'solo' : ''}`}>
             <div className="n01-stats-head">
@@ -696,18 +935,26 @@ function ScoreCell({
   cell,
   isCurrent,
   entry,
+  selected,
   onSelect,
 }: {
   cell: RowCell | null;
   isCurrent: boolean;
   entry: string;
+  /** The visit index this player's arrow-key selection is parked on, if any. */
+  selected: number | null;
   onSelect: (visitIndex: number) => void;
 }) {
   if (cell) {
     const display = cell.bust ? 'BUST' : String(cell.score);
     return (
       <td className="scored">
-        <button type="button" onClick={() => onSelect(cell.visitIndex)} aria-label={`${display} を修正`}>
+        <button
+          type="button"
+          className={selected === cell.visitIndex ? 'selected' : ''}
+          onClick={() => onSelect(cell.visitIndex)}
+          aria-label={`${display} を修正`}
+        >
           {cell.score >= 100 && !cell.bust ? <span className="ton-score">{display}</span> : display}
         </button>
       </td>

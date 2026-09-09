@@ -211,8 +211,10 @@ test.describe('layout: Pentathlon X01 input', () => {
     await startSinglePentathlonX01(page);
     await page.getByRole('button', { name: 'メニュー' }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('Enter');
-    await expect(dialog).toContainText('Backspace');
+    // The same list 通常01・チェックアウト練習 carry, now that the screens answer to the same keys.
+    for (const shortcut of ['Enter / Tab', 'BackSpace / Delete', 'ESC', '矢印', 'R', 'F', 'M', 'S']) {
+      await expect(dialog).toContainText(shortcut);
+    }
   });
 });
 

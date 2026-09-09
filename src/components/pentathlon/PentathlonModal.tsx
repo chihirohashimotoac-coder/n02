@@ -1,9 +1,16 @@
-import { useRef, type ReactNode } from 'react';
+import { useRef, type ReactNode, type RefObject } from 'react';
 import { useDialogFocus } from '../common/useDialogFocus';
 
 interface Props {
   label: string;
   onClose: () => void;
+  /**
+   * Where focus goes on close, when the trigger is the wrong answer - the score sheet, on the
+   * gameplay screens. See useDialogFocus: with a focused button keeping its native Enter, parking
+   * focus back on ☰ or on a score cell turns the next Enter into "open that dialog again" instead
+   * of "commit the score".
+   */
+  returnFocusTo?: RefObject<HTMLElement | null>;
   /**
    * Keys this dialog itself acts on (e.g. the finish-darts dialog's 1/2/3). Called before the
    * keystroke is swallowed, so gameplay behind the dialog still never sees it.
@@ -31,11 +38,12 @@ export default function PentathlonModal({
   label,
   onClose,
   onKeyDown,
+  returnFocusTo,
   variant = 'default',
   children,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
-  useDialogFocus({ cardRef, onClose, onKeyDown });
+  useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo });
 
   return (
     <div className="n01-modal-backdrop pent-modal-backdrop" onClick={onClose}>
