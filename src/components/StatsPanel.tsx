@@ -1,15 +1,21 @@
 import { useMemo } from 'react';
-import { clearHistory, type HistoryEntry } from '../storage/matchStorage';
+import { clearHistory, HISTORY_LIMIT, type HistoryEntry } from '../storage/matchStorage';
 
 interface Props {
   history: HistoryEntry[];
   onReset: () => void;
 }
 
+/**
+ * How many recent checkouts the 平均ダーツ figure averages over. Only that one number uses a
+ * window; every other figure on this panel is computed from the whole stored history.
+ */
+const AVERAGE_WINDOW = 10;
+
 export default function StatsPanel({ history, onReset }: Props) {
   const stats = useMemo(() => {
     const checkouts = history.filter((entry) => entry.reason === 'checkout');
-    const recent = checkouts.slice(0, 10);
+    const recent = checkouts.slice(0, AVERAGE_WINDOW);
     const averageDarts =
       recent.length > 0 ? recent.reduce((sum, entry) => sum + entry.darts, 0) / recent.length : null;
     const bestDarts = checkouts.length > 0 ? Math.min(...checkouts.map((entry) => entry.darts)) : null;
@@ -37,7 +43,7 @@ export default function StatsPanel({ history, onReset }: Props) {
           <p className="eyebrow">RECENT FORM</p>
           <h2>直近の成績</h2>
         </div>
-        <span>直近10 Leg</span>
+        <span>保存分 最大{HISTORY_LIMIT} Leg</span>
       </div>
 
       <article className="metric-card">
@@ -50,7 +56,7 @@ export default function StatsPanel({ history, onReset }: Props) {
             {stats.completed}
             <small>Leg</small>
           </strong>
-          <span>この端末に保存された直近の記録</span>
+          <span>保存されている全記録の合計</span>
         </div>
       </article>
 
@@ -64,7 +70,7 @@ export default function StatsPanel({ history, onReset }: Props) {
             {stats.averageDarts !== null ? stats.averageDarts.toFixed(1) : '—'}
             <small>本</small>
           </strong>
-          <span>チェックアウト完了までに使用</span>
+          <span>直近{AVERAGE_WINDOW}回のチェックアウトの平均</span>
         </div>
       </article>
 

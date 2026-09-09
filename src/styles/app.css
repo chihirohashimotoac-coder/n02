@@ -1,9 +1,26 @@
+/*
+ * n02 design tokens.
+ *
+ * The palette below (--canvas ... --shadow) is the pre-existing set and is NOT renamed: every rule
+ * that already used it keeps working, and the theme blocks at the bottom of this file keep
+ * overriding exactly what they always did. Everything after it is added, and every added token is
+ * defined as the value that was already in use at the places it replaces - so introducing them
+ * changes no pixel. They exist so the screens can be made to agree with each other without each
+ * one re-inventing its own spacing scale, radius or button treatment.
+ *
+ * Scope note: --cu-* (COUNT-UP amber) stays in practice.css and stays PRACTICE-only. It is that
+ * mode's accent, not the product's; nothing outside PRACTICE should reach for it.
+ */
 :root {
+  /* ---- palette (pre-existing; also the theme override surface) */
   --canvas: #f5f4ef;
   --surface: #fff;
   --surface-soft: #f0f3ee;
   --ink: #171a18;
-  --muted: #69716c;
+  /* Nudged from #69716c: that cleared 4.5:1 on white but only reached 4.49 on --surface-soft and
+     4.22 on the score sheet's header fill, so every small label on a tinted surface sat just under
+     AA. This value clears 4.5:1 on all four surfaces it is used over. */
+  --muted: #646c67;
   --line: #d9ddd7;
   --green: #0d503a;
   --green-dark: #083c2c;
@@ -11,6 +28,119 @@
   --amber: #a96505;
   --danger: #a43a32;
   --shadow: 0 18px 50px #19241e12;
+
+  /* ---- semantic roles
+     Named by what they mean, so a screen asks for "the colour of a heading" rather than for green.
+     Each is an alias of the palette above, so themes keep working through one indirection. */
+  --brand: var(--green);
+  --brand-strong: var(--green-dark);
+  --brand-soft: var(--green-soft);
+  --text: var(--ink);
+  --text-muted: var(--muted);
+  --text-on-brand: #fff;
+  /* The brand colour has to do two different jobs, and one value cannot do both in a dark theme:
+     --accent-text is brand-coloured TEXT drawn on a surface, --accent-fill is a brand-coloured
+     FILL with --on-accent-fill written on it. They coincide in the light themes and part company
+     in neon, where the fill has to stay dark enough to carry white while the text has to lift off
+     a near-black panel. */
+  --accent-text: var(--green);
+  --accent-fill: var(--green);
+  --on-accent-fill: #fff;
+  /* An inset panel inside a card (the per-player block on the setup screens). Themed, so it can
+     never strand a light box inside a dark theme. */
+  --panel-inset: #ffffff94;
+  /* A card that sits directly on the canvas (Pentathlon's preset cards and player panels), as
+     opposed to --panel-inset, which is a block inside an existing panel. Both are themed so a card
+     can never be left as a light box in a dark theme. */
+  --panel-card: #ffffffb8;
+  --border: var(--line);
+  --warning: var(--amber);
+  --negative: var(--danger);
+
+  /* ---- spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 26px;
+  --space-7: 34px;
+  --space-8: 44px;
+
+  /* ---- radius */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+
+  /* ---- elevation */
+  --shadow-card: var(--shadow);
+  --shadow-raised: 0 8px 24px #19241e14;
+  --shadow-overlay: 0 24px 70px #000000a6;
+  --shadow-footer: 0 -8px 30px #19241e14;
+
+  /* ---- borders */
+  --border-hairline: 1px solid var(--line);
+  --border-strong: 2px solid var(--green-dark);
+
+  /* ---- focus
+     One ring, used everywhere, so "what has focus" never has to be guessed at. */
+  --focus-ring: 3px solid #0d503a40;
+  --focus-ring-strong: 3px solid var(--green);
+  --focus-offset: 2px;
+
+  /* ---- typography
+     Numbers are tabular everywhere they are compared down a column: score sheets, remaining
+     scores, totals, stats tables. --font-num is the one place that decides it. */
+  --font-ui:
+    'Noto Sans JP', 'Yu Gothic UI', system-ui, -apple-system, sans-serif;
+  --font-num: var(--font-ui);
+  --numeric: tabular-nums;
+  --weight-regular: 400;
+  --weight-medium: 650;
+  --weight-bold: 700;
+  --weight-heavy: 800;
+  --weight-black: 900;
+
+  /* ---- controls
+     44px is the minimum comfortable touch target and the floor for every tappable control. */
+  --control-min: 44px;
+  --control-radius: var(--radius-md);
+
+  /* ---- gameplay surfaces */
+  --panel-bg: #ffffffc7;
+  --sheet-bg: #fff;
+  --sheet-line: #cfd4d0;
+  --sheet-head-bg: #e9ece8;
+  /* Behind the score sheet: shows through the scrollbar gutter and under the hint line. */
+  --sheet-gutter: #f7f7f3;
+  --history-alt-bg: #fbfbf8;
+  --player-active-bg: #dff36d;
+  --player-active-ink: #083c2c;
+  --player-active-edge: #a8cc1d;
+  /* The live entry cell. Green - the colour of input throughout the app - so it never competes
+     with the lime that means "whose throw it is". */
+  --entry-bg: #eaf6ee;
+  --entry-edge: var(--green);
+  --entry-ink: var(--green-dark);
+  /* The 1st-round starter-pick gesture keeps the amber it always had: it is a one-off prompt, not
+     an input state, and it must stay visibly different from the live entry cell beside it. */
+  --pick-bg: #fff8bb;
+  --pick-edge: #e5c928;
+
+  /* ---- modal / overlay */
+  --modal-scrim: #09120d8f;
+  --modal-blur: 6px;
+  --modal-radius: var(--radius-xl);
+
+  /* ---- award presentation
+     Shared by COUNT-UP, 通常01 and チェックアウト練習 so one award looks the same in every mode. */
+  --award-duration: 3000ms;
+  --award-radius: 20px;
+  --award-z: 70;
+  --award-ink: #fff;
+  --award-sub: #ffd489;
 }
 * {
   box-sizing: border-box;
@@ -23,8 +153,7 @@ body {
     radial-gradient(circle at 10% -10%, #0d503a0d, transparent 34%),
     var(--canvas);
   color: var(--ink);
-  font-family:
-    "Noto Sans JP", "Yu Gothic UI", system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ui);
   margin: 0;
 }
 button,
@@ -38,8 +167,8 @@ button {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline-offset: 2px;
-  outline: 3px solid #0d503a40;
+  outline-offset: var(--focus-offset);
+  outline: var(--focus-ring);
 }
 .loading-screen {
   min-height: 100vh;
@@ -116,7 +245,7 @@ select:focus-visible {
 .panel {
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
-  background: #ffffffc7;
+  background: var(--panel-bg);
   border-radius: 18px;
 }
 .setup-layout {
@@ -160,7 +289,7 @@ select:focus-visible {
 }
 .status-chip {
   background: var(--green-soft);
-  color: var(--green);
+  color: var(--accent-text);
   border: 1px solid #cfd8d1;
   border-radius: 999px;
   padding: 7px 11px;
@@ -226,8 +355,8 @@ select:focus-visible {
   color: var(--muted);
 }
 .checkmark {
-  background: var(--green);
-  color: #fff;
+  background: var(--accent-fill);
+  color: var(--on-accent-fill);
   border-radius: 50%;
   place-items: center;
   width: 28px;
@@ -327,7 +456,7 @@ select:focus-visible {
 }
 .player-config {
   border: 1px solid var(--line);
-  background: #ffffff94;
+  background: var(--panel-inset);
   border-radius: 14px;
   align-content: start;
   gap: 12px;
@@ -350,7 +479,7 @@ select:focus-visible {
   display: flex;
 }
 .name-input i {
-  color: #9aa19d;
+  color: var(--muted);
   font-size: 11px;
   font-style: normal;
 }
@@ -432,7 +561,7 @@ select:focus-visible {
   background: var(--green-soft);
   width: 48px;
   height: 48px;
-  color: var(--green);
+  color: var(--accent-text);
   border-radius: 50%;
   flex: none;
   place-items: center;
@@ -445,8 +574,8 @@ select:focus-visible {
   font-weight: 700;
 }
 .metric-card strong {
-  color: var(--green-dark);
-  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
+  font-variant-numeric: var(--numeric);
   font-size: 40px;
   line-height: 1.1;
   display: block;
@@ -499,7 +628,7 @@ select:focus-visible {
   background: var(--green-soft);
   width: 24px;
   height: 24px;
-  color: var(--green);
+  color: var(--accent-text);
   border-radius: 50%;
   place-items: center;
   font-weight: 800;
@@ -557,7 +686,7 @@ select:focus-visible {
 }
 .leg-score strong {
   color: var(--green);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 25px;
 }
 .leg-score i {
@@ -623,7 +752,7 @@ select:focus-visible {
 .remaining {
   text-align: center;
   letter-spacing: -0.06em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   margin-top: 26px;
   font-size: clamp(72px, 8vw, 116px);
   line-height: 0.95;
@@ -724,7 +853,7 @@ select:focus-visible {
   height: 82px;
   color: var(--green-dark);
   text-align: center;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   background: #fff;
   border-radius: 12px;
   font-size: 48px;
@@ -825,7 +954,7 @@ select:focus-visible {
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   background: #f7f7f4;
-  border: 1px solid #cfd4d0;
+  border: 1px solid var(--sheet-line);
   border-bottom-width: 2px;
   border-radius: 4px;
   padding: 2px 5px;
@@ -973,7 +1102,7 @@ select:focus-visible {
   color: var(--green-dark);
 }
 .round-history-row button strong {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 15px;
 }
 .round-history-row button small {
@@ -1204,8 +1333,8 @@ select:focus-visible {
 .n01-player-name.active {
   opacity: 1;
   color: #083c2c;
-  background: #dff36d;
-  box-shadow: inset 0 -5px #a8cc1d;
+  background: var(--player-active-bg);
+  box-shadow: inset 0 -5px var(--player-active-edge);
 }
 .n01-player-name span {
   border: 1px solid #ffffff47;
@@ -1243,15 +1372,16 @@ select:focus-visible {
 }
 .n01-leg-center small {
   letter-spacing: 0.14em;
-  opacity: 0.72;
+  /* Was 0.72, which left this label at 4.24:1 on the neon header. */
+  opacity: 0.85;
   font-size: 11px;
 }
 .n01-leg-center strong {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 30px;
 }
 .n01-score-area {
-  background: #f7f7f3;
+  background: var(--sheet-gutter);
   flex-direction: column;
   display: flex;
   position: absolute;
@@ -1272,7 +1402,7 @@ select:focus-visible {
   display: grid;
 }
 .n01-game-meta strong {
-  color: var(--green);
+  color: var(--accent-text);
   text-align: center;
   font-size: 15px;
 }
@@ -1303,29 +1433,39 @@ select:focus-visible {
   overflow-y: auto;
 }
 .n01-score-scroll:focus-visible {
-  outline: 3px solid var(--green);
+  outline: var(--focus-ring-strong);
   outline-offset: -3px;
 }
 .n01-score-table {
-  border-collapse: collapse;
+  /* `separate`, so a scrolled row can never paint over the sticky header - the same fix COUNT-UP's
+     sheet already carries. Cells now hold only their right and bottom edge, so the sheet reads as
+     ruled lines rather than a grid of boxed cells. */
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
   text-align: center;
-  background: #fff;
+  background: var(--sheet-bg);
   width: 100%;
 }
 .n01-score-table th {
   height: 44px;
   color: var(--muted);
-  background: #e9ece8;
-  border: 1px solid #cfd4d0;
-  font-size: 13px;
-  font-weight: 700;
+  background: var(--sheet-head-bg);
+  border: 0;
+  border-right: 1px solid var(--sheet-line);
+  border-bottom: 1px solid var(--sheet-line);
+  font-size: 12px;
+  font-weight: var(--weight-heavy);
+  letter-spacing: 0.08em;
+}
+.n01-score-table th:last-child {
+  border-right: 0;
 }
 .n01-score-table thead th {
   z-index: 2;
   position: sticky;
   top: 0;
-  box-shadow: inset 0 -1px #cfd4d0;
+  box-shadow: inset 0 -1px var(--sheet-line);
 }
 .n01-score-table th:first-child,
 .n01-score-table th:nth-child(4) {
@@ -1340,17 +1480,25 @@ select:focus-visible {
 }
 .n01-score-table td {
   vertical-align: middle;
-  font-variant-numeric: tabular-nums;
-  border: 1px solid #cfd4d0;
+  font-variant-numeric: var(--numeric);
+  border: 0;
+  border-right: 1px solid var(--sheet-line);
+  border-bottom: 1px solid var(--sheet-line);
   height: clamp(110px, 15vh, 150px);
 }
+.n01-score-table td:last-child {
+  border-right: 0;
+}
 .n01-score-table td.scored {
-  background: #fff;
+  background: var(--sheet-bg);
   padding: 0;
 }
 .n01-score-table td.scored.current {
-  background: #fff8bb;
-  box-shadow: inset 0 0 0 3px #e5c928;
+  background: var(--entry-bg);
+  box-shadow: inset 0 0 0 3px var(--entry-edge);
+}
+.n01-score-table td.scored.current input {
+  color: var(--entry-ink);
 }
 .n01-score-table td.scored button {
   cursor: pointer;
@@ -1373,11 +1521,11 @@ select:focus-visible {
 .n01-score-table td.scored button.starter-picker:hover,
 .n01-score-table td.scored button.starter-picker:focus-visible {
   color: var(--ink);
-  background: #fff8bb;
-  box-shadow: inset 0 0 0 3px #e5c928;
+  background: var(--pick-bg);
+  box-shadow: inset 0 0 0 3px var(--pick-edge);
 }
 .n01-score-table td.scored > span {
-  color: #a8aeaa;
+  color: var(--muted);
   font-size: 26px;
 }
 .n01-score-table td.scored input {
@@ -1392,32 +1540,29 @@ select:focus-visible {
   font-weight: 700;
 }
 .n01-score-table td.to-go {
-  background: #fbfbf8;
-  font-size: clamp(44px, 6vw, 80px);
-  font-weight: 700;
+  background: var(--history-alt-bg);
+  color: var(--muted);
+  /* 残り点数 > 入力中得点 > active player > round履歴 > 補助stats. The per-round 残り was set
+     LARGER than the score that produced it, which put a supporting number above the headline one.
+     The two are peers now, and the footer's live remaining is unmistakably the biggest thing. */
+  font-size: clamp(34px, 4.4vw, 58px);
+  font-weight: var(--weight-medium);
 }
 .n01-score-table td.darts {
   color: var(--muted);
-  background: #e9ece8;
-  font-size: clamp(28px, 4vw, 50px);
-  font-weight: 650;
-}
-.n01-table-hint {
-  text-align: center;
-  color: var(--muted);
-  flex: none;
-  margin: 0;
-  padding: 12px 18px;
-  font-size: 11px;
+  background: var(--sheet-head-bg);
+  /* A scale down the middle of the sheet, not a third headline number. */
+  font-size: clamp(18px, 2.4vw, 30px);
+  font-weight: var(--weight-bold);
 }
 .n01-game-footer {
-  border-top: 2px solid var(--green-dark);
+  border-top: var(--border-strong);
   z-index: 4;
-  background: #fff;
+  background: var(--surface);
   height: 252px;
   position: absolute;
   inset: auto 0 0;
-  box-shadow: 0 -8px 30px #19241e14;
+  box-shadow: var(--shadow-footer);
 }
 .n01-left-table {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1426,23 +1571,29 @@ select:focus-visible {
 }
 .n01-left-table > div {
   border-right: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   flex-direction: column;
   justify-content: center;
   align-items: center;
   display: flex;
+  transition: background 0.16s;
 }
 .n01-left-table > div:last-child {
   border: 0;
 }
 .n01-left-table > div.active {
   box-shadow: inset 0 5px 0 var(--green);
-  background: linear-gradient(#edf4ef, #fff);
+  background: linear-gradient(180deg, var(--green-soft), var(--surface));
+}
+/* The inactive side steps back rather than sitting at equal weight beside the live one. */
+.n01-left-table > div:not(.active) strong {
+  color: var(--muted);
 }
 .n01-left-table strong {
   letter-spacing: -0.06em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: clamp(82px, 10vw, 148px);
+  font-weight: var(--weight-heavy);
   line-height: 0.9;
 }
 .n01-left-table span {
@@ -1489,6 +1640,17 @@ select:focus-visible {
   color: #ffffff59;
   cursor: not-allowed;
 }
+/* Drawn inside the element: an outline outside a table cell or a flush-fitted bar is clipped. */
+.n01-score-table td.scored button:focus-visible,
+.n01-menu-table button:focus-visible,
+.n01-key-table button:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 0 3px var(--green);
+}
+.n01-menu-table button:focus-visible,
+.n01-key-table button:focus-visible {
+  box-shadow: inset 0 0 0 3px #ffffffd9;
+}
 .n01-score-table .ton-score {
   border: 0.07em solid #c8cbc9;
   border-radius: 50%;
@@ -1514,7 +1676,7 @@ select:focus-visible {
   z-index: 80;
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
-  background: #09120d8f;
+  background: var(--modal-scrim);
   place-items: center;
   padding: 20px;
   display: grid;
@@ -1691,7 +1853,7 @@ select:focus-visible {
   text-align: center;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  background: #e9ece8;
+  background: var(--sheet-head-bg);
   margin: 0;
   padding: 8px 12px;
   font-size: 10px;
@@ -1702,7 +1864,7 @@ select:focus-visible {
   min-height: 40px;
 }
 .n01-stats-row strong {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 17px;
 }
 .n01-stats-row span {
@@ -1966,9 +2128,6 @@ select:focus-visible {
   .n01-score-table td.darts {
     font-size: 24px;
   }
-  .n01-table-hint {
-    display: none;
-  }
   .n01-game-footer {
     height: 360px;
   }
@@ -2058,6 +2217,20 @@ select:focus-visible {
   --amber: #e8b021;
   --danger: #ff6a60;
   --shadow: 0 18px 50px #00000073;
+  /* --green (#0f8f52) reaches only 3.9:1 as text on this theme's panels, and carries white at just
+     4.1:1 as a fill. So the two roles split here: a lighter green for text, the darker green for
+     fills that white is written on (6.6:1). */
+  --accent-text: #1a9b5c;
+  --accent-fill: var(--green-dark);
+  --on-accent-fill: #fff;
+  --entry-bg: #12301f;
+  --entry-edge: #2ee58a;
+  --entry-ink: #2ee58a;
+  --pick-bg: #31300f;
+  --pick-edge: #cbb51e;
+  --panel-inset: #ffffff0f;
+  --panel-card: #17231bb8;
+  --sheet-gutter: #101512;
 }
 [data-theme="neon"] body {
   background:
@@ -2122,18 +2295,11 @@ select:focus-visible {
 }
 [data-theme="neon"] .n01-score-table td.to-go {
   background: #0d1410;
-  color: #2ee58a;
+  /* Muted like the other themes: the per-round 残り is a supporting number, and a bright accent
+     here would outrank the score that produced it. */
+  color: var(--muted);
 }
-[data-theme="neon"] .n01-score-table td.scored.current,
-[data-theme="neon"] .n01-score-table td.scored button.starter-picker:hover,
-[data-theme="neon"]
-  .n01-score-table
-  td.scored
-  button.starter-picker:focus-visible {
-  background: #31300f;
-  box-shadow: inset 0 0 0 3px #cbb51e;
-  color: var(--ink);
-}
+
 [data-theme="neon"] .n01-score-table .ton-score {
   border-color: #3f584a;
 }
@@ -2216,6 +2382,14 @@ select:focus-visible {
   --amber: #8a6d24;
   --danger: #a43a32;
   --shadow: 0 18px 50px #131a2a14;
+  --panel-inset: #ffffffb0;
+  --panel-card: #ffffffb8;
+  --sheet-gutter: #f7f8fb;
+  --entry-bg: #e7edf9;
+  --entry-edge: var(--green);
+  --entry-ink: var(--green);
+  --pick-bg: #f7ecce;
+  --pick-edge: #d4af4e;
 }
 [data-theme="navy"] body {
   background:
@@ -2237,15 +2411,7 @@ select:focus-visible {
 [data-theme="navy"] .n01-score-table td.to-go {
   background: #f9fafc;
 }
-[data-theme="navy"] .n01-score-table td.scored.current,
-[data-theme="navy"] .n01-score-table td.scored button.starter-picker:hover,
-[data-theme="navy"]
-  .n01-score-table
-  td.scored
-  button.starter-picker:focus-visible {
-  background: #f7ecce;
-  box-shadow: inset 0 0 0 3px #d4af4e;
-}
+
 [data-theme="navy"] .n01-player-name.active {
   background: #f0d98a;
   color: #14224a;
@@ -2552,4 +2718,174 @@ select:focus-visible {
 .result-card .share-card {
   width: 100%;
   margin-top: 10px;
+}
+
+/* ================================================================ smartphone landscape (01 / checkout / Pentathlon X01)
+
+   A phone held sideways is ~390-430px tall and ~844-932px wide. Stacked vertically the fixed
+   footer alone (360px + safe area) is taller than the whole viewport, so before this block the
+   84px header, the score sheet and the footer could not coexist: .n01-score-area collapsed to 0px
+   - no history, no live entry cell, no remaining score visible - and the keypad ran off the bottom
+   edge while the footer painted over the header.
+
+   The screen is short but very wide, so the controls move BESIDE the sheet instead of under it.
+   Purely a CSS re-placement of the same elements in the same DOM order: nothing here changes what
+   any control does, only where it sits. Scoped to a short landscape viewport with a coarse pointer,
+   so desktop, tablet and portrait phone layouts are untouched.
+
+   Pentathlon X01 (301/501) renders the same .n01-* shell, so it is covered by the same rules. */
+@media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
+  .n01-game-shell {
+    /* Width of the control rail on the right. The keypad needs three comfortable columns. */
+    --rail: clamp(268px, 33vw, 340px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+
+  .n01-game-header {
+    height: 46px;
+    padding-inline: var(--safe-l) var(--safe-r);
+  }
+  .n01-player-name {
+    gap: 8px;
+    padding: 0 12px;
+  }
+  .n01-player-name strong {
+    font-size: clamp(17px, 2.1vw, 24px);
+  }
+  .n01-player-name span {
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+  .n01-player-name em {
+    padding: 4px 7px;
+    font-size: 8px;
+  }
+  .n01-game-header {
+    grid-template-columns: minmax(0, 1fr) 108px minmax(0, 1fr);
+  }
+  .n01-leg-center small {
+    font-size: 9px;
+  }
+  .n01-leg-center strong {
+    font-size: 21px;
+  }
+
+  /* The sheet takes the whole height it is given, with the rail carved off the right. */
+  .n01-score-area {
+    inset: 46px calc(var(--rail) + var(--safe-r)) 0 var(--safe-l);
+  }
+  .n01-game-meta {
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 10px;
+  }
+  .n01-game-meta strong {
+    font-size: 12px;
+  }
+  .n01-notice {
+    min-height: 26px;
+    padding: 4px 10px;
+    font-size: 10px;
+  }
+  /* Rows sized so three or four rounds read at once in the height that is left. */
+  .n01-score-table td {
+    height: clamp(56px, 20vh, 92px);
+  }
+  .n01-score-table th {
+    height: 30px;
+    font-size: 11px;
+  }
+  .n01-score-table td.scored button {
+    font-size: clamp(24px, 3.2vw, 40px);
+  }
+  .n01-score-table td.scored input {
+    font-size: clamp(26px, 3.6vw, 44px);
+  }
+  .n01-score-table td.to-go {
+    font-size: clamp(26px, 3.6vw, 44px);
+  }
+  .n01-score-table td.darts {
+    font-size: clamp(18px, 2.4vw, 28px);
+  }
+  /* The rail: remaining scores, the menu bar and the keypad, stacked down the right-hand side. */
+  .n01-game-footer {
+    inset: 46px 0 0 auto;
+    width: calc(var(--rail) + var(--safe-r));
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    border-top: 0;
+    border-left: 2px solid var(--green-dark);
+    padding-right: var(--safe-r);
+    /* A minimum even where the browser reports no inset, so repeated taps on the bottom key row
+       never land on the home indicator / gesture area. */
+    padding-bottom: max(12px, var(--safe-b));
+    box-shadow: -8px 0 30px #19241e14;
+  }
+  .n01-left-table {
+    flex: none;
+    height: clamp(72px, 22vh, 96px);
+  }
+  .n01-left-table strong {
+    font-size: clamp(38px, 11vh, 56px);
+  }
+  .n01-left-table span {
+    min-height: 12px;
+    margin-top: 2px;
+    font-size: 10px;
+  }
+  .n01-left-table span.checkout-route {
+    font-size: clamp(12px, 1.6vw, 17px);
+  }
+  .n01-menu-table {
+    flex: none;
+    height: 40px;
+  }
+  .n01-menu-table button {
+    font-size: 12px;
+  }
+  .n01-menu-table button:last-child {
+    font-size: 16px;
+  }
+  /* Fills whatever is left, so the bottom key row always ends above the gesture area. */
+  .n01-key-table {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    padding-bottom: 0;
+    background: #354239;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .n01-key-table button {
+    color: #fff;
+    cursor: pointer;
+    touch-action: manipulation;
+    background: 0 0;
+    border-top: 1px solid #ffffff24;
+    border-bottom: 0;
+    border-left: 0;
+    border-right: 1px solid #ffffff24;
+    font-size: 20px;
+    font-weight: 650;
+  }
+  .n01-key-table button:active {
+    background: var(--green);
+  }
+  .n01-key-table button.enter {
+    background: var(--green);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  /* Dialogs and result cards get the same short-viewport treatment: they must scroll inside
+     themselves rather than run off a 390px-tall screen. */
+  .n01-modal-card,
+  .result-card {
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  }
 }

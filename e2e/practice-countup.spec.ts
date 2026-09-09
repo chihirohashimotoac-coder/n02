@@ -289,43 +289,43 @@ test.describe('COUNT-UP awards', () => {
     test(`${item.score} with ${item.bull} bull presents ${item.label}`, async ({ page }) => {
       await startCountUp(page, { bull: item.bull });
       await enterRound(page, item.score);
-      const card = page.locator('.countup-award-card');
+      const card = page.locator('.award-card');
       await expect(card).toBeVisible();
-      await expect(card.locator('.countup-award-name')).toHaveText(item.label);
-      await expect(card.locator('.countup-award-score')).toHaveText(String(item.score));
+      await expect(card.locator('.award-name')).toHaveText(item.label);
+      await expect(card.locator('.award-score')).toHaveText(String(item.score));
     });
   }
 
   test('99 earns no award at all', async ({ page }) => {
     await startCountUp(page);
     await enterRound(page, 99);
-    await expect(page.locator('.countup-award-card')).toHaveCount(0);
+    await expect(page.locator('.award-card')).toHaveCount(0);
   });
 
   test('does not block the next entry, and disappears on its own', async ({ page }) => {
     await startCountUp(page);
     await enterRound(page, 180);
-    await expect(page.locator('.countup-award-card')).toBeVisible();
+    await expect(page.locator('.award-card')).toBeVisible();
 
     // The next score goes in while the presentation is still up.
     await enterRound(page, 60);
     await expect(total(page)).toContainText('240');
 
-    await expect(page.locator('.countup-award-card')).toHaveCount(0, { timeout: 6000 });
+    await expect(page.locator('.award-card')).toHaveCount(0, { timeout: 6000 });
   });
 
   test('a consecutive award replaces the previous one instead of queueing', async ({ page }) => {
     await startCountUp(page);
     await enterRound(page, 100);
-    await expect(page.locator('.countup-award-name')).toHaveText('LOW TON');
+    await expect(page.locator('.award-name')).toHaveText('LOW TON');
     await enterRound(page, 180);
-    await expect(page.locator('.countup-award-card')).toHaveCount(1);
-    await expect(page.locator('.countup-award-name')).toHaveText('TON 80');
+    await expect(page.locator('.award-card')).toHaveCount(1);
+    await expect(page.locator('.award-name')).toHaveText('TON 80');
 
     // The replacement restarts the presentation from its own beginning rather than inheriting
     // whatever was left of the first one's time on screen.
     const elapsed = await page
-      .locator('.countup-award-card')
+      .locator('.award-card')
       .evaluate((el) => el.getAnimations().map((animation) => Number(animation.currentTime ?? 0)));
     expect(Math.min(...elapsed)).toBeLessThan(1500);
   });
@@ -333,7 +333,7 @@ test.describe('COUNT-UP awards', () => {
   test('runs one entry-hold-exit animation and is gone after about 3 seconds', async ({ page }) => {
     await startCountUp(page);
     await enterRound(page, 180);
-    const card = page.locator('.countup-award-card');
+    const card = page.locator('.award-card');
     await expect(card).toBeVisible();
 
     const animation = await card.evaluate((el) => {
@@ -346,7 +346,7 @@ test.describe('COUNT-UP awards', () => {
     });
     // Entry, hold and exit are one run that spans the whole time the card is up, so the fade-out is
     // actually played on screen instead of the card being cut off mid-animation at unmount.
-    expect(animation.name).toBe('countup-award-cycle');
+    expect(animation.name).toBe('award-cycle');
     expect(animation.seconds).toBeGreaterThan(2);
     expect(animation.seconds).toBeLessThan(3);
     expect(animation.fill).toBe('both');
@@ -363,9 +363,9 @@ test.describe('COUNT-UP awards with reduced motion', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await startCountUp(page);
     await enterRound(page, 180);
-    const card = page.locator('.countup-award-card');
-    await expect(card.locator('.countup-award-name')).toHaveText('TON 80');
-    await expect(card.locator('.countup-award-score')).toHaveText('180');
+    const card = page.locator('.award-card');
+    await expect(card.locator('.award-name')).toHaveText('TON 80');
+    await expect(card.locator('.award-score')).toHaveText('180');
     expect(await card.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
     expect(await card.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
 
@@ -384,7 +384,7 @@ test.describe('COUNT-UP editing', () => {
     await enterRound(page, 60);
     await expect(total(page)).toContainText('180');
     // Let the LOW TON presentation clear so the edit can be seen not to replay one.
-    await expect(page.locator('.countup-award-card')).toHaveCount(0, { timeout: 6000 });
+    await expect(page.locator('.award-card')).toHaveCount(0, { timeout: 6000 });
 
     await page.locator('.countup-table td.scored button').first().click();
     await page.getByLabel('修正後のラウンド得点').fill('150');
@@ -392,7 +392,7 @@ test.describe('COUNT-UP editing', () => {
 
     await expect(total(page)).toContainText('210');
     await expect(page.locator('.countup-total-meta')).toContainText('PPR 105.00');
-    await expect(page.locator('.countup-award-card')).toHaveCount(0);
+    await expect(page.locator('.award-card')).toHaveCount(0);
 
     // The recalculated award count shows up on the result screen: HAT TRICK, no LOW TON.
     for (const score of [0, 0, 0, 0, 0, 0]) await enterRound(page, score);

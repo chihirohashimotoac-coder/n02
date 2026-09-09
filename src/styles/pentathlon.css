@@ -63,7 +63,7 @@
 .pent-preset-card {
   border: 1px solid var(--line);
   cursor: pointer;
-  background: #ffffffb8;
+  background: var(--panel-card);
   border-radius: 16px;
   padding: 20px;
   text-align: left;
@@ -157,7 +157,7 @@
 .pent-progress-head span {
   color: var(--muted);
   font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .pent-progress-list {
@@ -199,7 +199,7 @@
 }
 
 .pent-progress-item .pent-score {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -223,17 +223,13 @@
 
 .pent-player {
   border: 1px solid var(--line);
-  background: #ffffffb8;
+  background: var(--panel-card);
   border-radius: 14px;
   padding: 14px;
   display: grid;
   gap: 6px;
   position: relative;
   overflow: hidden;
-}
-
-[data-theme='neon'] .pent-player {
-  background: #17231bb8;
 }
 
 .pent-player::before {
@@ -297,7 +293,7 @@
 .pent-player-value {
   font-size: clamp(34px, 11vw, 52px);
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   letter-spacing: -0.04em;
   line-height: 1;
   color: var(--ink);
@@ -357,7 +353,7 @@
   padding: 6px 10px;
   font-size: 13px;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .pent-pending-chip.empty {
@@ -416,7 +412,7 @@
   min-height: 48px;
   font-size: 16px;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   cursor: pointer;
   touch-action: manipulation;
 }
@@ -559,7 +555,7 @@
   touch-action: manipulation;
   min-height: 38px;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .pent-cricket-ring {
@@ -729,7 +725,7 @@
   align-self: center;
   text-align: center;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--muted);
   font-size: 13px;
 }
@@ -749,7 +745,9 @@
 }
 
 .pent-cricket-row.total .pent-cricket-num {
-  color: #ffffffab;
+  /* Was #ffffffab, which reads fine on the clean and navy fills (6.4:1 / 7.7:1) but only 3.89:1 on
+     neon's lighter --green-dark. */
+  color: #ffffffc8;
   font-size: 10px;
   letter-spacing: 0.16em;
 }
@@ -759,7 +757,7 @@
   place-items: center;
   color: #fff;
   font-size: clamp(28px, 5vw, 40px);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   letter-spacing: -0.03em;
   line-height: 1;
 }
@@ -880,7 +878,7 @@
 }
 
 .pent-result-row > span.value {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   font-weight: 700;
 }
 
@@ -1217,7 +1215,7 @@
   font-weight: 800;
   letter-spacing: 0.08em;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 [data-theme='neon'] .pent-round-chip,
@@ -1290,7 +1288,8 @@
 .pent-x01-shell .n01-score-table td.scored > button {
   color: var(--ink);
 }
-.pent-x01-shell .n01-score-table td.scored > button:hover {
+.pent-x01-shell .n01-score-table td.scored > button:hover,
+.pent-x01-shell .n01-score-table td.scored > button.selected {
   color: var(--green-dark);
 }
 
@@ -1444,7 +1443,7 @@
   color: var(--green-dark);
   font-size: 13px;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 .pent-typing em {
   font-style: normal;
@@ -1731,7 +1730,7 @@
 }
 .pent-result-stat b {
   font-size: 1.15em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 .pent-result-stat em {
   color: var(--muted);
@@ -1744,4 +1743,35 @@
 .pent-result-row > span.value {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* ================================================================ smartphone landscape (Pentathlon X01)
+
+   Pentathlon X01 renders the same .n01-game-shell as 通常01, so app.css's landscape rail applies to
+   its header, sheet and keys already. Only the two heights this file pins for the fullscreen
+   variant (--pent-footer-h drives .n01-game-footer and .n01-score-area) have to follow it across,
+   otherwise the sheet keeps the 0px it had and the footer runs 50px past the bottom edge.
+
+   --rail / --safe-* are set on .n01-game-shell in app.css, which is this same element. */
+@media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
+  .pent-x01-shell .n01-score-area {
+    inset: 46px calc(var(--rail) + var(--safe-r)) 0 var(--safe-l);
+  }
+  .pent-x01-shell .n01-game-footer {
+    inset: 46px 0 0 auto;
+    width: calc(var(--rail) + var(--safe-r));
+    height: auto;
+  }
+  .pent-x01-shell .n01-left-table {
+    height: clamp(72px, 22vh, 96px);
+  }
+  .pent-x01-shell .n01-menu-table {
+    height: 40px;
+  }
+  .pent-x01-shell .n01-key-table {
+    height: auto;
+    /* The shared rail already reserves the safe-area inset; the extra 20px this variant adds in
+       portrait would eat a whole key row out of a 390px-tall screen. */
+    padding-bottom: 0;
+  }
 }

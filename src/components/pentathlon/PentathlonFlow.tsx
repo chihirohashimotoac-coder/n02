@@ -1,5 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState, type ReactElement } from 'react';
 import TopBar from '../TopBar';
+import AwardOverlay, { type AwardPresentation } from '../common/AwardOverlay';
+import { useAwardPreload } from '../common/useAwardPreload';
+import { loadAwardDisplay, saveAwardDisplay } from '../../storage/awardSettings';
 import ThemeSelect from '../ThemeSelect';
 import PentathlonSetup from './PentathlonSetup';
 import SingleGameSetup from './SingleGameSetup';
@@ -154,6 +157,47 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
     onExit();
   }, [clear, onExit]);
 
+  /*
+   * Awards live here rather than on the play screen because a checkout ENDS the discipline: the
+   * play screen unmounts the instant the winning visit lands, and an award owned by it would be
+   * torn down with it - exactly the BIG FISH the player just threw. Held at the flow level, the
+   * presentation carries over onto the discipline result screen and runs its full 3 seconds.
+   *
+   * The ON/OFF setting is the same stored one 通常01・チェックアウト練習・COUNT-UP read, so turning
+   * awards off anywhere turns them off everywhere.
+   */
+  const [awardsEnabled, setAwardsEnabled] = useState(loadAwardDisplay);
+  const [award, setAward] = useState<AwardPresentation | null>(null);
+  const awardId = useRef(0);
+
+  const announceAward = useCallback((presented: Omit<AwardPresentation, 'id'>) => {
+    awardId.current += 1;
+    // A new award replaces whatever is showing and restarts its timer, never queues behind it.
+    setAward({ ...presented, id: awardId.current });
+  }, []);
+
+  const clearAward = useCallback(() => setAward(null), []);
+
+  const toggleAwards = useCallback(() => {
+    setAwardsEnabled((enabled) => {
+      const next = !enabled;
+      saveAwardDisplay(next);
+      // Turning it off takes down anything already on screen; it never touches session state.
+      if (!next) setAward(null);
+      return next;
+    });
+  }, []);
+
+  // Only the X01 disciplines present awards, so only their media is ever warmed - and only while
+  // one is actually being played.
+  const x01InPlay =
+    session !== null &&
+    session.status === 'playing' &&
+    session.current !== null &&
+    getEngine(currentDisciplineId(session)).meta.inputMode === 'visit-score';
+  useAwardPreload('x01', awardsEnabled && x01InPlay);
+
+  const renderScreen = (): ReactElement => {
   if (!session) {
     return (
       <div className="app-shell">
@@ -205,6 +249,9 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
           onExit={handleExitToMenu}
           error={error}
           onError={setError}
+          awardsEnabled={awardsEnabled}
+          onToggleAwards={toggleAwards}
+          onAward={announceAward}
         />
       );
     }
@@ -270,4 +317,17 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
   }
 
   return <PentathlonResult session={session} onFinish={handleFinish} />;
+  };
+
+  return (
+    <>
+      {renderScreen()}
+      {/*
+        Outside every screen: an award earned by the visit that ends a discipline must survive the
+        switch to the result screen. The layer is pointer-events: none and never takes focus, so
+        neither screen loses a single interaction to it.
+      */}
+      <AwardOverlay award={award} onExpire={clearAward} />
+    </>
+  );
 }

@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CountUpEditDialog, { type EditTarget } from './CountUpEditDialog';
+import DialogShell from '../common/DialogShell';
 import {
   COUNT_UP_ROUNDS,
   ROUND_SCORE_MESSAGE,
@@ -403,60 +404,69 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
       </footer>
 
       {modal === 'menu' && (
-        <div className="countup-modal-backdrop" role="dialog" aria-modal="true" aria-label="COUNT-UPメニュー">
-          <div className="countup-modal-card menu-list">
-            <h2>メニュー</h2>
-            <p className="countup-modal-note">
-              BULL設定：{state.settings.bullMode === 'fat' ? 'FAT BULL' : 'SEPARATE BULL'}／全{COUNT_UP_ROUNDS}ラウンド・1ラウンド3ダーツ
-            </p>
-            <button
-              type="button"
-              disabled={!canUndo(state)}
-              onClick={() => {
-                undo();
-                setModal('none');
-              }}
-            >
-              <kbd>U</kbd>{'\u3000'}直前の入力を戻す
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setModal('none');
-                requestExit();
-              }}
-            >
-              PRACTICE へ戻る
-            </button>
-            <p className="countup-modal-note">
-              キーボード：<kbd>0</kbd>–<kbd>9</kbd> 入力・<kbd>Enter</kbd> 確定・<kbd>Backspace</kbd> 1文字削除・
-              <kbd>U</kbd> 取り消し
-            </p>
-            <button type="button" className="countup-modal-cancel" onClick={() => setModal('none')}>
-              閉じる
-            </button>
-          </div>
-        </div>
+        <DialogShell
+          label="COUNT-UPメニュー"
+          backdropClassName="countup-modal-backdrop"
+          returnFocusTo={boardRef}
+          cardClassName="countup-modal-card menu-list"
+          onClose={() => setModal('none')}
+        >
+          <h2>メニュー</h2>
+          <p className="countup-modal-note">
+            BULL設定：{state.settings.bullMode === 'fat' ? 'FAT BULL' : 'SEPARATE BULL'}／全{COUNT_UP_ROUNDS}ラウンド・1ラウンド3ダーツ
+          </p>
+          <button
+            type="button"
+            disabled={!canUndo(state)}
+            onClick={() => {
+              undo();
+              setModal('none');
+            }}
+          >
+            <kbd>U</kbd>{'\u3000'}直前の入力を戻す
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setModal('none');
+              requestExit();
+            }}
+          >
+            PRACTICE へ戻る
+          </button>
+          <p className="countup-modal-note">
+            キーボード：<kbd>0</kbd>–<kbd>9</kbd> 入力・<kbd>Enter</kbd> 確定・<kbd>Backspace</kbd> 1文字削除・
+            <kbd>U</kbd> 取り消し
+          </p>
+          <button type="button" className="countup-modal-cancel" onClick={() => setModal('none')}>
+            閉じる
+          </button>
+        </DialogShell>
       )}
 
       {modal === 'confirm-exit' && (
-        <div className="countup-modal-backdrop" role="dialog" aria-modal="true" aria-label="COUNT-UPの終了確認">
-          <div className="countup-modal-card">
-            <h2>現在のCOUNT-UPを終了しますか？</h2>
-            <p className="countup-modal-note">途中経過は保存されません。</p>
-            <button type="button" className="countup-modal-primary" onClick={onExit}>
-              終了してPRACTICEへ
-            </button>
-            <button type="button" className="countup-modal-cancel" onClick={() => setModal('none')}>
-              続ける
-            </button>
-          </div>
-        </div>
+        <DialogShell
+          label="COUNT-UPの終了確認"
+          backdropClassName="countup-modal-backdrop"
+          returnFocusTo={boardRef}
+          cardClassName="countup-modal-card"
+          onClose={() => setModal('none')}
+        >
+          <h2>現在のCOUNT-UPを終了しますか？</h2>
+          <p className="countup-modal-note">途中経過は保存されません。</p>
+          <button type="button" className="countup-modal-primary" onClick={onExit}>
+            終了してPRACTICEへ
+          </button>
+          <button type="button" className="countup-modal-cancel" onClick={() => setModal('none')}>
+            続ける
+          </button>
+        </DialogShell>
       )}
 
       {modal === 'edit' && editTarget && (
         <CountUpEditDialog
           target={editTarget}
+          returnFocusTo={boardRef}
           onCommit={commitEdit}
           onCancel={() => {
             setModal('none');

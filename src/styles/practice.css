@@ -11,7 +11,8 @@
 .practice-hub,
 .countup-setup {
   --cu-accent: #d97706;
-  --cu-accent-strong: #b45309;
+  /* Was #b45309, which reached only 4.47:1 on --cu-accent-soft. */
+  --cu-accent-strong: #a54c08;
   --cu-accent-soft: #fdf0dc;
   --cu-on-accent: #2a1a06;
   --cu-header-a: #241703;
@@ -128,7 +129,7 @@
 
 .practice-card.playable .practice-card-badge {
   background: var(--cu-accent);
-  color: #fff;
+  color: var(--cu-on-accent);
 }
 
 @media (hover: hover) {
@@ -267,7 +268,7 @@
 
 .countup-history-row b {
   font-size: 20px;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--cu-accent-strong);
 }
 
@@ -348,7 +349,7 @@
 
 .countup-round-badge strong {
   font-size: clamp(18px, 4.4vw, 24px);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   line-height: 1;
 }
 
@@ -483,7 +484,7 @@
   height: clamp(72px, 14vh, 132px);
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 /* The climbing total, next to the score that produced it - COUNT-UP's answer to 01's 「残り」. */
@@ -496,7 +497,6 @@
 
 .countup-table td.running-total span {
   color: var(--muted);
-  opacity: 0.55;
   font-size: 16px;
   font-weight: 400;
 }
@@ -515,7 +515,7 @@
   /* A headline number in its cell, the way 01's 得点 is in its own. */
   font-size: clamp(26px, 4vw, 68px);
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: inherit;
 }
 
@@ -525,7 +525,6 @@
 
 .countup-table td.empty span {
   color: var(--muted);
-  opacity: 0.55;
   font-size: 16px;
 }
 
@@ -538,7 +537,7 @@
   font-size: clamp(28px, 4.4vw, 72px);
   font-weight: 900;
   color: var(--cu-accent-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 /* ---------------------------------------------------------------- COUNT-UP footer */
@@ -606,7 +605,7 @@
   padding: 2px 6px;
   border-radius: 999px;
   background: var(--cu-accent);
-  color: #fff;
+  color: var(--cu-on-accent);
 }
 
 .countup-total-value {
@@ -619,7 +618,7 @@
   font-weight: 900;
   line-height: 1;
   letter-spacing: -0.04em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--cu-accent-strong);
 }
 
@@ -641,7 +640,7 @@
   font-weight: 800;
   letter-spacing: 0.06em;
   color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .countup-notice {
@@ -758,7 +757,7 @@
 
 .countup-keypad button.enter {
   background: var(--cu-accent);
-  color: #fff;
+  color: var(--cu-on-accent);
   font-size: 14px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -776,139 +775,6 @@
 
   .countup-total-value {
     font-size: clamp(34px, 7vh, 58px);
-  }
-}
-
-/* ---------------------------------------------------------------- award presentation */
-
-/*
- * Never a modal: the layer takes no pointer events and no focus, so the next score can be typed
- * while it is on screen. It is purely a read-out of what has already been committed.
- */
-.countup-award-layer {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  display: grid;
-  /* Centred on the screen. It still takes no pointer events and no focus, so the controls and the
-     TOTAL underneath stay live and clickable while it is up. */
-  place-content: center;
-  place-items: center;
-  padding: 16px;
-  pointer-events: none;
-}
-
-.countup-award-card {
-  position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 2px;
-  padding: 18px clamp(26px, 8vw, 54px);
-  border-radius: 20px;
-  color: #fff;
-  background: linear-gradient(150deg, #1b1204f2, #4d3208f2);
-  border: 2px solid var(--cu-accent, #d97706);
-  box-shadow: 0 24px 70px #000000a6;
-  /*
-   * Entry, hold and exit are one keyframe run rather than three pieces of state. The card is
-   * unmounted at ~3s (see CountUpAwardOverlay); this run finishes a fraction earlier and holds its
-   * last frame, so the fade-out is actually seen instead of the card vanishing mid-animation.
-   */
-  animation: countup-award-cycle 2.92s both;
-}
-
-.countup-award-player {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  color: #ffd489;
-  max-width: 60vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.countup-award-name {
-  font-size: clamp(26px, 8vw, 48px);
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  line-height: 1.05;
-  text-align: center;
-  color: #ffb020;
-}
-
-.countup-award-score {
-  font-size: clamp(40px, 13vw, 78px);
-  font-weight: 900;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.03em;
-}
-
-/* An upward "score climbing" sweep behind the card - decoration only, never over the text. */
-.countup-award-rays {
-  position: absolute;
-  inset: -30% -14%;
-  z-index: -1;
-  border-radius: 50%;
-  background: radial-gradient(circle, #ffb02047, transparent 66%);
-  animation: countup-award-rise 0.9s ease-out;
-}
-
-.countup-award-card.award-ton-80 {
-  border-color: #ff9f1c;
-}
-
-.countup-award-card.award-hat-trick,
-.countup-award-card.award-three-in-the-black {
-  border-color: #ffd166;
-}
-
-/*
- * ~0.32s in, ~2.3s on screen, ~0.3s out. Deliberately small: opacity, a few percent of scale and a
- * dozen pixels of travel - no zoom, spin, bounce, flash or shake.
- */
-@keyframes countup-award-cycle {
-  0% {
-    opacity: 0;
-    transform: translateY(16px) scale(0.94);
-    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  11% {
-    opacity: 1;
-    transform: none;
-    animation-timing-function: linear;
-  }
-  89% {
-    opacity: 1;
-    transform: none;
-    animation-timing-function: cubic-bezier(0.4, 0, 0.7, 1);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-10px) scale(0.985);
-  }
-}
-
-@keyframes countup-award-rise {
-  from {
-    opacity: 0;
-    transform: translateY(24px) scale(0.7);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* The award must still be readable when animation is switched off - only the motion goes away. */
-@media (prefers-reduced-motion: reduce) {
-  .countup-award-card,
-  .countup-award-rays {
-    animation: none;
-  }
-  .countup-award-rays {
-    display: none;
   }
 }
 
@@ -1022,7 +888,7 @@
   font-weight: 900;
   line-height: 1;
   letter-spacing: -0.04em;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--cu-accent-strong);
 }
 
@@ -1043,7 +909,7 @@
 .countup-result-ppr b {
   font-size: 18px;
   color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .countup-award-list {
@@ -1068,7 +934,7 @@
 }
 
 .countup-award-list li b {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
   color: var(--cu-accent-strong);
 }
 
@@ -1110,7 +976,7 @@
 .countup-round-list button span {
   font-size: 16px;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .countup-result-hint {
@@ -1290,5 +1156,113 @@
 
   .countup-menu button {
     font-size: 13px;
+  }
+}
+
+/* ================================================================ smartphone landscape (COUNT-UP)
+
+   Same problem 01 has at this size, and the same answer. Stacked vertically the totals, the menu
+   bar and the keypad left the sheet 18-58px tall - fewer than one full round visible - so on a
+   short landscape viewport the footer becomes a rail down the right and the sheet takes the height.
+
+   CSS only: the DOM order (header, progress, board, footer) is unchanged, so tab order, the
+   keyboard route and the scroll-the-current-round-into-view behaviour all still work as they did.
+   The existing landscape-tablet rules above stay for taller landscape screens (an iPad). */
+@media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
+  .countup-shell {
+    --cu-rail: clamp(264px, 32vw, 336px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) calc(var(--cu-rail) + env(safe-area-inset-right, 0px));
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      'head head'
+      'prog prog'
+      'board rail';
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .countup-header {
+    grid-area: head;
+    height: 42px;
+  }
+  .countup-identity strong {
+    font-size: 17px;
+  }
+  .countup-identity span {
+    font-size: 8px;
+  }
+  .countup-round-badge strong {
+    font-size: 17px;
+  }
+
+  .countup-progress {
+    grid-area: prog;
+    padding-block: 3px;
+  }
+
+  .countup-board {
+    grid-area: board;
+  }
+  /* Five rounds at a time in the height the rail leaves, instead of well under one. */
+  .countup-table td {
+    height: clamp(52px, 15vh, 76px);
+  }
+  .countup-table td.scored button {
+    font-size: clamp(20px, 2.9vw, 34px);
+  }
+  .countup-table td.running-total {
+    font-size: clamp(17px, 2.4vw, 28px);
+  }
+  .countup-cell-entry {
+    font-size: clamp(21px, 3.1vw, 36px);
+  }
+
+  .countup-footer {
+    grid-area: rail;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-top: 0;
+    border-left: 3px solid var(--cu-accent);
+    padding-right: env(safe-area-inset-right, 0px);
+    /* Matches the rail in 01: a minimum even where the browser reports no inset, so repeated taps
+       on the bottom key row never reach the home indicator / gesture area. */
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    box-shadow: -8px 0 30px #19241e14;
+  }
+  .countup-totals {
+    flex: none;
+  }
+  .countup-total-card {
+    padding: 5px 8px;
+  }
+  .countup-total-value {
+    font-size: clamp(30px, 13vh, 54px);
+  }
+  .countup-notice {
+    flex: none;
+  }
+  .countup-menu {
+    flex: none;
+    height: 40px;
+  }
+  .countup-menu button {
+    font-size: 13px;
+  }
+  /* Fills the rest of the rail, so the bottom key row always clears the gesture area. */
+  .countup-keypad {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
+  }
+  .countup-keypad button {
+    font-size: 19px;
+  }
+
+  .countup-modal-card {
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
   }
 }

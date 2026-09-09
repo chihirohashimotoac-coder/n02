@@ -1,0 +1,193 @@
+/*
+ * The award presentation, shared by COUNT-UP, 通常01 and チェックアウト練習.
+ *
+ * Its own file because it is the one piece of UI that belongs to no single mode: app.css is the 01
+ * shell, practice.css is PRACTICE, pentathlon.css is Pentathlon, and this sits above all of them.
+ *
+ * The one rule everything else here follows from: this layer must never be able to interfere with
+ * play. It takes no pointer events, holds no focus, and reserves no space.
+ */
+
+.award-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--award-z);
+  display: grid;
+  place-content: center;
+  place-items: center;
+  /* Non-negotiable. Score entry, ENTER, UNDO, player switching and every result action underneath
+     stay live and clickable for the whole 3 seconds. */
+  pointer-events: none;
+  padding:
+    max(12px, env(safe-area-inset-top, 0px))
+    max(12px, env(safe-area-inset-right, 0px))
+    max(12px, env(safe-area-inset-bottom, 0px))
+    max(12px, env(safe-area-inset-left, 0px));
+}
+
+/*
+ * Scaled off the viewport's SHORT side (vmin), so one rule covers a tall phone and a 390px-tall
+ * phone on its side alike: the card can never be taller than the screen in either orientation.
+ */
+.award-card {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(72vmin, 420px);
+  aspect-ratio: 1;
+  max-width: 100%;
+  border-radius: var(--award-radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-overlay);
+  animation: award-cycle 2.94s both;
+  /* Keeps the opacity/transform on the compositor, so animating over a playing <video> - a layer
+     the browser composites separately - does not step. */
+  will-change: opacity, transform;
+}
+
+.award-media {
+  position: absolute;
+  inset: 0;
+  background: #05070a;
+}
+
+.award-video,
+.award-poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/*
+ * The floor: neither the movie nor the poster could be loaded (offline first run with nothing
+ * cached, or both requests failed). A CSS-only ring in the award's own colour, so the presentation
+ * still reads as a presentation rather than a black square.
+ */
+.award-fallback {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 50%, #0000 54%, var(--award-tint) 55%, #0000 62%),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--award-tint) 26%, #05070a) 0%, #05070a 68%);
+}
+
+/*
+ * The award as real text, over the movie. Centred in the card's own dark middle - every movie is
+ * built with a clear centre for exactly this - and never clipped, however long the player name is.
+ */
+.award-text {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: 0 8%;
+  text-align: center;
+  text-shadow: 0 2px 14px #000000b3;
+}
+
+.award-player {
+  max-width: 100%;
+  font-size: clamp(10px, 2.4vmin, 14px);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.14em;
+  color: var(--award-sub);
+  /* A long name wraps to a second line rather than being cut off; three lines is the cap. */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.award-name {
+  max-width: 100%;
+  font-size: clamp(18px, 6.2vmin, 42px);
+  font-weight: var(--weight-black);
+  letter-spacing: 0.03em;
+  line-height: 1.06;
+  color: var(--award-tint);
+  overflow-wrap: anywhere;
+}
+
+.award-score {
+  font-size: clamp(30px, 11vmin, 74px);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: var(--numeric);
+  color: var(--award-ink);
+}
+
+/*
+ * Per-award tint, matched to the movie behind it so the text belongs to the picture rather than
+ * sitting on top of it. Only the text colour: the movies carry no words at all.
+ */
+.award-card {
+  --award-tint: #7fe3b0;
+}
+.award-card.award-low-ton {
+  --award-tint: #7fe3b0;
+}
+.award-card.award-high-ton {
+  --award-tint: #7ab6ff;
+}
+.award-card.award-ton-80 {
+  --award-tint: #ffce6a;
+}
+.award-card.award-hat-trick {
+  --award-tint: #ff9d6a;
+}
+.award-card.award-three-in-the-black {
+  --award-tint: #6fd8ff;
+}
+.award-card.award-big-fish {
+  --award-tint: #ffd27a;
+}
+
+/*
+ * Timed against the movies themselves, which are 3.000s and carry their own fade from and to black
+ * (see docs/award-movie-production-report.md): ~0.18s in, ~2.1s held, then a long ~0.66s out that
+ * lands a frame before the 3s unmount.
+ *
+ * The exit used to be 0.32s. On top of the movie's own darkening that read as a snap rather than a
+ * fade - the award was simply gone - which is what made it feel unnatural. Given real time, the two
+ * curves now read as one continuous departure, and there is no bright card left to cut away.
+ *
+ * Deliberately small otherwise: opacity, a few percent of scale and a dozen pixels of travel - no
+ * zoom, spin, bounce, flash or shake.
+ */
+@keyframes award-cycle {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.95);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  6% {
+    opacity: 1;
+    transform: none;
+    animation-timing-function: linear;
+  }
+  77.5% {
+    opacity: 1;
+    transform: none;
+    animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.985);
+  }
+}
+
+/*
+ * Motion off: the card appears and disappears without moving. The movie is not played at all (see
+ * AwardOverlay) - the poster and this text hold for the same 3 seconds, so the award is never
+ * missed, only stilled.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .award-card {
+    animation: none;
+  }
+}

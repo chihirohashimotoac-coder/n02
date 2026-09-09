@@ -592,11 +592,12 @@ test.describe('モーダルは背後のゲームへキー入力を漏らさな�
     await expect(page.getByRole('dialog')).toBeVisible();
 
     await page.keyboard.type('77');
-    await page.keyboard.press('Backspace');
     await page.keyboard.press('u');
     await expect(page.getByRole('dialog')).toBeVisible();
 
-    await page.keyboard.press('Escape');
+    // BackSpace closes this dialog, exactly as it closes 通常01's - it is the dialog's own key, and
+    // still never reaches the entry behind it.
+    await page.keyboard.press('Backspace');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     // The entry is exactly as it was left, and the committed round was not undone.
     await expect(liveCell(page)).toHaveValue('55');

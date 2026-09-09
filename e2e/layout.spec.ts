@@ -211,8 +211,10 @@ test.describe('layout: Pentathlon X01 input', () => {
     await startSinglePentathlonX01(page);
     await page.getByRole('button', { name: 'メニュー' }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('Enter');
-    await expect(dialog).toContainText('Backspace');
+    // The same list 通常01・チェックアウト練習 carry, now that the screens answer to the same keys.
+    for (const shortcut of ['Enter / Tab', 'BackSpace / Delete', 'ESC', '矢印', 'R', 'F', 'M', 'S']) {
+      await expect(dialog).toContainText(shortcut);
+    }
   });
 });
 
@@ -413,15 +415,24 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     await startCountUp(page);
     const viewport = page.viewportSize()!;
 
-    // Full bleed, like 01's score table: no empty margins beside the sheet, and the footer and its
-    // menu bar run the same full width underneath.
+    // Full bleed, like 01's score table: no empty margins beside the sheet, and the menu bar runs
+    // the full width of the controls block.
+    //
+    // Two arrangements, one guarantee. Stacked (desktop, portrait, landscape tablet) the footer
+    // sits under a full-width sheet. On a short landscape phone the footer is a rail down the
+    // right-hand side and the sheet takes everything the rail leaves - so the width the sheet owes
+    // is measured against the footer's own left edge rather than the viewport.
+    const footer = (await page.locator('.countup-footer').boundingBox())!;
+    const railed = footer.x > 1;
+    const sheetWidth = railed ? footer.x : viewport.width;
+
     const table = (await page.locator('.countup-table').boundingBox())!;
     expect(table.x).toBeLessThanOrEqual(1);
-    expect(table.width).toBeGreaterThanOrEqual(viewport.width - 20); // allow a scrollbar gutter
-    for (const selector of ['.countup-footer', '.countup-menu']) {
-      const box = (await page.locator(selector).boundingBox())!;
-      expect(box.width).toBeGreaterThanOrEqual(viewport.width - 20);
-    }
+    expect(table.width).toBeGreaterThanOrEqual(sheetWidth - 20); // allow a scrollbar gutter
+    // Between them the sheet and the controls reach the right edge: no dead margin either way.
+    expect(footer.x + footer.width).toBeGreaterThanOrEqual(viewport.width - 1);
+    const menu = (await page.locator('.countup-menu').boundingBox())!;
+    expect(menu.width).toBeGreaterThanOrEqual(footer.width - 20);
 
     // 8 fixed rounds are never stretched into 8 tall bands to fill the screen.
     const row = (await page.locator('.countup-table tbody tr').first().boundingBox())!;
@@ -480,7 +491,7 @@ test.describe('layout: PRACTICE / COUNT-UP', () => {
     await openFreshApp(page);
     await startCountUp(page);
     await enterCountUpRound(page, 180);
-    await expect(page.locator('.countup-award-card')).toBeVisible();
+    await expect(page.locator('.award-card')).toBeVisible();
 
     // The overlay takes no pointer events, so every control underneath stays live.
     expect(await isUnobstructed(page, '.countup-cell-entry')).toBe(true);

@@ -30,6 +30,10 @@ const VIEWPORTS = {
   tabletPortrait: { width: 768, height: 1024 },
   tabletLandscape: { width: 1024, height: 768 },
   tabletWide: { width: 1180, height: 820 },
+  // The same three phones on their side. Barely 390px tall, and the tightest layout the app has.
+  iphone13Landscape: { width: 844, height: 390 },
+  iphone15Landscape: { width: 852, height: 393 },
+  iphoneMaxLandscape: { width: 932, height: 430 },
 } as const;
 
 const chromium = executablePath ? { launchOptions: { executablePath } } : {};
@@ -47,12 +51,18 @@ export default defineConfig({
     ...chromium,
   },
   projects: [
-    // Full suites, run on one desktop and one mobile viewport.
+    // Full suites, run on one desktop and one mobile viewport. landscape.spec.ts is excluded: it
+    // asserts the layout that only exists on a short landscape viewport, and has its own projects.
     {
       name: 'desktop-chromium',
+      testIgnore: /landscape\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], viewport: VIEWPORTS.desktop, ...chromium },
     },
-    { name: 'mobile-chromium', use: { ...devices['Pixel 5'], ...chromium } },
+    {
+      name: 'mobile-chromium',
+      testIgnore: /landscape\.spec\.ts/,
+      use: { ...devices['Pixel 5'], ...chromium },
+    },
 
     // Layout-only checks across every required viewport size.
     {
@@ -105,6 +115,23 @@ export default defineConfig({
         ...chromium,
       },
     },
+
+    /*
+     * Smartphone landscape. A separate set of projects rather than more layout-* entries, because
+     * these run landscape.spec.ts as well: the rail layout it checks only exists at this height,
+     * and the orientation tests rotate the viewport themselves.
+     */
+    ...(
+      [
+        ['844x390', VIEWPORTS.iphone13Landscape],
+        ['852x393', VIEWPORTS.iphone15Landscape],
+        ['932x430', VIEWPORTS.iphoneMaxLandscape],
+      ] as const
+    ).map(([name, viewport]) => ({
+      name: `layout-landscape-${name}`,
+      testMatch: /(layout|landscape)\.spec\.ts/,
+      use: { ...devices['Pixel 5'], viewport, ...chromium },
+    })),
 
     /*
      * Real WebKit on an iPhone device profile - the closest this suite gets to Mobile Safari.

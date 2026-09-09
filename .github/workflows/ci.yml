@@ -39,6 +39,20 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The preview host builds with this script. It must compile, and - unlike `npm run build` -
+      # it must never touch the tracked root artifacts GitHub Pages publishes, so a preview
+      # deployment can never leak into production.
+      #
+      # Compared against the tree as it stands AFTER `npm run build`, not against a clean tree: the
+      # production build is expected to write those artifacts, and this step is about proving the
+      # preview build does not.
+      - name: Preview build leaves production artifacts untouched
+        run: |
+          git status --porcelain > /tmp/tree-before-preview.txt
+          npm run build:preview
+          git status --porcelain > /tmp/tree-after-preview.txt
+          diff /tmp/tree-before-preview.txt /tmp/tree-after-preview.txt
+
       # Chromium covers the desktop and Android viewports; WebKit is what backs the iPhone
       # projects in playwright.config.ts, which are skipped when it isn't installed.
       - name: Install Playwright browsers

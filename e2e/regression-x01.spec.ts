@@ -143,6 +143,39 @@ test.describe('通常01', () => {
 
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('361');
   });
+
+  /**
+   * Opening the editor parks the arrow-key selection on the edited cell. If committing (or
+   * cancelling) leaves it parked, every later digit is routed into "edit the selected cell"
+   * instead of the score entry, and the round becomes unplayable.
+   */
+  test('after editing a past score, the current round is still enterable', async ({ page }) => {
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await enterGameScore(page, 60); // P1 -> 441
+
+    await page.locator('.n01-score-table td.scored button').first().click();
+    await page.locator('.n01-modal-card input[type="number"]').fill('100');
+    await page.getByRole('button', { name: '修正して再計算' }).click();
+    await expect(page.locator('.n01-modal-card')).toHaveCount(0);
+    await expect(page.locator('.n01-left-table strong').first()).toHaveText('401');
+
+    await enterGameScore(page, 41); // P2 -> 460, and no editor may reopen
+    await expect(page.locator('.n01-modal-card')).toHaveCount(0);
+    await expect(page.locator('.n01-left-table strong').nth(1)).toHaveText('460');
+  });
+
+  test('cancelling the editor also releases the selected cell', async ({ page }) => {
+    await page.getByRole('button', { name: /ゲームを開始/ }).click();
+    await enterGameScore(page, 60); // P1 -> 441
+
+    await page.locator('.n01-score-table td.scored button').first().click();
+    await page.getByRole('button', { name: 'キャンセル' }).click();
+    await expect(page.locator('.n01-modal-card')).toHaveCount(0);
+
+    await enterGameScore(page, 41); // P2 -> 460
+    await expect(page.locator('.n01-modal-card')).toHaveCount(0);
+    await expect(page.locator('.n01-left-table strong').nth(1)).toHaveText('460');
+  });
 });
 
 test.describe('チェックアウト練習', () => {

@@ -6,6 +6,7 @@ import './styles/global.css';
 import './styles/app.css';
 import './styles/pentathlon.css';
 import './styles/practice.css';
+import './styles/award.css';
 
 void purgeLegacyCache();
 
