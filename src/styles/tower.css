@@ -1,0 +1,1242 @@
+/*
+ * PRACTICE / TOWER OF THE DARTS styles.
+ *
+ * Every selector in this file starts at a `tower-*` class, so nothing here can reach an existing
+ * 01, checkout, Pentathlon or COUNT-UP screen: there is no bare `button`, `svg`, `body` or `:root`
+ * rule anywhere below. The handful of shared classes TOWER reuses (`panel`, `setup-panel`,
+ * `practice-note`, `countup-choice`, `countup-history`) are used as they are and are never
+ * restyled from here.
+ *
+ * Surfaces are built from the shared theme tokens in app.css (clean / neon / navy); TOWER adds only
+ * its own `--tw-*` accents, scoped to its own roots, so its identity survives every theme without
+ * redefining a token anyone else reads.
+ */
+
+.tower-shell,
+.tower-setup,
+.tower-result {
+  --tw-accent: #2f6ea5;
+  --tw-accent-strong: #1d4f7c;
+  --tw-accent-soft: #e6f0f8;
+  --tw-on-accent: #fff;
+  --tw-hit: #17693f;
+  --tw-hit-soft: #e3f2e9;
+  --tw-miss: #a43a32;
+  --tw-miss-soft: #fbeae8;
+  --tw-life: #d2691e;
+  --tw-life-off: #d9ddd7;
+  --tw-board-plate: #2a2f2c;
+  --tw-board-dark: #232724;
+  --tw-board-light: #ded6c2;
+  --tw-board-red: #8c3a33;
+  --tw-board-green: #245f45;
+  --tw-board-dim: 0.28;
+  --tw-lit: #ffd21f;
+  --tw-lit-edge: #7a5a00;
+  --tw-wire: #6c7470;
+  --tw-number: #e9e6dd;
+  --tw-header-a: #10263a;
+  --tw-header-b: #2f6ea5;
+}
+
+[data-theme='neon'] .tower-shell,
+[data-theme='neon'] .tower-setup,
+[data-theme='neon'] .tower-result {
+  --tw-accent: #3fb4ff;
+  --tw-accent-strong: #79ccff;
+  --tw-accent-soft: #08263a;
+  --tw-on-accent: #04121d;
+  --tw-hit: #37d98a;
+  --tw-hit-soft: #07281a;
+  --tw-miss: #ff6b5e;
+  --tw-miss-soft: #2a0f0d;
+  --tw-life: #ffa23f;
+  --tw-life-off: #2c3830;
+  --tw-board-plate: #0b100d;
+  --tw-board-dark: #10150f;
+  --tw-board-light: #6d6a5e;
+  --tw-board-red: #5e2a26;
+  --tw-board-green: #14402f;
+  --tw-board-dim: 0.4;
+  --tw-lit: #ffe45c;
+  --tw-lit-edge: #a08300;
+  --tw-wire: #3c4640;
+  --tw-number: #b9c6bd;
+  --tw-header-a: #04121d;
+  --tw-header-b: #0d3b5e;
+}
+
+[data-theme='navy'] .tower-shell,
+[data-theme='navy'] .tower-setup,
+[data-theme='navy'] .tower-result {
+  --tw-accent: #2c5d8f;
+  --tw-accent-strong: #1b3f63;
+  --tw-accent-soft: #e7eef6;
+  --tw-on-accent: #fff;
+  --tw-board-plate: #1b2430;
+  --tw-board-dark: #1a222c;
+  --tw-board-light: #d5dbe3;
+  --tw-board-red: #7d3a3a;
+  --tw-board-green: #23543f;
+  --tw-wire: #5d6875;
+  --tw-number: #e4e9ef;
+  --tw-header-a: #0c1a28;
+  --tw-header-b: #2c5d8f;
+}
+
+/* ============================================================================ the board drawing */
+
+.tower-board {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.tower-board-plate {
+  fill: var(--tw-board-plate);
+}
+
+.tower-seg {
+  stroke: var(--tw-wire);
+  stroke-width: 0.6;
+  /* Unlit regions stay recognisably a dartboard but drop right back, so the lit set reads first. */
+  opacity: var(--tw-board-dim);
+}
+
+.tower-seg.tone-dark {
+  fill: var(--tw-board-dark);
+}
+.tower-seg.tone-light {
+  fill: var(--tw-board-light);
+}
+.tower-seg.tone-red {
+  fill: var(--tw-board-red);
+}
+.tower-seg.tone-green {
+  fill: var(--tw-board-green);
+}
+
+.tower-seg.is-lit {
+  fill: var(--tw-lit);
+  stroke: var(--tw-lit-edge);
+  stroke-width: 0.9;
+  opacity: 1;
+}
+
+.tower-board-number {
+  fill: var(--tw-number);
+  font-size: 15px;
+  font-weight: 800;
+  opacity: 0.5;
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-board-number.is-lit {
+  fill: var(--tw-lit);
+  opacity: 1;
+}
+
+.tower-board-floor {
+  fill: var(--tw-number);
+  font-size: 16px;
+  font-weight: 900;
+  opacity: 0.65;
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-board-main {
+  /* Bounded by height as well as width, so a short landscape screen still leaves room for the
+     judgement buttons rather than spending the whole viewport on the board. */
+  width: min(100%, 62vh);
+  margin-inline: auto;
+}
+
+.tower-board-mini {
+  width: min(160px, 40vw);
+  flex: none;
+}
+
+/* ================================================================================== play screen */
+
+.tower-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.tower-shell:focus {
+  outline: none;
+}
+
+.tower-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 52px;
+  padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px));
+  background: linear-gradient(105deg, var(--tw-header-a), var(--tw-header-b));
+  color: #fff;
+}
+
+.tower-identity {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  min-width: 0;
+}
+
+.tower-identity strong {
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.tower-identity span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  opacity: 0.75;
+}
+
+.tower-floor-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1;
+}
+
+.tower-floor-badge small {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  opacity: 0.75;
+}
+
+.tower-floor-badge strong {
+  font-size: 24px;
+  font-weight: 900;
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-floor-badge strong i {
+  font-style: normal;
+  font-size: 0.5em;
+  opacity: 0.75;
+}
+
+.tower-climb {
+  flex: none;
+  display: grid;
+  gap: 3px;
+  padding: 5px max(10px, env(safe-area-inset-left, 0px)) 5px max(10px, env(safe-area-inset-right, 0px));
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.tower-climb-row {
+  display: grid;
+  grid-template-columns: minmax(48px, 22%) minmax(0, 1fr) 46px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.tower-climb-row.active {
+  color: var(--tw-accent-strong);
+}
+
+.tower-climb-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tower-climb-track {
+  position: relative;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--tw-life-off);
+  overflow: hidden;
+}
+
+.tower-climb-fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  border-radius: var(--radius-pill);
+  background: var(--tw-accent);
+}
+
+.tower-climb-row.active .tower-climb-fill {
+  background: var(--tw-accent-strong);
+}
+
+.tower-climb-value {
+  text-align: right;
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px max(10px, env(safe-area-inset-left, 0px)) 10px max(10px, env(safe-area-inset-right, 0px));
+  background: var(--surface);
+}
+
+.tower-turn-line {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tower-turn-line b {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--tw-accent-strong);
+}
+
+.tower-target-text {
+  margin: 0;
+  text-align: center;
+  font-size: clamp(14px, 3.4vw, 20px);
+  font-weight: 800;
+  line-height: 1.3;
+  color: var(--ink);
+  background: var(--tw-accent-soft);
+  border-radius: var(--radius-md);
+  padding: 6px 12px;
+  max-width: 100%;
+}
+
+.tower-flash {
+  margin: 0;
+  font-size: clamp(13px, 3vw, 18px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  padding: 5px 16px;
+  border-radius: var(--radius-pill);
+  animation: tower-flash-in 180ms ease-out;
+}
+
+@keyframes tower-flash-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tower-flash {
+    animation: none;
+  }
+}
+
+.tower-flash.is-hit,
+.tower-flash.is-recover,
+.tower-flash.is-clear {
+  color: var(--tw-hit);
+  background: var(--tw-hit-soft);
+}
+
+.tower-flash.is-miss,
+.tower-flash.is-over {
+  color: var(--tw-miss);
+  background: var(--tw-miss-soft);
+}
+
+/* ============================================================================= footer / controls */
+
+.tower-footer {
+  flex: none;
+  background: var(--surface);
+  border-top: 3px solid var(--tw-accent);
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  box-shadow: var(--shadow-footer);
+}
+
+.tower-status {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.tower-status.solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tower-status-card {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  padding: 5px 8px;
+  background: var(--surface);
+}
+
+.tower-status-card.active {
+  background: var(--tw-accent-soft);
+}
+
+.tower-status-card.is-cleared,
+.tower-status-card.is-retired {
+  opacity: 0.68;
+}
+
+.tower-status-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tower-status-name em {
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--tw-accent);
+  color: var(--tw-on-accent);
+}
+
+.tower-status-name em.done {
+  background: var(--muted);
+}
+
+.tower-status-life {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.tower-life-pips {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.tower-life-pips i {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--tw-life-off);
+  border: 2px solid var(--tw-life-off);
+}
+
+.tower-life-pips i.on {
+  background: var(--tw-life);
+  border-color: var(--tw-life);
+}
+
+.tower-life-value {
+  font-size: 13px;
+  font-variant-numeric: var(--numeric);
+  color: var(--ink);
+}
+
+.tower-status-meta {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-turn-pips {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tower-pip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 2px dashed var(--line);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.tower-pip i {
+  font-style: normal;
+  font-size: 9px;
+  opacity: 0.7;
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-pip.now {
+  border-style: solid;
+  border-color: var(--tw-accent);
+  color: var(--tw-accent-strong);
+}
+
+.tower-pip.done {
+  border-style: solid;
+}
+
+.tower-pip.done.is-hit {
+  border-color: var(--tw-hit);
+  background: var(--tw-hit-soft);
+  color: var(--tw-hit);
+}
+
+.tower-pip.done.is-miss {
+  border-color: var(--tw-miss);
+  background: var(--tw-miss-soft);
+  color: var(--tw-miss);
+}
+
+.tower-notice {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--tw-accent-strong);
+  background: var(--tw-accent-soft);
+}
+
+.tower-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+/*
+ * The two judgements are the screen's whole input surface: side by side, full width each, tall
+ * enough to hit without looking, and with a real gap between them so a mis-reach lands on nothing
+ * rather than on the opposite answer. They are told apart by wording and by icon as well as by
+ * colour.
+ */
+.tower-judge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: clamp(64px, 13vh, 104px);
+  border-radius: var(--radius-lg);
+  border: 3px solid transparent;
+  font-weight: 900;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.tower-judge i {
+  font-style: normal;
+  font-size: clamp(20px, 5vw, 30px);
+  line-height: 1;
+}
+
+.tower-judge strong {
+  font-size: clamp(16px, 4.2vw, 24px);
+  letter-spacing: 0.06em;
+}
+
+.tower-judge kbd {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: #ffffff59;
+  border: 1px solid #ffffff73;
+}
+
+/* The key badges mean nothing without a keyboard, so a touch-only device is not shown them. */
+@media (hover: none) and (pointer: coarse) {
+  .tower-judge kbd,
+  .tower-primary kbd {
+    display: none;
+  }
+}
+
+.tower-judge.hit {
+  background: var(--tw-hit);
+  border-color: var(--tw-hit);
+  color: #fff;
+}
+
+.tower-judge.miss {
+  background: var(--tw-miss);
+  border-color: var(--tw-miss);
+  color: #fff;
+}
+
+.tower-judge:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tower-judge:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.tower-actions-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.tower-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  text-align: center;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  border: 3px solid var(--tw-accent);
+  background: var(--tw-accent-soft);
+}
+
+.tower-panel strong {
+  font-size: clamp(14px, 3.6vw, 19px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: var(--tw-accent-strong);
+}
+
+.tower-panel p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.tower-panel small {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.tower-panel.over {
+  border-color: var(--tw-miss);
+  background: var(--tw-miss-soft);
+}
+
+.tower-panel.over strong {
+  color: var(--tw-miss);
+}
+
+.tower-panel.clear {
+  border-color: var(--tw-hit);
+  background: var(--tw-hit-soft);
+}
+
+.tower-panel.clear strong {
+  color: var(--tw-hit);
+}
+
+.tower-panel.end {
+  border-color: var(--muted);
+  background: var(--surface-soft);
+}
+
+.tower-panel.end strong {
+  color: var(--muted);
+}
+
+.tower-continue-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.tower-primary,
+.tower-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding-inline: 16px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--tw-accent-strong);
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.tower-primary {
+  background: var(--tw-accent-strong);
+  color: var(--tw-on-accent);
+}
+
+.tower-secondary {
+  background: transparent;
+  color: var(--tw-accent-strong);
+}
+
+.tower-primary kbd {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: #ffffff59;
+  border: 1px solid #ffffff73;
+}
+
+.tower-history {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 38px;
+  padding-inline: 10px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border-block: 1px solid var(--line);
+}
+
+.tower-history-empty {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.tower-history-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding-inline: 8px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+  cursor: pointer;
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-history-chip i {
+  font-style: normal;
+  font-size: 12px;
+}
+
+.tower-history-chip.is-hit {
+  border-color: var(--tw-hit);
+  color: var(--tw-hit);
+}
+
+.tower-history-chip.is-miss {
+  border-color: var(--tw-miss);
+  color: var(--tw-miss);
+}
+
+.tower-history-chip.latest {
+  box-shadow: 0 0 0 2px var(--tw-accent-soft);
+}
+
+.tower-menu {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 56px;
+  gap: 1px;
+  background: var(--line);
+  height: 44px;
+}
+
+.tower-menu button {
+  border: 0;
+  background: var(--surface);
+  color: var(--tw-accent-strong);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.tower-menu button:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ====================================================================================== dialogs */
+
+.tower-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #0b120e9e;
+}
+
+.tower-modal-card {
+  display: grid;
+  gap: 10px;
+  width: min(440px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 18px;
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-overlay);
+}
+
+.tower-modal-card h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.tower-modal-note {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.tower-modal-note.strong {
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.tower-modal-note kbd,
+.tower-modal-card kbd {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  color: var(--ink);
+}
+
+.tower-help-steps {
+  margin: 0;
+  padding-left: 1.3em;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.tower-modal-card.menu-list button {
+  min-height: 46px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tower-modal-card.menu-list button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.tower-modal-primary {
+  min-height: 48px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--tw-accent-strong);
+  background: var(--tw-accent-strong);
+  color: var(--tw-on-accent);
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.tower-modal-cancel {
+  min-height: 44px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* ================================================================================ setup / result */
+
+.tower-rule-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tower-rule-list li {
+  display: grid;
+  grid-template-columns: minmax(96px, 26%) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--tw-accent-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tower-rule-list b {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: var(--tw-accent-strong);
+}
+
+.tower-close-call-note {
+  border-left: 4px solid var(--tw-accent);
+  padding-left: 10px;
+}
+
+.tower-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tower-result-grid.solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tower-result-card {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 14px 10px;
+  border-radius: var(--radius-lg);
+  border: 3px solid var(--line);
+  background: var(--surface);
+}
+
+.tower-result-card.is-cleared {
+  border-color: var(--tw-hit);
+  background: var(--tw-hit-soft);
+}
+
+.tower-result-name {
+  font-size: 15px;
+  font-weight: 900;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tower-result-status {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  color: #fff;
+}
+
+.tower-result-status.is-cleared {
+  background: var(--tw-hit);
+}
+
+.tower-result-floor {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: clamp(44px, 12vw, 84px);
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+  color: var(--tw-accent-strong);
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-result-floor i {
+  font-style: normal;
+  font-size: 0.34em;
+}
+
+.tower-result-floor-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+
+.tower-result-range {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-result-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+  margin: 8px 0 0;
+  width: 100%;
+}
+
+.tower-result-stats > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+
+.tower-result-stats dt {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.tower-result-stats dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 900;
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-result-stats-note {
+  margin: 2px 0 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tower-result-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+}
+
+.tower-result-top p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.tower-result-undo {
+  width: 100%;
+}
+
+/* =========================================================== phone landscape (TOWER)
+
+   The same problem COUNT-UP and 01 have at this size, and the same answer: stacked vertically the
+   status cards, the pips and the judgement buttons leave the board a sliver. On a short landscape
+   viewport the footer becomes a rail down the right and the board takes the height.
+
+   CSS only - the DOM order (header, climb, stage, footer) is unchanged, so tab order and the
+   keyboard route work exactly as they do in portrait. */
+@media (orientation: landscape) and (height <= 560px) {
+  .tower-shell {
+    --tw-rail: clamp(280px, 38vw, 380px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) calc(var(--tw-rail) + env(safe-area-inset-right, 0px));
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      'head head'
+      'climb climb'
+      'stage rail';
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .tower-header {
+    grid-area: head;
+    height: 40px;
+  }
+
+  .tower-identity strong {
+    font-size: 15px;
+  }
+
+  .tower-identity span {
+    font-size: 8px;
+  }
+
+  .tower-floor-badge strong {
+    font-size: 18px;
+  }
+
+  .tower-climb {
+    grid-area: climb;
+    padding-block: 3px;
+  }
+
+  .tower-stage {
+    grid-area: stage;
+    justify-content: flex-start;
+  }
+
+  /* Height is the scarce dimension here, so the board is sized off it and the caption stays put. */
+  .tower-board-main {
+    width: min(100%, 52vh);
+  }
+
+  .tower-target-text {
+    font-size: clamp(12px, 1.8vw, 16px);
+    padding: 4px 10px;
+  }
+
+  .tower-footer {
+    grid-area: rail;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    border-top: 0;
+    border-left: 3px solid var(--tw-accent);
+    padding-right: env(safe-area-inset-right, 0px);
+    /* A minimum even where the browser reports no inset, so repeated taps on the bottom row never
+       reach the home indicator / gesture area. */
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    box-shadow: -8px 0 30px #19241e14;
+  }
+
+  .tower-status,
+  .tower-turn-pips,
+  .tower-history,
+  .tower-menu,
+  .tower-notice {
+    flex: none;
+  }
+
+  /*
+   * The judgement buttons fill whatever the rail has left, so they are the easiest thing to hit on
+   * the screen no matter how short it is.
+   *
+   * `overflow-y: auto` is the safety valve: at this height the CONTINUE panel is the tallest thing
+   * the action area ever holds, and without it a panel taller than its share does not push the
+   * strip below down - it spills over it, and the 次へ button underneath stops being clickable.
+   * Everything below is what keeps that panel inside its share in the first place.
+   */
+  .tower-actions {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    align-content: stretch;
+    gap: 8px;
+    padding: 6px 8px;
+  }
+
+  .tower-judge {
+    min-height: clamp(56px, 22vh, 120px);
+  }
+
+  .tower-panel {
+    align-content: center;
+    gap: 4px;
+    padding: 8px;
+  }
+
+  .tower-panel strong {
+    font-size: clamp(12px, 1.7vw, 15px);
+  }
+
+  .tower-panel p {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .tower-panel small {
+    font-size: 9px;
+  }
+
+  .tower-continue-row {
+    gap: 8px;
+  }
+
+  .tower-primary,
+  .tower-secondary {
+    min-height: 42px;
+    font-size: 13px;
+    padding-inline: 8px;
+  }
+
+  .tower-status-card {
+    padding: 3px 6px;
+  }
+
+  .tower-turn-pips {
+    padding: 3px 6px;
+  }
+
+  .tower-pip {
+    height: 22px;
+    font-size: 10px;
+  }
+
+  .tower-history {
+    height: 30px;
+  }
+
+  .tower-menu {
+    height: 40px;
+  }
+
+  .tower-modal-card {
+    max-height: calc(100vh - 24px);
+  }
+}
