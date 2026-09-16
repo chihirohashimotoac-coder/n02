@@ -1,5 +1,6 @@
 interface Props {
   onSelectCountUp: () => void;
+  onSelectTower: () => void;
   onExit: () => void;
 }
 
@@ -22,7 +23,7 @@ const COMING_SOON = [
   },
 ] as const;
 
-export default function PracticeHub({ onSelectCountUp, onExit }: Props) {
+export default function PracticeHub({ onSelectCountUp, onSelectTower, onExit }: Props) {
   return (
     <div className="panel setup-panel practice-hub">
       <div className="section-heading">
@@ -34,7 +35,7 @@ export default function PracticeHub({ onSelectCountUp, onExit }: Props) {
       </div>
 
       <p className="practice-note">
-        ダーツの基礎練習をまとめたメニューです。今回プレイできるのは COUNT-UP です。
+        ダーツの基礎練習をまとめたメニューです。今回プレイできるのは COUNT-UP と TOWER OF THE DARTS です。
       </p>
 
       <div className="practice-card-grid">
@@ -43,6 +44,16 @@ export default function PracticeHub({ onSelectCountUp, onExit }: Props) {
           <strong>COUNT-UP</strong>
           <span className="practice-card-sub">8 ROUNDS / TOTAL SCORE</span>
           <small>8ラウンド24ダーツで合計得点を競う、最も基本的なスコア練習。</small>
+          <span className="practice-card-go" aria-hidden="true">
+            ➤
+          </span>
+        </button>
+
+        <button type="button" className="practice-card playable" data-practice="tower" onClick={onSelectTower}>
+          <span className="practice-card-badge">PLAYABLE</span>
+          <strong>TOWER OF THE DARTS</strong>
+          <span className="practice-card-sub">100 FLOORS / LIFE &amp; CONTINUE</span>
+          <small>100階ぶんのお題を1投ずつ突破する登頂モード。成功／MISSを自分で入力して進みます。</small>
           <span className="practice-card-go" aria-hidden="true">
             ➤
           </span>

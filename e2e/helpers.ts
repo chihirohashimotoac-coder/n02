@@ -149,6 +149,73 @@ export async function startCountUp(
 }
 
 /**
+ * Opens PRACTICE → TOWER and starts a climb.
+ *
+ * LIFE defaults to 3 rather than the product default of 5, because a GAME OVER is then three darts
+ * away instead of five and most tests below are about what happens at LIFE 0. Pass `life: null` to
+ * leave the picker alone and get the real default.
+ */
+export async function startTower(
+  page: Page,
+  options: { players?: 1 | 2; names?: string[]; life?: number | null; startFloor?: number } = {},
+) {
+  await openPracticeHub(page);
+  await page.locator('.practice-card[data-practice="tower"]').click();
+  await page.waitForSelector('.tower-setup');
+  if (options.players === 2) await page.getByRole('button', { name: /2 PLAYERS/ }).click();
+
+  const life = options.life === undefined ? 3 : options.life;
+  if (life !== null) {
+    await page.locator('.tower-life-grid button', { hasText: new RegExp(`^${life}$`) }).click();
+  }
+  if (options.startFloor) {
+    await page.locator('.tower-floor-grid button', { hasText: new RegExp(`^${options.startFloor}F`) }).click();
+  }
+
+  for (const [index, name] of (options.names ?? []).entries()) {
+    await page.locator('.name-input input').nth(index).fill(name);
+  }
+  await page.getByRole('button', { name: /TOWER を開始/ }).click();
+  await page.waitForSelector('.tower-shell');
+  // The first-run help opens over the board on a fresh browser; dismiss it so play can start.
+  const help = page.getByRole('button', { name: 'はじめる' });
+  if (await help.isVisible()) await help.click();
+}
+
+/**
+ * TOWER deliberately swallows a second activation within ~220ms, so a double tap or a touch that
+ * also reports a click is one dart. Playwright clicks far faster than a person can throw, so every
+ * helper below waits past that window first - the delay is the point, not a workaround.
+ */
+export const TOWER_INPUT_GAP_MS = 280;
+
+/** Waits past TOWER's repeat lock, then clicks. Use for any TOWER control a test drives in a row. */
+export async function towerClick(page: Page, selector: string) {
+  await page.waitForTimeout(TOWER_INPUT_GAP_MS);
+  await page.locator(selector).click();
+}
+
+/** Waits past TOWER's repeat lock, then clicks a control by its accessible name. */
+export async function towerClickByName(page: Page, name: string | RegExp) {
+  await page.waitForTimeout(TOWER_INPUT_GAP_MS);
+  await page.getByRole('button', { name }).click();
+}
+
+/** One TOWER judgement, by button. */
+export async function judgeTower(page: Page, result: 'hit' | 'miss') {
+  await towerClick(page, result === 'hit' ? '.tower-judge.hit' : '.tower-judge.miss');
+}
+
+/** Judges `count` darts the same way, taking the pickup screen's 次へ whenever it appears. */
+export async function judgeTowerDarts(page: Page, result: 'hit' | 'miss', count: number) {
+  for (let index = 0; index < count; index += 1) {
+    await judgeTower(page, result);
+    const next = page.locator('.tower-panel.pickup button');
+    if (await next.isVisible()) await towerClick(page, '.tower-panel.pickup button');
+  }
+}
+
+/**
  * Does this device get an on-screen keypad? Narrow screens and wide touch-first screens do; a
  * mouse/keyboard desktop types instead. Mirrors the CSS capability test used by 01 and COUNT-UP.
  */
