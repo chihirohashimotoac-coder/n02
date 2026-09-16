@@ -36,6 +36,12 @@ export default defineConfig({
         // movies themselves are deliberately NOT precached - 2.7MB is far too much to hold up a
         // service-worker install for something the poster already covers.
         globPatterns: ['**/*.{js,css,html,svg,webmanifest,webp}'],
+        // ...but not TOWER's scenery, for the same reason. That is ~1.2MB of webp across five
+        // stairwells and the gauge tower, and holding up a service-worker install with it would tax
+        // every player - including everyone who never opens TOWER - for artwork the mode degrades
+        // gracefully without: TowerScene and TowerGauge both draw their own fallback. It is cached
+        // at runtime instead, below.
+        globIgnores: ['**/tower/**'],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
@@ -43,8 +49,19 @@ export default defineConfig({
         // ...and the navigation fallback must not swallow them: an award asset request is not a
         // navigation, and answering it with index.html would break the <video> rather than let it
         // fall back cleanly.
-        navigateFallbackDenylist: [/\/awards\//],
+        navigateFallbackDenylist: [/\/awards\//, /\/tower\//],
         runtimeCaching: [
+          {
+            // TOWER scenery: fetched when a band is first shown, then served from the cache. A
+            // climb crosses at most five bands, so the cache is bounded by the artwork itself.
+            urlPattern: ({ url }: { url: URL }) => url.pathname.includes('/tower/'),
+            handler: 'CacheFirst' as const,
+            options: {
+              cacheName: 'n02-tower-art-v1',
+              expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 180 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             // Award movies: cached the first time they are actually fetched (the idle warm-up on
             // entering a mode, or the overlay itself), then served from the cache offline. Opaque

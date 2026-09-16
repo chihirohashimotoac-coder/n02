@@ -1,21 +1,26 @@
-import { useId } from 'react';
+import { useEffect, useId, useState } from 'react';
+import { TOWER_SCENE_BANDS, towerSceneUrl } from '../../domain/practice/towerAssets';
 
 interface Props {
-  /** 1...5 - which stretch of the tower the climb is in. Only the palette changes with it. */
+  /** 1...5 - which stretch of the tower the climb is in. Picks the artwork and the palette. */
   band: number;
 }
 
 /**
  * The stairwell the climb is happening in.
  *
- * Drawn rather than photographed: n02 ships no photographic assets, the source video's frames are
- * evidence and not game art, and a stock photograph would put a licence on the repository. So this
- * builds the scene out of geometry - a masonry back wall, a flight of stairs in one-point
- * perspective, an arch with daylight behind it, and wall torches - which also lets the whole thing
- * re-light per band from four colour tokens and stay a few KB.
+ * Two layers. The artwork in web/public/tower/ is the scene a player sees; underneath it sits a
+ * scene built out of geometry - masonry, a flight of stairs in one-point perspective, an arch and
+ * wall torches - which paints instantly, covers the moment before a 200KB image arrives, and is
+ * what remains if the file is missing, blocked, or being asked for offline before it was ever
+ * fetched. Neither layer is decoration for the other: the drawing is the fallback, and it is
+ * exercised whenever the artwork cannot load.
  *
- * It is decoration behind the board and is `aria-hidden` at the call site: nothing here carries
- * information the player needs, and the floor number is already announced elsewhere.
+ * The source video's frames are still not used here. The artwork was supplied separately; the
+ * frames stay evidence, and no game asset is cut from them.
+ *
+ * All of it is decoration behind the board and is `aria-hidden`: nothing here carries information
+ * the player needs, and the floor number is announced elsewhere.
  *
  * Gradient ids come from `useId`, so two scenes on one page - or the scene next to the board and
  * the gauge - can never collide over a document-wide id.
@@ -173,7 +178,60 @@ const TORCHES = [
   { x: VIEW_W - 108, y: 300, scale: 1.15 },
 ];
 
+/**
+ * The photographed scene for one band.
+ *
+ * Mounted with `key={band}` by the parent, so a band change makes a new element and its load state
+ * starts clean - no chance of showing the sixties' scene while the eighties' file is still coming
+ * down the wire. Until it reports `load` it stays transparent and the drawing shows through; if it
+ * reports `error` it stays that way for good and the drawing is simply what the band looks like.
+ *
+ * On a successful load it warms the next band during idle time, the way the award assets do: a
+ * climb only crosses a band boundary every 20 floors, and by then the file is already there.
+ */
+function ScenePhoto({ band }: Props) {
+  const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading');
+
+  useEffect(() => {
+    if (state !== 'ready' || band >= TOWER_SCENE_BANDS) return;
+    const warm = () => {
+      const next = new Image();
+      next.src = towerSceneUrl(band + 1);
+    };
+    // requestIdleCallback is not in Safari; a short timeout is the same idea, late enough that it
+    // never competes with the scene the player is actually looking at.
+    const timer = window.setTimeout(warm, 1200);
+    return () => window.clearTimeout(timer);
+  }, [band, state]);
+
+  if (state === 'failed') return null;
+
+  return (
+    <img
+      className={`tower-scene-photo ${state === 'ready' ? 'is-ready' : ''}`.trim()}
+      src={towerSceneUrl(band)}
+      alt=""
+      aria-hidden="true"
+      decoding="async"
+      onLoad={() => setState('ready')}
+      onError={() => setState('failed')}
+    />
+  );
+}
+
 export default function TowerScene({ band }: Props) {
+  return (
+    <div className="tower-scene" aria-hidden="true">
+      <TowerSceneDrawing band={band} />
+      <ScenePhoto key={band} band={band} />
+      {/* Holds the board and the white type above the artwork, which is brightest exactly where the
+          board sits. Without it the summit scene washes out the board's own numbers. */}
+      <div className="tower-scene-scrim" />
+    </div>
+  );
+}
+
+function TowerSceneDrawing({ band }: Props) {
   const palette = paletteFor(band);
   const uid = useId().replace(/:/g, '');
   const wallId = `tw-wall-${uid}`;
@@ -183,7 +241,7 @@ export default function TowerScene({ band }: Props) {
 
   return (
     <svg
-      className="tower-scene"
+      className="tower-scene-drawn"
       viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
       preserveAspectRatio="xMidYMid slice"
       aria-hidden="true"

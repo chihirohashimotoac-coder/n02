@@ -9,6 +9,7 @@ import {
   type TowerState,
 } from '../../domain/practice/tower';
 import { TOWER_HELP_SEEN_KEY } from '../../storage/towerStorage';
+import { TOWER_GAUGE_ART } from '../../domain/practice/towerAssets';
 
 /**
  * The play screen's input contract: what a dart costs, what is refused, and what the keyboard is
@@ -115,16 +116,66 @@ describe('the judgement buttons', () => {
     expect(thrownPips()).toEqual([]);
   });
 
-  it('draws the climb as a tower that fills as floors are beaten', () => {
+  it('lights the tower up to the floor the player is past', () => {
     renderGame(game(1, { currentFloor: 51, lastClearedFloor: 50 }));
     const gauge = document.querySelector('.tower-gauge');
     expect(gauge).not.toBeNull();
-    const blocks = document.querySelectorAll('.tower-gauge-block');
-    const climbed = document.querySelectorAll('.tower-gauge-block.is-climbed');
-    expect(blocks).toHaveLength(20);
-    // Half the tower beaten, so half its storeys are lit.
-    expect(climbed).toHaveLength(10);
     expect(gauge?.getAttribute('aria-label')).toContain('50F');
+
+    // Half the tower beaten, so the lit copy is clipped to halfway up the shaft: the boundary sits
+    // midway between the top of the plinth and the top of the shaft.
+    const lit = document.querySelector<HTMLElement>('.tower-gauge-art.is-lit');
+    const midway = (TOWER_GAUGE_ART.shaftBottomPct + TOWER_GAUGE_ART.shaftTopPct) / 2;
+    expect(lit?.style.clipPath).toBe(`inset(${midway}% 0 0 0)`);
+
+    // ...and the player's marker rides that same boundary.
+    const marker = document.querySelector<HTMLElement>('.tower-gauge-marker.p0');
+    expect(marker?.style.top).toBe(`${midway}%`);
+  });
+
+  it('lights the crown only on a finished climb, and only the plinth before the first floor', () => {
+    renderGame(game(1, { currentFloor: 1, lastClearedFloor: 0 }));
+    const litAt = () => document.querySelector<HTMLElement>('.tower-gauge-art.is-lit')?.style.clipPath;
+    // Nothing beaten: the fill starts at the top of the plinth, so only the base glows.
+    expect(litAt()).toBe(`inset(${TOWER_GAUGE_ART.shaftBottomPct}% 0 0 0)`);
+
+    cleanup();
+    renderGame(game(1, { currentFloor: 100, lastClearedFloor: 100 }));
+    // 100F beaten lights the whole file, crown included - which nothing short of a clear does.
+    expect(litAt()).toBe('inset(0% 0 0 0)');
+
+    cleanup();
+    renderGame(game(1, { currentFloor: 100, lastClearedFloor: 99 }));
+    expect(litAt()).not.toBe('inset(0% 0 0 0)');
+  });
+
+  it('falls back to a drawn gauge when the artwork cannot be fetched', () => {
+    renderGame(game(1, { currentFloor: 51, lastClearedFloor: 50 }));
+    expect(document.querySelector('.tower-gauge-fallback')).toBeNull();
+
+    fireEvent.error(document.querySelector('.tower-gauge-art')!);
+
+    expect(document.querySelectorAll('.tower-gauge-art')).toHaveLength(0);
+    expect(document.querySelectorAll('.tower-gauge-block')).toHaveLength(20);
+    expect(document.querySelectorAll('.tower-gauge-block.is-climbed')).toHaveLength(10);
+    // The gauge still says where everyone is, however it is drawn.
+    expect(document.querySelector('.tower-gauge')?.getAttribute('aria-label')).toContain('50F');
+  });
+
+  it('shows the band artwork over the drawn scene, and keeps the drawing if it fails', () => {
+    renderGame(game(1, { currentFloor: 45, lastClearedFloor: 44 }));
+    const photo = document.querySelector<HTMLImageElement>('.tower-scene-photo');
+    expect(photo?.getAttribute('src')).toContain('tower/tower-stage-041-060.webp');
+    // The drawing is underneath from the first paint, not swapped in on failure.
+    expect(document.querySelector('.tower-scene-drawn')).not.toBeNull();
+    expect(photo?.className).not.toContain('is-ready');
+
+    fireEvent.load(photo!);
+    expect(document.querySelector('.tower-scene-photo')?.className).toContain('is-ready');
+
+    fireEvent.error(document.querySelector('.tower-scene-photo')!);
+    expect(document.querySelector('.tower-scene-photo')).toBeNull();
+    expect(document.querySelector('.tower-scene-drawn')).not.toBeNull();
   });
 
   it('changes the stairwell behind the board as the climb gets higher', () => {

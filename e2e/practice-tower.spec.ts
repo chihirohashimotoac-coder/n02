@@ -299,12 +299,32 @@ test.describe('TOWER settings', () => {
     await startTower(page, { startFloor: 61, names: ['AKI'] });
     await expect(floorBadge(page)).toContainText('61');
 
-    // 60 of 100 floors are granted, so 12 of the gauge's 20 storeys are already lit.
-    await expect(page.locator('.tower-gauge-block.is-climbed')).toHaveCount(12);
+    // 60 of 100 floors are granted, so the tower is lit to roughly three fifths of its shaft. The
+    // clip is measured from the top, so 60% climbed leaves a little over 40% dark - the exact
+    // number comes from where the plinth and the crown sit in the artwork (TOWER_GAUGE_ART).
+    const litInset = await page
+      .locator('.tower-gauge-art.is-lit')
+      .evaluate((el) => Number(/([\d.]+)%/.exec((el as HTMLElement).style.clipPath)?.[1]));
+    expect(litInset).toBeGreaterThan(38);
+    expect(litInset).toBeLessThan(45);
     await expect(page.locator('.tower-gauge')).toHaveAttribute('aria-label', /60F/);
 
-    // ...and the stairwell is the one that belongs to the sixties, not the ground floor's.
+    // The gauge is the delivered artwork, actually served: a 404 would leave naturalWidth at 0 and
+    // silently drop the screen back to the drawn fallback.
+    const artWidths = await page
+      .locator('.tower-gauge-art')
+      .evaluateAll((nodes) => nodes.map((node) => (node as HTMLImageElement).naturalWidth));
+    expect(artWidths).toHaveLength(2);
+    expect(Math.min(...artWidths)).toBeGreaterThan(0);
+    await expect(page.locator('.tower-gauge-fallback')).toHaveCount(0);
+
+    // ...and the stairwell is the one that belongs to the sixties, not the ground floor's - both
+    // the drawn band and the artwork the band names.
     await expect(page.locator('.tower-stage')).toHaveAttribute('data-band', '4');
+    const scene = page.locator('.tower-scene-photo');
+    await expect(scene).toHaveAttribute('src', /tower-stage-061-080\.webp$/);
+    await expect(scene).toHaveClass(/is-ready/);
+    expect(await scene.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   });
 
   test('reports CLEAR FLOOR from a high start floor', async ({ page }) => {

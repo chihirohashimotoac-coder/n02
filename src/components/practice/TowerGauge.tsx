@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { TOWER_GAUGE_ART, gaugeLitInsetPct, towerGaugeUrl } from '../../domain/practice/towerAssets';
+
 interface GaugePlayer {
   name: string;
   /** Highest floor this player is past. */
@@ -14,138 +17,118 @@ interface Props {
 /**
  * The climb, drawn as the tower itself.
  *
- * It reads bottom-to-top like the original's tower: the stack of floor blocks fills upwards as
- * floors are beaten, and each player's marker rides the outside at their own height. A plain bar
- * would carry the same number, but the point of this gauge is that a glance at it says "how far up
- * the tower am I", which a horizontal bar never quite does.
+ * It reads bottom-to-top like the original's tower: the stonework fills with light as floors are
+ * beaten, and each player's marker rides the shaft at their own height. A plain bar would carry the
+ * same number, but the point of this gauge is that a glance at it says "how far up the tower am I",
+ * which a horizontal bar never quite does.
  *
- * Drawn as discrete blocks rather than one clipped shape on purpose: it looks like stacked storeys,
- * and it needs no `clipPath` or `mask`, so the gauge introduces no document-wide SVG id that could
- * collide with the board beside it or with a second gauge on the same screen.
+ * The tower is the supplied artwork (web/public/tower/tower-gauge.webp), laid down twice: a dimmed
+ * copy for the part still ahead, and a full-brightness copy clipped to the part already climbed.
+ * Same file, same box, so the two always line up and the browser fetches it once.
+ *
+ * The box is given the image's own aspect ratio, which is what makes the percentages honest: a
+ * `clip-path: inset(...)` is measured against the element, so unless the element IS the image, a
+ * percentage taken off the artwork would land somewhere else on screen. The measurements
+ * themselves live in towerAssets.ts.
+ *
+ * If the file cannot be fetched the gauge falls back to a plain stack of storey blocks - the shape
+ * it had before the artwork existed - so the climb is still readable offline or on a broken deploy.
  */
 
-/** One block per this many floors. 100 / 5 = 20 storeys, which reads as a tower rather than a bar. */
+/** One block per this many floors, in the fallback gauge. 100 / 5 = 20 storeys. */
 const FLOORS_PER_BLOCK = 5;
-
-/*
- * A deliberately tall, narrow viewBox. The gauge is laid out as a slim full-height column beside
- * the board, and the drawing scales to fit its width - so the taller the box is relative to its
- * width, the more of the column's height the tower actually occupies.
- */
-const VIEW_W = 40;
-const VIEW_H = 520;
-/** The tower tapers as it rises: half-width at the base and at the top of the shaft. */
-const BASE_HALF = 13;
-const TOP_HALF = 7.5;
-const SHAFT_BOTTOM = 495;
-const SHAFT_TOP = 58;
-const CENTRE = VIEW_W / 2;
 
 function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-/** Half-width of the tower at a height ratio (0 at the base, 1 at the top of the shaft). */
-function halfWidthAt(ratio: number): number {
-  return round(BASE_HALF + (TOP_HALF - BASE_HALF) * ratio);
-}
-
-function yAt(ratio: number): number {
-  return round(SHAFT_BOTTOM + (SHAFT_TOP - SHAFT_BOTTOM) * ratio);
-}
-
-interface Block {
-  d: string;
-  /** The highest floor this block represents, so it can be compared against a cleared floor. */
-  topFloor: number;
-}
-
-/** Static geometry: the storeys, bottom first. */
-function buildBlocks(finalFloor: number): Block[] {
-  const count = Math.ceil(finalFloor / FLOORS_PER_BLOCK);
-  return Array.from({ length: count }, (_, index) => {
-    const from = index / count;
-    const to = (index + 1) / count;
-    // A small gap between storeys, so the courses read as separate floors.
-    const yBottom = yAt(from);
-    const yTop = yAt(to) + 2;
-    const halfBottom = halfWidthAt(from);
-    const halfTop = halfWidthAt(to);
-    return {
-      topFloor: Math.min(finalFloor, (index + 1) * FLOORS_PER_BLOCK),
-      d: [
-        `M${round(CENTRE - halfBottom)} ${yBottom}`,
-        `L${round(CENTRE - halfTop)} ${yTop}`,
-        `L${round(CENTRE + halfTop)} ${yTop}`,
-        `L${round(CENTRE + halfBottom)} ${yBottom}`,
-        'Z',
-      ].join(''),
-    };
-  });
-}
-
-/** The crenellated cap and the plinth, which are what make the silhouette read as a tower. */
-function buildRoof(): string {
-  const half = TOP_HALF + 2.5;
-  const top = SHAFT_TOP - 3;
-  const merlonTop = top - 18;
-  const merlons = 5;
-  const step = (half * 2) / (merlons * 2 - 1);
-  const parts: string[] = [`M${round(CENTRE - half)} ${top}`];
-  for (let index = 0; index < merlons; index += 1) {
-    const left = round(CENTRE - half + index * step * 2);
-    const right = round(left + step);
-    parts.push(`L${left} ${merlonTop}`, `L${right} ${merlonTop}`, `L${right} ${top}`);
-  }
-  parts.push(`L${round(CENTRE + half)} ${top}`, 'Z');
-  return parts.join('');
-}
-
-const ROOF = buildRoof();
-const PLINTH = `M${round(CENTRE - BASE_HALF - 3.5)} ${VIEW_H} L${round(CENTRE - BASE_HALF - 1)} ${SHAFT_BOTTOM} L${round(
-  CENTRE + BASE_HALF + 1,
-)} ${SHAFT_BOTTOM} L${round(CENTRE + BASE_HALF + 3.5)} ${VIEW_H} Z`;
-
 export default function TowerGauge({ players, finalFloor, className = '' }: Props) {
-  const blocks = buildBlocks(finalFloor);
+  const [artFailed, setArtFailed] = useState(false);
   const leader = players.reduce((best, player) => Math.max(best, player.clearedFloor), 0);
-  const label = players
-    .map((player) => `${player.name} ${player.clearedFloor}F`)
-    .join('、');
+  const label = players.map((player) => `${player.name} ${player.clearedFloor}F`).join('、');
 
   return (
-    <svg
-      className={`tower-gauge ${className}`.trim()}
-      viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-      preserveAspectRatio="xMidYMax meet"
+    <div
+      className={`tower-gauge ${artFailed ? 'is-drawn' : ''} ${className}`.trim()}
+      style={{ aspectRatio: `${TOWER_GAUGE_ART.width} / ${TOWER_GAUGE_ART.height}` }}
       role="img"
       aria-label={`塔の進行：${finalFloor}F 中 ${label}`}
     >
-      <path className="tower-gauge-plinth" d={PLINTH} />
-
-      {blocks.map((block) => (
-        <path
-          key={block.topFloor}
-          className={`tower-gauge-block ${block.topFloor <= leader ? 'is-climbed' : ''}`}
-          d={block.d}
-        />
-      ))}
-
-      <path className={`tower-gauge-roof ${leader >= finalFloor ? 'is-climbed' : ''}`} d={ROOF} />
+      {artFailed ? (
+        <FallbackTower finalFloor={finalFloor} leader={leader} />
+      ) : (
+        <>
+          {/* The climb still ahead: the same tower, held back in the dark. */}
+          <img
+            className="tower-gauge-art"
+            src={towerGaugeUrl()}
+            alt=""
+            aria-hidden="true"
+            decoding="async"
+            onError={() => setArtFailed(true)}
+          />
+          {/* The climb already made, lit from the plinth up to where the leader stands. */}
+          <img
+            className="tower-gauge-art is-lit"
+            src={towerGaugeUrl()}
+            alt=""
+            aria-hidden="true"
+            decoding="async"
+            style={{ clipPath: `inset(${round(gaugeLitInsetPct(leader, finalFloor))}% 0 0 0)` }}
+          />
+        </>
+      )}
 
       {players.map((player, index) => {
-        const ratio = Math.min(1, Math.max(0, player.clearedFloor / finalFloor));
-        const y = yAt(ratio);
-        // Player 1 rides the left face, player 2 the right, so two markers never sit on top of
-        // each other however close the climbs are.
+        const inset = round(gaugeLitInsetPct(player.clearedFloor, finalFloor));
+        // Player 1 rides the left face of the shaft, player 2 the right, so two markers never sit
+        // on top of each other however close the climbs are.
         const left = index === 0;
-        const x = left ? CENTRE - halfWidthAt(ratio) - 1 : CENTRE + halfWidthAt(ratio) + 1;
-        const tip = left ? x + 6 : x - 6;
         return (
-          <polygon
+          <span
             key={index}
-            className={`tower-gauge-marker p${index} ${player.active ? 'is-active' : ''}`}
-            points={`${round(tip)},${y} ${round(x)},${round(y - 11)} ${round(x)},${round(y + 11)}`}
+            className={`tower-gauge-marker p${index} ${player.active ? 'is-active' : ''}`.trim()}
+            style={
+              left
+                ? { top: `${inset}%`, right: `${round(100 - TOWER_GAUGE_ART.shaftLeftPct)}%` }
+                : { top: `${inset}%`, left: `${TOWER_GAUGE_ART.shaftRightPct}%` }
+            }
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * What the gauge looks like with no artwork: storeys stacked bottom-up, lighting as they are
+ * beaten. Stretched to the same box, so the markers keep pointing at the right heights.
+ */
+function FallbackTower({ finalFloor, leader }: { finalFloor: number; leader: number }) {
+  const count = Math.ceil(finalFloor / FLOORS_PER_BLOCK);
+  const { shaftTopPct, shaftBottomPct, shaftLeftPct, shaftRightPct } = TOWER_GAUGE_ART;
+  const span = shaftBottomPct - shaftTopPct;
+
+  return (
+    <svg
+      className="tower-gauge-fallback"
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {Array.from({ length: count }, (_, index) => {
+        const topFloor = Math.min(finalFloor, (index + 1) * FLOORS_PER_BLOCK);
+        const bottom = shaftBottomPct - (index / count) * span;
+        const top = shaftBottomPct - ((index + 1) / count) * span;
+        return (
+          <rect
+            key={topFloor}
+            className={`tower-gauge-block ${topFloor <= leader ? 'is-climbed' : ''}`.trim()}
+            x={shaftLeftPct}
+            y={round(top)}
+            width={round(shaftRightPct - shaftLeftPct)}
+            height={round(bottom - top - 0.25)}
           />
         );
       })}
