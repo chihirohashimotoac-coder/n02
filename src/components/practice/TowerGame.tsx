@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import DialogShell from '../common/DialogShell';
 import TowerBoard from './TowerBoard';
 import TowerGauge from './TowerGauge';
+import TowerScene from './TowerScene';
 import {
   activeTowerPlayer,
   advanceTurn,
@@ -295,13 +296,10 @@ export default function TowerGame({ state, onChange, onExit }: Props) {
         </div>
       </header>
 
-      {/* The stairwell behind the board. `data-band` is the only thing that changes with height,
-          so the whole scene is one CSS token swap per 20 floors rather than any per-floor work. */}
+      {/* The stairwell behind the board. The band is the only thing that changes with height: the
+          scene re-lights every 20 floors rather than doing any per-floor work. */}
       <div className="tower-stage" data-band={sceneBand(floor, rules.finalFloor)}>
-        <div className="tower-scene" aria-hidden="true">
-          <span className="tower-scene-steps" />
-          <span className="tower-scene-glow" />
-        </div>
+        <TowerScene band={sceneBand(floor, rules.finalFloor)} />
 
         <p className="tower-turn-line">
           <b>{active.name}</b>
@@ -310,25 +308,30 @@ export default function TowerGame({ state, onChange, onExit }: Props) {
           </span>
         </p>
 
-        {/* No written description of the target under the board: the board IS the description, and
-            a second copy in words only competed with it for the space it needs. The same sentence
-            is still the board's accessible name, so a screen reader gets it. */}
-        <div className="tower-board-area">
-          <TowerBoard
-            regions={regions}
-            className="tower-board-main"
-            ariaLabel={`${active.name} の ${floor}F のお題：${targetText}`}
+        {/* Board and gauge are one centred pair, not two things pinned to opposite edges: on a wide
+            screen the board is sized by the height it has and the gauge sits immediately beside it,
+            rather than drifting out to the window edge. */}
+        <div className="tower-play-row">
+          {/* No written description of the target under the board: the board IS the description,
+              and a second copy in words only competed with it for the space it needs. The same
+              sentence is still the board's accessible name, so a screen reader gets it. */}
+          <div className="tower-board-area">
+            <TowerBoard
+              regions={regions}
+              className="tower-board-main"
+              ariaLabel={`${active.name} の ${floor}F のお題：${targetText}`}
+            />
+          </div>
+
+          <TowerGauge
+            finalFloor={rules.finalFloor}
+            players={indexes.map((index) => ({
+              name: state.players[index].name,
+              clearedFloor: state.players[index].lastClearedFloor,
+              active: index === state.activePlayerIndex,
+            }))}
           />
         </div>
-
-        <TowerGauge
-          finalFloor={rules.finalFloor}
-          players={indexes.map((index) => ({
-            name: state.players[index].name,
-            clearedFloor: state.players[index].lastClearedFloor,
-            active: index === state.activePlayerIndex,
-          }))}
-        />
 
         {flash && (
           <p className={`tower-flash is-${flash.kind}`} key={flash.id} role="status">

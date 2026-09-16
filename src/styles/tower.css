@@ -30,7 +30,7 @@
   --tw-board-light: #ded6c2;
   --tw-board-red: #8c3a33;
   --tw-board-green: #245f45;
-  --tw-board-dim: 0.22;
+  --tw-board-dim: 0.3;
   --tw-lit: #ffd21f;
   --tw-lit-edge: #7a5a00;
   --tw-wire: #6c7470;
@@ -57,7 +57,7 @@
   --tw-board-light: #6d6a5e;
   --tw-board-red: #5e2a26;
   --tw-board-green: #14402f;
-  --tw-board-dim: 0.3;
+  --tw-board-dim: 0.38;
   --tw-lit: #ffe45c;
   --tw-lit-edge: #a08300;
   --tw-wire: #3c4640;
@@ -99,7 +99,9 @@
 
 .tower-seg {
   stroke: var(--tw-wire);
-  stroke-width: 0.6;
+  /* The real TRIPLE / DOUBLE bands are only ~5 viewBox units wide, so the wire has to stay hairline
+     or it eats the band it is supposed to outline. */
+  stroke-width: 0.4;
   /* Unlit regions stay recognisably a dartboard but drop right back, so the lit set reads first. */
   opacity: var(--tw-board-dim);
 }
@@ -120,7 +122,7 @@
 .tower-seg.is-lit {
   fill: var(--tw-lit);
   stroke: var(--tw-lit-edge);
-  stroke-width: 0.9;
+  stroke-width: 0.5;
   opacity: 1;
 }
 
@@ -233,75 +235,17 @@
 
 /* ================================================================== the stairwell behind the board
 
-   One backdrop, five looks. `data-band` on the stage swaps the four tokens below every 20 floors,
-   so a player can see they have got somewhere without reading the number. Drawn entirely with
-   gradients - no images, and nothing from the source video. */
-
-.tower-stage[data-band='1'] {
-  --scene-far: #241a12;
-  --scene-near: #4c3625;
-  --scene-step: #6b4d321f;
-  --scene-glow: #ff9a3c40;
-}
-
-.tower-stage[data-band='2'] {
-  --scene-far: #14211a;
-  --scene-near: #2d4737;
-  --scene-step: #4d7a5e1f;
-  --scene-glow: #6fd7a238;
-}
-
-.tower-stage[data-band='3'] {
-  --scene-far: #111c2c;
-  --scene-near: #26405f;
-  --scene-step: #4a7bb01f;
-  --scene-glow: #5aa8ff38;
-}
-
-.tower-stage[data-band='4'] {
-  --scene-far: #1a1430;
-  --scene-near: #3d2e61;
-  --scene-step: #7d5cc41f;
-  --scene-glow: #b57cff3a;
-}
-
-.tower-stage[data-band='5'] {
-  --scene-far: #0e1531;
-  --scene-near: #2e3f72;
-  --scene-step: #7f93d41f;
-  --scene-glow: #ffd45c45;
-}
+   The scene itself is drawn in TowerScene.tsx (masonry, a flight in perspective, an arch and
+   torches) because flat gradients could not carry it. All this file does is place it and give the
+   stage the text colour that sits on top of it. */
 
 .tower-scene {
   position: absolute;
   inset: 0;
   z-index: 0;
-  overflow: hidden;
-  background: linear-gradient(to top, var(--scene-far) 10%, var(--scene-near) 100%);
-}
-
-/* The stair treads: parallel courses rising to the right, plus the wall's vertical joints. */
-.tower-scene-steps {
-  position: absolute;
-  inset: -12% -12% -2%;
-  background:
-    repeating-linear-gradient(-13deg, transparent 0 30px, var(--scene-step) 30px 33px),
-    repeating-linear-gradient(90deg, transparent 0 58px, #ffffff0a 58px 60px);
-}
-
-/* Light from the floor above, which is where the climb is going. */
-.tower-scene-glow {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(120% 70% at 50% -10%, var(--scene-glow), transparent 70%),
-    radial-gradient(140% 100% at 50% 100%, #00000059, transparent 65%);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .tower-scene-glow {
-    transition: background 420ms ease-out;
-  }
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 /* ================================================================================== play screen */
@@ -314,20 +258,32 @@
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto minmax(0, 1fr);
-  grid-template-areas:
-    'turn gauge'
-    'board gauge';
-  gap: 2px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: 5px max(6px, env(safe-area-inset-left, 0px)) 6px max(6px, env(safe-area-inset-right, 0px));
   overflow: hidden;
   color: #f2efe8;
 }
 
+/*
+ * Board and gauge as one centred pair. The board area is square (`aspect-ratio`), so on a wide
+ * screen its width follows the height it was given and the gauge lands right next to it instead of
+ * out at the window edge; on a narrow screen the board shrinks to the width available and the pair
+ * still sits together.
+ */
+.tower-play-row {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: clamp(4px, 1.4vw, 14px);
+}
+
 .tower-turn-line {
-  grid-area: turn;
   position: relative;
   z-index: 1;
   margin: 0;
@@ -349,10 +305,10 @@
 }
 
 .tower-board-area {
-  grid-area: board;
-  position: relative;
-  z-index: 1;
-  min-height: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 100%;
+  aspect-ratio: 1;
   display: grid;
   place-items: center;
 }
@@ -368,8 +324,7 @@
 }
 
 .tower-gauge {
-  grid-area: gauge;
-  z-index: 1;
+  flex: none;
   width: clamp(34px, 10vw, 54px);
   height: 100%;
   filter: drop-shadow(0 2px 6px #00000066);
@@ -669,11 +624,20 @@
   background: var(--tw-accent-soft);
 }
 
+/*
+ * The judgement row is capped and centred rather than stretched edge to edge: the buttons keep
+ * their shape (see `aspect-ratio` below) and simply get smaller, which is what buys the board its
+ * height back.
+ */
 .tower-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  padding: 6px 8px;
+  gap: clamp(10px, 4vw, 28px);
+  padding: 5px 8px;
+  width: 100%;
+  max-width: clamp(290px, 82vw, 430px);
+  margin-inline: auto;
+  justify-items: center;
 }
 
 /*
@@ -683,14 +647,19 @@
  * colour.
  */
 .tower-judge {
+  position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  /* Small, as the board is what the height is for - but never below a comfortable touch target,
-     which is the floor of this clamp rather than something a short viewport can erode. */
-  min-height: clamp(56px, 7.4vh, 68px);
+  gap: 8px;
+  /* One fixed shape, scaled as a whole: the width comes from the capped row above and the height
+     follows it, so making the buttons smaller never turns them into a different, flatter button.
+     The floor keeps them at a comfortable touch target on the shortest supported viewport. */
+  width: 100%;
+  aspect-ratio: 16 / 5;
+  min-height: 44px;
+  max-height: 64px;
   border-radius: var(--radius-lg);
   border: 3px solid transparent;
   font-weight: 900;
@@ -701,22 +670,28 @@
 
 .tower-judge i {
   font-style: normal;
-  font-size: clamp(17px, 4vw, 24px);
+  font-size: clamp(15px, 3.4vw, 21px);
   line-height: 1;
 }
 
 .tower-judge strong {
-  font-size: clamp(15px, 3.8vw, 21px);
+  font-size: clamp(14px, 3.6vw, 20px);
   letter-spacing: 0.06em;
+  line-height: 1;
 }
 
+/* Out of the flow, in the corner: the key hint must never be what decides the button's height. */
 .tower-judge kbd {
-  font-size: 10px;
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  font-size: 9px;
   font-weight: 800;
-  padding: 0 6px;
+  line-height: 1.5;
+  padding: 0 5px;
   border-radius: var(--radius-sm);
-  background: #ffffff59;
-  border: 1px solid #ffffff73;
+  background: #ffffff40;
+  border: 1px solid #ffffff5e;
 }
 
 /* The key badges mean nothing without a keyboard, so a touch-only device is not shown them. */
@@ -1365,13 +1340,18 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    align-content: stretch;
-    gap: 8px;
+    /* Centred, not stretched: stretching the rows overrode the buttons' aspect-ratio and turned
+       them into tall blocks only in landscape. */
+    align-content: center;
+    gap: 10px;
     padding: 6px 8px;
+    max-width: 100%;
   }
 
+  /* No height override here: the buttons keep the one shape they have everywhere, and the rail
+     centres them in whatever height it has left. */
   .tower-judge {
-    min-height: clamp(56px, 22vh, 120px);
+    max-height: 56px;
   }
 
   .tower-panel {

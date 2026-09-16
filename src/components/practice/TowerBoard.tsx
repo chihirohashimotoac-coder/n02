@@ -37,16 +37,28 @@ interface Props {
  */
 
 /**
- * Radii in viewBox units. Proportional to a real board, except that the TRIPLE and DOUBLE bands are
- * widened: at true scale they are ~4% of the radius each, which on a phone is a hairline that
- * cannot be read across the room, and reading which band is lit is the whole task here.
+ * Radii in viewBox units, at the true proportions of a steel-tip board.
+ *
+ * Taken from the WDF/BDO dimensions and scaled by `MM_TO_VIEW`: double bull 6.35mm radius, single
+ * bull 15.9mm, the triple ring from 99mm to 107mm, the double ring from 162mm to 170mm - so both
+ * scoring rings are the real 8mm wide, and the bull is the real fraction of the face rather than
+ * the oversized one a schematic usually draws.
+ *
+ * The rings are thin at this scale, which is the point: what a player reads off this board has to
+ * match what they are looking at across the room. Legibility is bought back by drawing the board
+ * large (it is most of the screen) and by lighting the target in high-contrast yellow, not by
+ * distorting the geometry.
  */
-const R_DB = 12;
-const R_SB = 25;
-const R_TRIPLE_IN = 56;
-const R_TRIPLE_OUT = 75;
-const R_DOUBLE_IN = 94;
+const BOARD_RADIUS_MM = 170;
 const R_DOUBLE_OUT = 113;
+const MM_TO_VIEW = R_DOUBLE_OUT / BOARD_RADIUS_MM;
+const round1 = (mm: number) => Math.round(mm * MM_TO_VIEW * 10) / 10;
+
+const R_DB = round1(6.35);
+const R_SB = round1(15.9);
+const R_TRIPLE_IN = round1(99);
+const R_TRIPLE_OUT = round1(107);
+const R_DOUBLE_IN = round1(162);
 const R_LABEL = 125;
 /**
  * Tight to the number ring: the drawing is the screen's main object, so every unit of the viewBox

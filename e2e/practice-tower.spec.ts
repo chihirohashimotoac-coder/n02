@@ -384,12 +384,25 @@ test.describe('TOWER layout', () => {
     }
     expect(await hasHorizontalScroll(page)).toBe(false);
 
-    // The judgement buttons are big, and are not on top of one another.
+    // The judgement buttons are deliberately compact so the board gets the height - but never
+    // below a comfortable touch target, and never overlapping each other.
     const hit = await page.locator('.tower-judge.hit').boundingBox();
     const miss = await page.locator('.tower-judge.miss').boundingBox();
-    expect(hit && hit.height).toBeGreaterThanOrEqual(56);
-    expect(miss && miss.height).toBeGreaterThanOrEqual(56);
+    expect(hit && hit.height).toBeGreaterThanOrEqual(44);
+    expect(miss && miss.height).toBeGreaterThanOrEqual(44);
     expect(hit && miss && hit.x + hit.width).toBeLessThanOrEqual(miss!.x);
+
+    // ...and they keep one shape rather than flattening as they shrink.
+    expect(hit && hit.width / hit.height).toBeGreaterThan(2.5);
+
+    // The board is the screen's main object: it takes most of what the stage has.
+    const stage = await page.locator('.tower-stage').boundingBox();
+    const board = await page.locator('.tower-board-main').boundingBox();
+    expect(stage && board && Math.min(board.width, board.height) / stage.height).toBeGreaterThan(0.55);
+
+    // The gauge sits against the board, not out at the window edge.
+    const gauge = await page.locator('.tower-gauge').boundingBox();
+    expect(board && gauge && gauge.x - (board.x + board.width)).toBeLessThan(40);
   });
 
   test('keeps the buttons on screen without scrolling after a dart', async ({ page }) => {
