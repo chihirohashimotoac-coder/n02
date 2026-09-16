@@ -41,14 +41,18 @@ interface Props {
  * widened: at true scale they are ~4% of the radius each, which on a phone is a hairline that
  * cannot be read across the room, and reading which band is lit is the whole task here.
  */
-const R_DB = 11;
-const R_SB = 23;
-const R_TRIPLE_IN = 57;
-const R_TRIPLE_OUT = 74;
-const R_DOUBLE_IN = 95;
-const R_DOUBLE_OUT = 112;
-const R_LABEL = 123;
-const VIEW = 134;
+const R_DB = 12;
+const R_SB = 25;
+const R_TRIPLE_IN = 56;
+const R_TRIPLE_OUT = 75;
+const R_DOUBLE_IN = 94;
+const R_DOUBLE_OUT = 113;
+const R_LABEL = 125;
+/**
+ * Tight to the number ring: the drawing is the screen's main object, so every unit of the viewBox
+ * that is not board is a unit the board is not using.
+ */
+const VIEW = 136;
 
 const SECTOR_DEGREES = 360 / TOWER_NUMBER_ORDER.length;
 const HALF_SECTOR = SECTOR_DEGREES / 2;
@@ -131,7 +135,9 @@ export default function TowerBoard({ regions, floor, className = '', ariaLabel }
       role="img"
       aria-label={label}
     >
-      <circle className="tower-board-plate" cx="0" cy="0" r={R_DOUBLE_OUT + 10} />
+      {/* The plate runs out past the number ring, not just past the double ring: the numbers then
+          sit on the board's own dark ground instead of on whatever the stairwell behind is doing. */}
+      <circle className="tower-board-plate" cx="0" cy="0" r={VIEW - 2} />
 
       {SEGMENTS.map((segment) => (
         <path
@@ -159,6 +165,9 @@ export default function TowerBoard({ regions, floor, className = '', ariaLabel }
         r={R_DB}
       />
 
+      {/* The numbers are how a player finds the lit sector, so they are drawn last, large, and with
+          their own dark outline - they have to stay readable over the board, over the lit yellow,
+          and over whatever the scene behind the board is doing at that floor. */}
       {LABELS.map(({ value, x, y }) => (
         <text
           key={value}

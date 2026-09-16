@@ -100,7 +100,7 @@ describe('TOWER history storage', () => {
     expect(row.players[0].clearFloor).toBe(100);
     expect(row.players[0].status).toBe('playing');
     expect(row.players[0].throws).toBe(0);
-    expect(row.rules).toEqual({ startFloor: 1, startLife: 3, continues: 5, recovery: true });
+    expect(row.rules).toEqual({ startFloor: 1, startLife: 5, continues: 5, recovery: true });
   });
 
   it('remembers that the first-run help has been shown, under a second key of its own', () => {

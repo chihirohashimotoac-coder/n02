@@ -36,7 +36,11 @@ export interface TowerRules {
   startFloor: number;
   finalFloor: number;
   startLife: number;
-  /** n02 rule: a hard ceiling of 3. The video only ever showed 3; other settings were never seen. */
+  /**
+   * The ceiling a recovery restores to. Always equal to `startLife`: a recovery is a refill, so
+   * the setting the player chose is also the most they can ever hold. The observed video ran 3 and
+   * never showed a LIFE above its starting value.
+   */
   maxLife: number;
   /** CONTINUEs available per player. */
   continues: number;
@@ -47,19 +51,31 @@ export interface TowerRules {
 }
 
 /**
- * The single place TOWER's numbers live. The observed video ran START LIFE 3 / CONTINUE 5 /
- * RECOVERY ON, and that is what n02 plays; there is no settings screen for them.
+ * The base rules. START LIFE and START FLOOR are chosen on the setup screen and override these
+ * two; everything else is fixed for the mode.
+ *
+ * The video's own game ran START LIFE 3 / CONTINUE 5 / RECOVERY ON. n02 opens on 5 LIFE because a
+ * 100-floor climb with a human calling every dart is a long session - that is an n02 choice, not
+ * the original's default.
  */
 export const TOWER_RULES: TowerRules = {
   startFloor: 1,
   finalFloor: 100,
-  startLife: 3,
-  maxLife: 3,
+  startLife: 5,
+  maxLife: 5,
   continues: 5,
   dartsPerTurn: 3,
   recoveryInterval: 10,
   recovery: true,
 };
+
+/** Selectable LIFE counts, 1 through 10. */
+export const TOWER_LIFE_OPTIONS: readonly number[] = Array.from({ length: 10 }, (_, index) => index + 1);
+export const DEFAULT_TOWER_LIFE = 5;
+
+/** The floors a climb can be started from - the same five the original's START FLOOR screen offers. */
+export const TOWER_START_FLOORS: readonly number[] = [1, 21, 41, 61, 81];
+export const DEFAULT_TOWER_START_FLOOR = 1;
 
 export const TOWER_COURSE_ID = TOWER_COURSE_SOURCE.courseId;
 export const TOWER_DATA_VERSION = TOWER_COURSE_SOURCE.schemaVersion;
@@ -100,10 +116,41 @@ export interface TowerSettings {
   playerCount: 1 | 2;
   /** Always two slots so 「同じ設定でもう一度」 keeps player 2's name across a solo game. */
   names: [string, string];
+  /** 1...10. Also the ceiling a 10F recovery refills to. */
+  startLife: number;
+  /** One of TOWER_START_FLOORS. */
+  startFloor: number;
 }
 
 export function defaultTowerSettings(): TowerSettings {
-  return { playerCount: 1, names: ['', ''] };
+  return {
+    playerCount: 1,
+    names: ['', ''],
+    startLife: DEFAULT_TOWER_LIFE,
+    startFloor: DEFAULT_TOWER_START_FLOOR,
+  };
+}
+
+/** Clamps a chosen LIFE into the selectable range, so a bad stored value can never start a game. */
+export function normalizeLife(value: number): number {
+  if (!Number.isInteger(value)) return DEFAULT_TOWER_LIFE;
+  return Math.min(Math.max(value, TOWER_LIFE_OPTIONS[0]), TOWER_LIFE_OPTIONS[TOWER_LIFE_OPTIONS.length - 1]);
+}
+
+/** Falls back to 1F for anything that is not one of the offered start floors. */
+export function normalizeStartFloor(value: number): number {
+  return TOWER_START_FLOORS.includes(value) ? value : DEFAULT_TOWER_START_FLOOR;
+}
+
+/** The rules a settings choice produces. `maxLife` follows `startLife`: a recovery is a refill. */
+export function rulesFor(settings: TowerSettings): TowerRules {
+  const startLife = normalizeLife(settings.startLife);
+  return {
+    ...TOWER_RULES,
+    startFloor: normalizeStartFloor(settings.startFloor),
+    startLife,
+    maxLife: startLife,
+  };
 }
 
 export function normalizeName(name: string, index: PlayerIndex): string {
@@ -211,7 +258,10 @@ function clonePlayer(player: TowerPlayer): TowerPlayer {
   return { ...player, stats: { ...player.stats } };
 }
 
-export function createTowerGame(settings: TowerSettings, rules: TowerRules = TOWER_RULES): TowerState {
+export function createTowerGame(
+  settings: TowerSettings,
+  rules: TowerRules = rulesFor(settings),
+): TowerState {
   const indexes: PlayerIndex[] = settings.playerCount === 2 ? [0, 1] : [0];
   return {
     courseId: TOWER_COURSE_ID,
@@ -221,7 +271,10 @@ export function createTowerGame(settings: TowerSettings, rules: TowerRules = TOW
     players: indexes.map((index) => ({
       name: normalizeName(settings.names[index], index),
       currentFloor: rules.startFloor,
-      lastClearedFloor: 0,
+      // n02 rule: starting above 1F grants the floors below it, so CLEAR FLOOR reads as "the
+      // highest floor you are past" whatever the start. At 1F this is 0, which is what a climb
+      // that never beats its first floor reports.
+      lastClearedFloor: rules.startFloor - 1,
       life: rules.startLife,
       continuesUsed: 0,
       status: 'playing' as const,

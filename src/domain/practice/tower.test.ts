@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  TOWER_LIFE_OPTIONS,
   TOWER_RULES,
+  TOWER_START_FLOORS,
   activeTowerPlayer,
   advanceTurn,
   allFinished,
@@ -11,12 +13,16 @@ import {
   chooseContinue,
   createTowerGame,
   currentTurnThrows,
+  defaultTowerSettings,
   floorTargetText,
   isRecoveryFloor,
   nextActionId,
   playerResults,
+  normalizeLife,
+  normalizeStartFloor,
   recentThrows,
   remainingContinues,
+  rulesFor,
   rewindPreview,
   rewindToThrow,
   totalThrows,
@@ -28,14 +34,29 @@ import {
   type TowerThrowResult,
 } from './tower';
 
+/**
+ * Most rule tests below run on 3 LIFE rather than the product default of 5: it is the shortest
+ * path to LIFE 0, which is what the GAME OVER, CONTINUE and recovery rules are actually about. The
+ * defaults themselves, and the full 1-10 range, are covered in the settings block.
+ */
+const TEST_LIFE = 3;
+
+function settingsFor(overrides: Partial<TowerSettings> = {}): TowerSettings {
+  return {
+    playerCount: 1,
+    names: ['P1', 'P2'],
+    startLife: TEST_LIFE,
+    startFloor: 1,
+    ...overrides,
+  };
+}
+
 function solo(name = 'P1'): TowerState {
-  const settings: TowerSettings = { playerCount: 1, names: [name, ''] };
-  return createTowerGame(settings);
+  return createTowerGame(settingsFor({ playerCount: 1, names: [name, ''] }));
 }
 
 function duo(first = 'P1', second = 'P2'): TowerState {
-  const settings: TowerSettings = { playerCount: 2, names: [first, second] };
-  return createTowerGame(settings);
+  return createTowerGame(settingsFor({ playerCount: 2, names: [first, second] }));
 }
 
 /** One dart, then the pickup screen's 「次へ」 when the turn has just run out. */
@@ -76,7 +97,7 @@ describe('TOWER setup', () => {
     for (const player of state.players) {
       expect(player.currentFloor).toBe(1);
       expect(player.lastClearedFloor).toBe(0);
-      expect(player.life).toBe(TOWER_RULES.startLife);
+      expect(player.life).toBe(TEST_LIFE);
       expect(player.continuesUsed).toBe(0);
       expect(player.status).toBe('playing');
       expect(player.stats).toEqual({ throws: 0, hits: 0, misses: 0 });
@@ -87,24 +108,114 @@ describe('TOWER setup', () => {
   });
 
   it('falls back to PLAYER n for a blank name, and keeps a solo game to one player', () => {
-    const state = createTowerGame({ playerCount: 1, names: ['  ', 'kept'] });
+    const state = createTowerGame(settingsFor({ playerCount: 1, names: ['  ', 'kept'] }));
     expect(state.players).toHaveLength(1);
     expect(state.players[0].name).toBe('PLAYER 1');
     // Player 2's name survives on the settings for 「同じ設定でもう一度」.
     expect(state.settings.names[1]).toBe('kept');
   });
 
-  it('plays the observed configuration: LIFE 3, CONTINUE 5, recovery on, 1F to 100F', () => {
+  it('opens on the n02 defaults: LIFE 5 from 1F, CONTINUE 5, recovery on, up to 100F', () => {
+    expect(defaultTowerSettings()).toEqual({
+      playerCount: 1,
+      names: ['', ''],
+      startLife: 5,
+      startFloor: 1,
+    });
     expect(TOWER_RULES).toMatchObject({
       startFloor: 1,
       finalFloor: 100,
-      startLife: 3,
-      maxLife: 3,
       continues: 5,
       dartsPerTurn: 3,
       recoveryInterval: 10,
       recovery: true,
     });
+  });
+});
+
+describe('the LIFE and START FLOOR settings', () => {
+  it('offers 1 through 10 LIFE, and plays the one chosen', () => {
+    expect(TOWER_LIFE_OPTIONS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    for (const life of TOWER_LIFE_OPTIONS) {
+      const state = createTowerGame(settingsFor({ startLife: life }));
+      expect(state.players[0].life).toBe(life);
+      expect(state.rules.startLife).toBe(life);
+      // A recovery is a refill, so the ceiling follows the choice.
+      expect(state.rules.maxLife).toBe(life);
+    }
+  });
+
+  it('runs out of LIFE after exactly that many misses', () => {
+    let state = createTowerGame(settingsFor({ startLife: 1 }));
+    state = applyThrow(state, 'miss');
+    expect(state.phase).toBe('continue');
+
+    let longer = createTowerGame(settingsFor({ startLife: 7 }));
+    for (let dart = 0; dart < 6; dart += 1) {
+      longer = play(longer, 'miss');
+      expect(longer.phase).not.toBe('continue');
+    }
+    longer = play(longer, 'miss');
+    expect(longer.phase).toBe('continue');
+    expect(longer.players[0].life).toBe(0);
+  });
+
+  it('refills to the chosen LIFE on a 10F recovery, never past it', () => {
+    let state = createTowerGame(settingsFor({ startLife: 8, startFloor: 1 }));
+    state.players[0] = { ...state.players[0], currentFloor: 10, lastClearedFloor: 9, life: 2 };
+    state = applyThrow(state, 'hit');
+    expect(state.players[0].life).toBe(8);
+
+    let full = createTowerGame(settingsFor({ startLife: 2 }));
+    full.players[0] = { ...full.players[0], currentFloor: 10, lastClearedFloor: 9 };
+    full = applyThrow(full, 'hit');
+    expect(full.players[0].life).toBe(2);
+  });
+
+  it('clamps a LIFE outside the range rather than starting a broken game', () => {
+    expect(normalizeLife(0)).toBe(1);
+    expect(normalizeLife(99)).toBe(10);
+    expect(normalizeLife(4)).toBe(4);
+    expect(normalizeLife(2.5)).toBe(5);
+    expect(rulesFor(settingsFor({ startLife: 0 })).startLife).toBe(1);
+  });
+
+  it('offers the original’s five start floors, and opens the climb on the chosen one', () => {
+    expect(TOWER_START_FLOORS).toEqual([1, 21, 41, 61, 81]);
+    for (const floor of TOWER_START_FLOORS) {
+      const state = createTowerGame(settingsFor({ startFloor: floor }));
+      expect(state.players[0].currentFloor).toBe(floor);
+      // The floors below the start are granted, so CLEAR FLOOR always reads as "the highest floor
+      // you are past" - which is 0 for a 1F start that has beaten nothing.
+      expect(state.players[0].lastClearedFloor).toBe(floor - 1);
+      expect(playerResults(state)[0]).toMatchObject({ startFloor: floor, clearFloor: floor - 1 });
+    }
+  });
+
+  it('starts both players of a 2-player game on the same floor', () => {
+    const state = createTowerGame(settingsFor({ playerCount: 2, startFloor: 41 }));
+    expect(state.players.map((player) => player.currentFloor)).toEqual([41, 41]);
+    expect(state.players.map((player) => player.lastClearedFloor)).toEqual([40, 40]);
+  });
+
+  it('climbs and finishes normally from a high start floor', () => {
+    let state = createTowerGame(settingsFor({ startFloor: 81, startLife: 2 }));
+    state = climb(state, 3);
+    expect(state.players[0].currentFloor).toBe(84);
+    expect(state.players[0].lastClearedFloor).toBe(83);
+
+    // 100F still ends it, and there is still no 101F.
+    let top = createTowerGame(settingsFor({ startFloor: 81 }));
+    top.players[0] = { ...top.players[0], currentFloor: 100, lastClearedFloor: 99 };
+    top = applyThrow(top, 'hit');
+    expect(top.players[0].status).toBe('cleared');
+    expect(top.players[0].currentFloor).toBe(100);
+  });
+
+  it('falls back to 1F for a start floor that is not on the list', () => {
+    expect(normalizeStartFloor(50)).toBe(1);
+    expect(normalizeStartFloor(21)).toBe(21);
+    expect(rulesFor(settingsFor({ startFloor: 7 })).startFloor).toBe(1);
   });
 });
 

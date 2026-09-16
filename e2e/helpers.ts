@@ -148,12 +148,30 @@ export async function startCountUp(
   await page.waitForSelector('.countup-shell');
 }
 
-/** Opens PRACTICE → TOWER and starts a climb with the given options. */
-export async function startTower(page: Page, options: { players?: 1 | 2; names?: string[] } = {}) {
+/**
+ * Opens PRACTICE → TOWER and starts a climb.
+ *
+ * LIFE defaults to 3 rather than the product default of 5, because a GAME OVER is then three darts
+ * away instead of five and most tests below are about what happens at LIFE 0. Pass `life: null` to
+ * leave the picker alone and get the real default.
+ */
+export async function startTower(
+  page: Page,
+  options: { players?: 1 | 2; names?: string[]; life?: number | null; startFloor?: number } = {},
+) {
   await openPracticeHub(page);
   await page.locator('.practice-card[data-practice="tower"]').click();
   await page.waitForSelector('.tower-setup');
   if (options.players === 2) await page.getByRole('button', { name: /2 PLAYERS/ }).click();
+
+  const life = options.life === undefined ? 3 : options.life;
+  if (life !== null) {
+    await page.locator('.tower-life-grid button', { hasText: new RegExp(`^${life}$`) }).click();
+  }
+  if (options.startFloor) {
+    await page.locator('.tower-floor-grid button', { hasText: new RegExp(`^${options.startFloor}F`) }).click();
+  }
+
   for (const [index, name] of (options.names ?? []).entries()) {
     await page.locator('.name-input input').nth(index).fill(name);
   }

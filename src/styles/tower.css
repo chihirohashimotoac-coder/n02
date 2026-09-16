@@ -30,7 +30,7 @@
   --tw-board-light: #ded6c2;
   --tw-board-red: #8c3a33;
   --tw-board-green: #245f45;
-  --tw-board-dim: 0.28;
+  --tw-board-dim: 0.22;
   --tw-lit: #ffd21f;
   --tw-lit-edge: #7a5a00;
   --tw-wire: #6c7470;
@@ -57,7 +57,7 @@
   --tw-board-light: #6d6a5e;
   --tw-board-red: #5e2a26;
   --tw-board-green: #14402f;
-  --tw-board-dim: 0.4;
+  --tw-board-dim: 0.3;
   --tw-lit: #ffe45c;
   --tw-lit-edge: #a08300;
   --tw-wire: #3c4640;
@@ -126,10 +126,16 @@
 
 .tower-board-number {
   fill: var(--tw-number);
-  font-size: 15px;
-  font-weight: 800;
-  opacity: 0.5;
+  /* In viewBox units, so it scales with the board - which is now most of the screen. */
+  font-size: 18px;
+  font-weight: 900;
+  opacity: 0.66;
   font-variant-numeric: var(--numeric);
+  /* Outlined, so a number stays readable whether it sits on the plate or over a lit sector. */
+  paint-order: stroke fill;
+  stroke: #0b0d0c;
+  stroke-width: 2.4;
+  stroke-linejoin: round;
 }
 
 .tower-board-number.is-lit {
@@ -143,13 +149,6 @@
   font-weight: 900;
   opacity: 0.65;
   font-variant-numeric: var(--numeric);
-}
-
-.tower-board-main {
-  /* Bounded by height as well as width, so a short landscape screen still leaves room for the
-     judgement buttons rather than spending the whole viewport on the board. */
-  width: min(100%, 62vh);
-  margin-inline: auto;
 }
 
 .tower-board-mini {
@@ -180,7 +179,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 52px;
+  height: 44px;
   padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px));
   background: linear-gradient(105deg, var(--tw-header-a), var(--tw-header-b));
   color: #fff;
@@ -194,7 +193,7 @@
 }
 
 .tower-identity strong {
-  font-size: 19px;
+  font-size: 16px;
   font-weight: 900;
   letter-spacing: 0.08em;
 }
@@ -221,7 +220,7 @@
 }
 
 .tower-floor-badge strong {
-  font-size: 24px;
+  font-size: 21px;
   font-weight: 900;
   font-variant-numeric: var(--numeric);
 }
@@ -232,121 +231,175 @@
   opacity: 0.75;
 }
 
-.tower-climb {
-  flex: none;
-  display: grid;
-  gap: 3px;
-  padding: 5px max(10px, env(safe-area-inset-left, 0px)) 5px max(10px, env(safe-area-inset-right, 0px));
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+/* ================================================================== the stairwell behind the board
+
+   One backdrop, five looks. `data-band` on the stage swaps the four tokens below every 20 floors,
+   so a player can see they have got somewhere without reading the number. Drawn entirely with
+   gradients - no images, and nothing from the source video. */
+
+.tower-stage[data-band='1'] {
+  --scene-far: #241a12;
+  --scene-near: #4c3625;
+  --scene-step: #6b4d321f;
+  --scene-glow: #ff9a3c40;
 }
 
-.tower-climb-row {
-  display: grid;
-  grid-template-columns: minmax(48px, 22%) minmax(0, 1fr) 46px;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted);
+.tower-stage[data-band='2'] {
+  --scene-far: #14211a;
+  --scene-near: #2d4737;
+  --scene-step: #4d7a5e1f;
+  --scene-glow: #6fd7a238;
 }
 
-.tower-climb-row.active {
-  color: var(--tw-accent-strong);
+.tower-stage[data-band='3'] {
+  --scene-far: #111c2c;
+  --scene-near: #26405f;
+  --scene-step: #4a7bb01f;
+  --scene-glow: #5aa8ff38;
 }
 
-.tower-climb-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.tower-stage[data-band='4'] {
+  --scene-far: #1a1430;
+  --scene-near: #3d2e61;
+  --scene-step: #7d5cc41f;
+  --scene-glow: #b57cff3a;
 }
 
-.tower-climb-track {
-  position: relative;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  background: var(--tw-life-off);
-  overflow: hidden;
+.tower-stage[data-band='5'] {
+  --scene-far: #0e1531;
+  --scene-near: #2e3f72;
+  --scene-step: #7f93d41f;
+  --scene-glow: #ffd45c45;
 }
 
-.tower-climb-fill {
+.tower-scene {
   position: absolute;
-  inset-block: 0;
-  left: 0;
-  border-radius: var(--radius-pill);
-  background: var(--tw-accent);
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: linear-gradient(to top, var(--scene-far) 10%, var(--scene-near) 100%);
 }
 
-.tower-climb-row.active .tower-climb-fill {
-  background: var(--tw-accent-strong);
+/* The stair treads: parallel courses rising to the right, plus the wall's vertical joints. */
+.tower-scene-steps {
+  position: absolute;
+  inset: -12% -12% -2%;
+  background:
+    repeating-linear-gradient(-13deg, transparent 0 30px, var(--scene-step) 30px 33px),
+    repeating-linear-gradient(90deg, transparent 0 58px, #ffffff0a 58px 60px);
 }
 
-.tower-climb-value {
-  text-align: right;
-  font-variant-numeric: var(--numeric);
+/* Light from the floor above, which is where the climb is going. */
+.tower-scene-glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 70% at 50% -10%, var(--scene-glow), transparent 70%),
+    radial-gradient(140% 100% at 50% 100%, #00000059, transparent 65%);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .tower-scene-glow {
+    transition: background 420ms ease-out;
+  }
+}
+
+/* ================================================================================== play screen */
+
+/*
+ * The board is the screen. Everything else on the stage is pinned around it, and the board area is
+ * what is left over - which on a phone in portrait is roughly two thirds of the viewport.
+ */
 .tower-stage {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 8px max(10px, env(safe-area-inset-left, 0px)) 10px max(10px, env(safe-area-inset-right, 0px));
-  background: var(--surface);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'turn gauge'
+    'board gauge';
+  gap: 2px 6px;
+  padding: 5px max(6px, env(safe-area-inset-left, 0px)) 6px max(6px, env(safe-area-inset-right, 0px));
+  overflow: hidden;
+  color: #f2efe8;
 }
 
 .tower-turn-line {
+  grid-area: turn;
+  position: relative;
+  z-index: 1;
   margin: 0;
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: center;
-  font-size: 12px;
-  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffffad;
+  text-shadow: 0 1px 3px #000000a8;
 }
 
 .tower-turn-line b {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
-  color: var(--tw-accent-strong);
+  color: #fff;
 }
 
-.tower-target-text {
-  margin: 0;
-  text-align: center;
-  font-size: clamp(14px, 3.4vw, 20px);
-  font-weight: 800;
-  line-height: 1.3;
-  color: var(--ink);
-  background: var(--tw-accent-soft);
-  border-radius: var(--radius-md);
-  padding: 6px 12px;
-  max-width: 100%;
+.tower-board-area {
+  grid-area: board;
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+/*
+ * Sized to fill whatever the stage leaves, in both directions. The SVG's own
+ * preserveAspectRatio keeps it square and centred, so it is always the largest board the space
+ * allows rather than a fixed fraction of the width.
+ */
+.tower-board-main {
+  width: 100%;
+  height: 100%;
+}
+
+.tower-gauge {
+  grid-area: gauge;
+  z-index: 1;
+  width: clamp(34px, 10vw, 54px);
+  height: 100%;
+  filter: drop-shadow(0 2px 6px #00000066);
 }
 
 .tower-flash {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
   margin: 0;
+  white-space: nowrap;
   font-size: clamp(13px, 3vw, 18px);
   font-weight: 900;
   letter-spacing: 0.04em;
   padding: 5px 16px;
   border-radius: var(--radius-pill);
+  box-shadow: 0 6px 20px #00000059;
   animation: tower-flash-in 180ms ease-out;
 }
 
 @keyframes tower-flash-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translate(-50%, 4px);
   }
   to {
     opacity: 1;
-    transform: none;
+    transform: translateX(-50%);
   }
 }
 
@@ -359,15 +412,61 @@
 .tower-flash.is-hit,
 .tower-flash.is-recover,
 .tower-flash.is-clear {
-  color: var(--tw-hit);
-  background: var(--tw-hit-soft);
+  color: #06301c;
+  background: #5ce6a0;
 }
 
 .tower-flash.is-miss,
 .tower-flash.is-over {
-  color: var(--tw-miss);
-  background: var(--tw-miss-soft);
+  color: #fff;
+  background: #c2382c;
 }
+
+/* ============================================================================== the tower gauge */
+
+.tower-gauge-plinth {
+  fill: #0000005c;
+  stroke: #ffffff2e;
+  stroke-width: 0.8;
+}
+
+.tower-gauge-block {
+  fill: #ffffff14;
+  stroke: #ffffff38;
+  stroke-width: 0.7;
+}
+
+.tower-gauge-block.is-climbed {
+  fill: var(--tw-lit);
+  stroke: var(--tw-lit-edge);
+}
+
+.tower-gauge-roof {
+  fill: #ffffff1f;
+  stroke: #ffffff4a;
+  stroke-width: 0.8;
+}
+
+.tower-gauge-roof.is-climbed {
+  fill: var(--tw-lit);
+  stroke: var(--tw-lit-edge);
+}
+
+.tower-gauge-marker {
+  fill: #fff;
+  stroke: #000000a6;
+  stroke-width: 0.6;
+}
+
+.tower-gauge-marker.p1 {
+  fill: #6fd0ff;
+}
+
+.tower-gauge-marker.is-active {
+  stroke: #fff;
+  stroke-width: 1.4;
+}
+
 
 /* ============================================================================= footer / controls */
 
@@ -393,9 +492,9 @@
 
 .tower-status-card {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   justify-items: center;
-  padding: 5px 8px;
+  padding: 3px 8px;
   background: var(--surface);
 }
 
@@ -413,7 +512,7 @@
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -435,13 +534,24 @@
   background: var(--muted);
 }
 
+/* LIFE and the floor/CONTINUE read-out share one line, so the card is two lines however many
+   LIFE the player chose. */
+.tower-status-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
+}
+
 .tower-status-life {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 10px;
+  gap: 5px;
+  font-size: 9px;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   color: var(--muted);
 }
 
@@ -451,8 +561,8 @@
 }
 
 .tower-life-pips i {
-  width: 13px;
-  height: 13px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   background: var(--tw-life-off);
   border: 2px solid var(--tw-life-off);
@@ -463,10 +573,33 @@
   border-color: var(--tw-life);
 }
 
+/* Above five, dots stop being countable at a glance - a bar plus the number is honest instead. */
+.tower-life-bar {
+  display: inline-block;
+  width: 46px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--tw-life-off);
+  overflow: hidden;
+}
+
+.tower-life-bar i {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--tw-life);
+}
+
 .tower-life-value {
-  font-size: 13px;
+  font-size: 12px;
   font-variant-numeric: var(--numeric);
   color: var(--ink);
+}
+
+.tower-life-value em {
+  font-style: normal;
+  font-size: 0.8em;
+  color: var(--muted);
 }
 
 .tower-status-meta {
@@ -480,7 +613,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
-  padding: 5px 8px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -489,7 +622,7 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 26px;
+  height: 20px;
   border-radius: var(--radius-sm);
   border: 2px dashed var(--line);
   font-size: 11px;
@@ -539,8 +672,8 @@
 .tower-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 6px 8px;
 }
 
 /*
@@ -555,7 +688,9 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
-  min-height: clamp(64px, 13vh, 104px);
+  /* Small, as the board is what the height is for - but never below a comfortable touch target,
+     which is the floor of this clamp rather than something a short viewport can erode. */
+  min-height: clamp(56px, 7.4vh, 68px);
   border-radius: var(--radius-lg);
   border: 3px solid transparent;
   font-weight: 900;
@@ -566,12 +701,12 @@
 
 .tower-judge i {
   font-style: normal;
-  font-size: clamp(20px, 5vw, 30px);
+  font-size: clamp(17px, 4vw, 24px);
   line-height: 1;
 }
 
 .tower-judge strong {
-  font-size: clamp(16px, 4.2vw, 24px);
+  font-size: clamp(15px, 3.8vw, 21px);
   letter-spacing: 0.06em;
 }
 
@@ -613,14 +748,18 @@
   transform: translateY(1px);
 }
 
+/* One line, always: the full explanation lives in the first-run help, and this is the reminder. */
 .tower-actions-hint {
   grid-column: 1 / -1;
   margin: 0;
   text-align: center;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.25;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tower-panel {
@@ -730,7 +869,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  height: 38px;
+  height: 28px;
   padding-inline: 10px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -784,7 +923,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 56px;
   gap: 1px;
   background: var(--line);
-  height: 44px;
+  height: 40px;
 }
 
 .tower-menu button {
@@ -911,6 +1050,65 @@
 }
 
 /* ================================================================================ setup / result */
+
+/* LIFE 1-10: a compact row of numbers, wrapping on a narrow phone. */
+.tower-life-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+  gap: 6px;
+}
+
+/* START FLOOR: five choices, each showing what that floor actually asks for. */
+.tower-floor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 6px;
+}
+
+.tower-option {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  min-height: 48px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+  font-variant-numeric: var(--numeric);
+}
+
+.tower-option.wide {
+  min-height: 56px;
+}
+
+.tower-option strong {
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.tower-option small {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--muted);
+  text-align: center;
+  /* A floor caption can run long (1F lists the whole board); it wraps rather than widening. */
+  overflow-wrap: anywhere;
+}
+
+.tower-option.selected {
+  border-color: var(--tw-accent-strong);
+  background: var(--tw-accent-soft);
+  color: var(--tw-accent-strong);
+}
+
+.tower-option.selected small {
+  color: var(--tw-accent-strong);
+}
 
 .tower-rule-list {
   display: grid;
@@ -1088,24 +1286,23 @@
    status cards, the pips and the judgement buttons leave the board a sliver. On a short landscape
    viewport the footer becomes a rail down the right and the board takes the height.
 
-   CSS only - the DOM order (header, climb, stage, footer) is unchanged, so tab order and the
-   keyboard route work exactly as they do in portrait. */
+   CSS only - the DOM order (header, stage, footer) is unchanged, so tab order and the keyboard
+   route work exactly as they do in portrait. */
 @media (orientation: landscape) and (height <= 560px) {
   .tower-shell {
-    --tw-rail: clamp(280px, 38vw, 380px);
+    --tw-rail: clamp(250px, 33vw, 340px);
     display: grid;
     grid-template-columns: minmax(0, 1fr) calc(var(--tw-rail) + env(safe-area-inset-right, 0px));
-    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
       'head head'
-      'climb climb'
       'stage rail';
     padding-left: env(safe-area-inset-left, 0px);
   }
 
   .tower-header {
     grid-area: head;
-    height: 40px;
+    height: 38px;
   }
 
   .tower-identity strong {
@@ -1120,24 +1317,16 @@
     font-size: 18px;
   }
 
-  .tower-climb {
-    grid-area: climb;
-    padding-block: 3px;
-  }
-
   .tower-stage {
     grid-area: stage;
-    justify-content: flex-start;
   }
 
-  /* Height is the scarce dimension here, so the board is sized off it and the caption stays put. */
-  .tower-board-main {
-    width: min(100%, 52vh);
+  .tower-turn-line {
+    font-size: 10px;
   }
 
-  .tower-target-text {
-    font-size: clamp(12px, 1.8vw, 16px);
-    padding: 4px 10px;
+  .tower-turn-line b {
+    font-size: 13px;
   }
 
   .tower-footer {

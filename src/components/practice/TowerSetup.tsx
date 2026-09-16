@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import {
+  TOWER_LIFE_OPTIONS,
   TOWER_RULES,
+  TOWER_START_FLOORS,
   floorTargetText,
   type TowerSettings,
 } from '../../domain/practice/tower';
@@ -35,7 +37,7 @@ export default function TowerSetup({ settings, onChangeSettings, onStart, onBack
       </div>
 
       <p className="practice-note">
-        1F から {TOWER_RULES.finalFloor}F まで、各階のお題を1投ずつ突破していく登頂モードです。ハードダーツ用に、
+        選んだ階から {TOWER_RULES.finalFloor}F まで、各階のお題を1投ずつ突破していく登頂モードです。ハードダーツ用に、
         <strong>着弾を見た人が「成功」か「MISS」を押す</strong>方式で進めます。アプリが着弾を判定することはありません。
       </p>
 
@@ -59,10 +61,52 @@ export default function TowerSetup({ settings, onChangeSettings, onStart, onBack
         </div>
         {settings.playerCount === 2 && (
           <p className="practice-note small">
-            2人とも 1F から自分の塔を登ります。階・LIFE・CONTINUE はプレイヤーごとに別々です。
+            2人とも同じ開始階から自分の塔を登ります。階・LIFE・CONTINUE はプレイヤーごとに別々です。
             投げていない側が着弾を確認して入力すると進行がスムーズです。
           </p>
         )}
+      </div>
+
+      <div className="field-section">
+        <h2 id="tower-life">LIFE（ミスできる回数）</h2>
+        <div className="tower-life-grid" role="group" aria-labelledby="tower-life">
+          {TOWER_LIFE_OPTIONS.map((life) => (
+            <button
+              key={life}
+              type="button"
+              className={`tower-option ${settings.startLife === life ? 'selected' : ''}`}
+              aria-pressed={settings.startLife === life}
+              onClick={() => update({ startLife: life })}
+            >
+              {life}
+            </button>
+          ))}
+        </div>
+        <p className="practice-note small">
+          MISS のたびに1つ減り、0で GAME OVER です。{TOWER_RULES.recoveryInterval}の倍数階を突破したときは、ここで選んだ数まで回復します。
+        </p>
+      </div>
+
+      <div className="field-section">
+        <h2 id="tower-start-floor">開始する階</h2>
+        <div className="tower-floor-grid" role="group" aria-labelledby="tower-start-floor">
+          {TOWER_START_FLOORS.map((floor) => (
+            <button
+              key={floor}
+              type="button"
+              className={`tower-option wide ${settings.startFloor === floor ? 'selected' : ''}`}
+              aria-pressed={settings.startFloor === floor}
+              onClick={() => update({ startFloor: floor })}
+            >
+              <strong>{floor}F</strong>
+              <small>{floorTargetText(floor)}</small>
+            </button>
+          ))}
+        </div>
+        <p className="practice-note small">
+          選んだ階から {TOWER_RULES.finalFloor}F を目指します。CLEAR FLOOR は「突破済みの階」なので、
+          {TOWER_START_FLOORS[1]}F 開始なら {TOWER_START_FLOORS[1] - 1} からの記録になります。
+        </p>
       </div>
 
       <div className="field-section">
@@ -97,17 +141,17 @@ export default function TowerSetup({ settings, onChangeSettings, onStart, onBack
         <h2>ルール</h2>
         <ul className="tower-rule-list">
           <li>
-            <b>START LIFE {TOWER_RULES.startLife}</b>
+            <b>START LIFE {settings.startLife}</b>
             <span>MISS で LIFE −1。同じ階・同じお題のまま再挑戦します。</span>
           </li>
           <li>
             <b>CONTINUE {TOWER_RULES.continues}</b>
-            <span>LIFE 0 で GAME OVER。枠が残っていれば同じ階・LIFE {TOWER_RULES.startLife} で再開できます。</span>
+            <span>LIFE 0 で GAME OVER。枠が残っていれば同じ階・LIFE {settings.startLife} で再開できます。</span>
           </li>
           <li>
             <b>RECOVERY ON</b>
             <span>
-              {TOWER_RULES.recoveryInterval}の倍数階を<strong>突破した時</strong>に LIFE が {TOWER_RULES.maxLife} へ戻ります（
+              {TOWER_RULES.recoveryInterval}の倍数階を<strong>突破した時</strong>に LIFE が {settings.startLife} へ戻ります（
               {TOWER_RULES.recoveryInterval}F に上がっただけでは回復しません）。
             </span>
           </li>

@@ -78,7 +78,9 @@ export default function TowerResult({
 
                 <span className="tower-result-range">
                   START FLOOR {result.startFloor} → {result.clearFloor}F 突破
-                  {result.clearFloor === 0 ? '（1F未突破）' : ''}
+                  {/* Starting above 1F grants the floors below it, so "beat nothing" is the start
+                      floor minus one, not zero. */}
+                  {result.clearFloor < result.startFloor ? `（${result.startFloor}F 未突破）` : ''}
                 </span>
 
                 {/* n02's own counters - not part of what the original RESULT showed. */}

@@ -25,8 +25,19 @@ function Harness({ initial }: { initial: TowerState }) {
   return <TowerGame state={state} onChange={setState} onExit={() => {}} />;
 }
 
-function game(playerCount: 1 | 2 = 1, patch: Partial<TowerPlayer> = {}): TowerState {
-  const settings: TowerSettings = { playerCount, names: ['AKI', 'BEN'] };
+/** 3 LIFE, so a GAME OVER is three darts away rather than five. */
+function game(
+  playerCount: 1 | 2 = 1,
+  patch: Partial<TowerPlayer> = {},
+  settingsPatch: Partial<TowerSettings> = {},
+): TowerState {
+  const settings: TowerSettings = {
+    playerCount,
+    names: ['AKI', 'BEN'],
+    startLife: 3,
+    startFloor: 1,
+    ...settingsPatch,
+  };
   const state = createTowerGame(settings);
   state.players[0] = { ...state.players[0], ...patch };
   return state;
@@ -96,9 +107,36 @@ describe('the judgement buttons', () => {
   it('shows the floor, its target and a full LIFE on the first dart', () => {
     renderGame(game());
     expect(floorBadge()).toContain('1');
-    expect(screen.getByText('盤面すべて（82エリア）')).toBeInTheDocument();
+    // The target is the board, not a sentence under it - the sentence is the board's accessible
+    // name, and appears nowhere on screen.
+    expect(screen.getByRole('img', { name: /1F のお題：盤面すべて（82エリア）/ })).toBeInTheDocument();
+    expect(document.querySelector('.tower-target-text')).toBeNull();
     expect(life()).toBe(3);
     expect(thrownPips()).toEqual([]);
+  });
+
+  it('draws the climb as a tower that fills as floors are beaten', () => {
+    renderGame(game(1, { currentFloor: 51, lastClearedFloor: 50 }));
+    const gauge = document.querySelector('.tower-gauge');
+    expect(gauge).not.toBeNull();
+    const blocks = document.querySelectorAll('.tower-gauge-block');
+    const climbed = document.querySelectorAll('.tower-gauge-block.is-climbed');
+    expect(blocks).toHaveLength(20);
+    // Half the tower beaten, so half its storeys are lit.
+    expect(climbed).toHaveLength(10);
+    expect(gauge?.getAttribute('aria-label')).toContain('50F');
+  });
+
+  it('changes the stairwell behind the board as the climb gets higher', () => {
+    const band = () => document.querySelector('.tower-stage')?.getAttribute('data-band');
+    renderGame(game());
+    expect(band()).toBe('1');
+    cleanup();
+    renderGame(game(1, { currentFloor: 45, lastClearedFloor: 44 }));
+    expect(band()).toBe('3');
+    cleanup();
+    renderGame(game(1, { currentFloor: 100, lastClearedFloor: 99 }));
+    expect(band()).toBe('5');
   });
 
   it('spends one dart per press and moves a floor on 成功', () => {
@@ -350,7 +388,7 @@ describe('the top of the tower', () => {
   it('does not clear on reaching 100F, and clears on beating it', () => {
     renderGame(game(1, { currentFloor: 100, lastClearedFloor: 99 }));
     expect(floorBadge()).toContain('100');
-    expect(screen.getByText('DBULL')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /100F のお題：DBULL/ })).toBeInTheDocument();
     // Standing on 100F is still a normal throw.
     expect(hitButton()).not.toBeNull();
 

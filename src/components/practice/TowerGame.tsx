@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import DialogShell from '../common/DialogShell';
 import TowerBoard from './TowerBoard';
+import TowerGauge from './TowerGauge';
 import {
   activeTowerPlayer,
   advanceTurn,
@@ -56,6 +57,18 @@ export const REPEAT_LOCK_MS = 220;
 
 /** How many past darts the history strip offers as rewind points. */
 const HISTORY_LENGTH = 10;
+
+/** How many floors share one look of the stairwell. Five bands over a 100-floor tower. */
+const SCENE_BAND_FLOORS = 20;
+
+/**
+ * Which stairwell the climb is in, 1...5. The scene is meant to tell a player they have got
+ * somewhere without them reading a number, so it changes on the twenties rather than continuously.
+ */
+function sceneBand(floor: number, finalFloor: number): number {
+  const bands = Math.ceil(finalFloor / SCENE_BAND_FLOORS);
+  return Math.min(bands, Math.max(1, Math.ceil(floor / SCENE_BAND_FLOORS)));
+}
 
 /**
  * The TOWER OF THE DARTS play screen.
@@ -282,42 +295,40 @@ export default function TowerGame({ state, onChange, onExit }: Props) {
         </div>
       </header>
 
-      <div
-        className="tower-climb"
-        role="img"
-        aria-label={`${active.name} は ${rules.finalFloor}F 中 ${active.lastClearedFloor}F まで突破`}
-      >
-        {indexes.map((index) => {
-          const player = state.players[index];
-          const ratio = Math.min(1, player.lastClearedFloor / rules.finalFloor);
-          return (
-            <div className={`tower-climb-row ${index === state.activePlayerIndex ? 'active' : ''}`} key={index}>
-              <span className="tower-climb-name">{player.name}</span>
-              <span className="tower-climb-track">
-                <span className="tower-climb-fill" style={{ width: `${ratio * 100}%` }} />
-              </span>
-              <span className="tower-climb-value">{player.lastClearedFloor}F</span>
-            </div>
-          );
-        })}
-      </div>
+      {/* The stairwell behind the board. `data-band` is the only thing that changes with height,
+          so the whole scene is one CSS token swap per 20 floors rather than any per-floor work. */}
+      <div className="tower-stage" data-band={sceneBand(floor, rules.finalFloor)}>
+        <div className="tower-scene" aria-hidden="true">
+          <span className="tower-scene-steps" />
+          <span className="tower-scene-glow" />
+        </div>
 
-      <div className="tower-stage">
         <p className="tower-turn-line">
           <b>{active.name}</b>
           <span>
-            {floor}F のお題{isRecoveryFloor(floor, rules) ? '（突破で LIFE 回復）' : ''}
+            {floor}F{isRecoveryFloor(floor, rules) ? ' ・突破で LIFE 回復' : ''}
           </span>
         </p>
 
-        <TowerBoard
-          regions={regions}
-          floor={floor}
-          className="tower-board-main"
-          ariaLabel={`${active.name} の ${floor}F のお題：${targetText}`}
-        />
+        {/* No written description of the target under the board: the board IS the description, and
+            a second copy in words only competed with it for the space it needs. The same sentence
+            is still the board's accessible name, so a screen reader gets it. */}
+        <div className="tower-board-area">
+          <TowerBoard
+            regions={regions}
+            className="tower-board-main"
+            ariaLabel={`${active.name} の ${floor}F のお題：${targetText}`}
+          />
+        </div>
 
-        <p className="tower-target-text">{targetText}</p>
+        <TowerGauge
+          finalFloor={rules.finalFloor}
+          players={indexes.map((index) => ({
+            name: state.players[index].name,
+            clearedFloor: state.players[index].lastClearedFloor,
+            active: index === state.activePlayerIndex,
+          }))}
+        />
 
         {flash && (
           <p className={`tower-flash is-${flash.kind}`} key={flash.id} role="status">
@@ -339,19 +350,30 @@ export default function TowerGame({ state, onChange, onExit }: Props) {
                   {player.status === 'cleared' && <em className="done">CLEAR</em>}
                   {player.status === 'retired' && <em className="done">END</em>}
                 </span>
-                <span className="tower-status-life" aria-label={`LIFE ${player.life} / ${rules.maxLife}`}>
-                  <b aria-hidden="true">LIFE</b>
-                  <span className="tower-life-pips" aria-hidden="true">
-                    {Array.from({ length: rules.maxLife }, (_, pip) => (
-                      <i key={pip} className={pip < player.life ? 'on' : 'off'} />
-                    ))}
+                <span className="tower-status-line">
+                  {/* Pips up to five read at a glance; past that they get too small to count, so a
+                      LIFE of 8 shows the number and a bar instead of eight dots nobody reads. */}
+                  <span className="tower-status-life" aria-label={`LIFE ${player.life} / ${rules.maxLife}`}>
+                    <b aria-hidden="true">LIFE</b>
+                    {rules.maxLife <= 5 ? (
+                      <span className="tower-life-pips" aria-hidden="true">
+                        {Array.from({ length: rules.maxLife }, (_, pip) => (
+                          <i key={pip} className={pip < player.life ? 'on' : 'off'} />
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="tower-life-bar" aria-hidden="true">
+                        <i style={{ width: `${(player.life / rules.maxLife) * 100}%` }} />
+                      </span>
+                    )}
+                    <b className="tower-life-value" aria-hidden="true">
+                      {player.life}
+                      <em>/{rules.maxLife}</em>
+                    </b>
                   </span>
-                  <b className="tower-life-value" aria-hidden="true">
-                    {player.life}
-                  </b>
-                </span>
-                <span className="tower-status-meta">
-                  {player.currentFloor}F ／ CONTINUE 残 {remainingContinues(player, rules)}
+                  <span className="tower-status-meta">
+                    {player.currentFloor}F・C残{remainingContinues(player, rules)}
+                  </span>
                 </span>
               </div>
             );
@@ -405,9 +427,7 @@ export default function TowerGame({ state, onChange, onExit }: Props) {
                 <strong>MISS</strong>
                 <kbd aria-hidden="true">2</kbd>
               </button>
-              <p className="tower-actions-hint">
-                際どいときは、どちらも押さずに着弾を確認してください。入力があるまで進みません。
-              </p>
+              <p className="tower-actions-hint">際どいときは、押さずに着弾を確認してください</p>
             </>
           )}
 

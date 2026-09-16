@@ -93,7 +93,9 @@ test.describe('TOWER play', () => {
     await openFreshApp(page);
     await startTower(page);
     await expect(floorBadge(page)).toContainText('1');
-    await expect(page.locator('.tower-target-text')).toHaveText('盤面すべて（82エリア）');
+    // The target is the board itself; the written description is only its accessible name.
+    await expect(page.locator('.tower-target-text')).toHaveCount(0);
+    await expect(page.getByRole('img', { name: /1F のお題：盤面すべて（82エリア）/ })).toBeVisible();
 
     await judgeTower(page, 'hit');
     await expect(floorBadge(page)).toContainText('2');
@@ -152,7 +154,7 @@ test.describe('TOWER play', () => {
     await towerClickByName(page, 'CONTINUE する');
     await expect(floorBadge(page)).toContainText('4');
     expect(await lifeOf(page)).toBe(3);
-    await expect(page.locator('.tower-status-card').first()).toContainText('CONTINUE 残 4');
+    await expect(page.locator('.tower-status-card').first()).toContainText('C残4');
   });
 
   test('takes a dart back, recovery and all', async ({ page }) => {
@@ -261,6 +263,61 @@ test.describe('TOWER play', () => {
     await expect(page.locator('.tower-result-card')).toHaveCount(2);
     await expect(page.locator('.tower-result-card').first()).toContainText('AKI');
     await expect(page.locator('.tower-result-card').nth(1)).toContainText('BEN');
+  });
+});
+
+test.describe('TOWER settings', () => {
+  test('opens on 5 LIFE from 1F when the pickers are left alone', async ({ page }) => {
+    await openFreshApp(page);
+    await startTower(page, { life: null });
+    expect(await lifeOf(page)).toBe(5);
+    await expect(floorBadge(page)).toContainText('1');
+    await expect(page.locator('.tower-status-card').first()).toContainText('1F');
+  });
+
+  test('plays the chosen LIFE, down to a single miss', async ({ page }) => {
+    await openFreshApp(page);
+    await startTower(page, { life: 1 });
+    expect(await lifeOf(page)).toBe(1);
+    await judgeTower(page, 'miss');
+    await expect(page.locator('.tower-panel.over')).toContainText('GAME OVER');
+  });
+
+  test('refills to the chosen LIFE on a 10F recovery', async ({ page }) => {
+    await openFreshApp(page);
+    await startTower(page, { life: 7 });
+    await judgeTowerDarts(page, 'hit', 8);
+    await judgeTowerDarts(page, 'miss', 2);
+    expect(await lifeOf(page)).toBe(5);
+    await judgeTowerDarts(page, 'hit', 2); // clears 9F then 10F
+    await expect(floorBadge(page)).toContainText('11');
+    expect(await lifeOf(page)).toBe(7);
+  });
+
+  test('starts the climb on the chosen floor, with the tower already part-built', async ({ page }) => {
+    await openFreshApp(page);
+    await startTower(page, { startFloor: 61, names: ['AKI'] });
+    await expect(floorBadge(page)).toContainText('61');
+
+    // 60 of 100 floors are granted, so 12 of the gauge's 20 storeys are already lit.
+    await expect(page.locator('.tower-gauge-block.is-climbed')).toHaveCount(12);
+    await expect(page.locator('.tower-gauge')).toHaveAttribute('aria-label', /60F/);
+
+    // ...and the stairwell is the one that belongs to the sixties, not the ground floor's.
+    await expect(page.locator('.tower-stage')).toHaveAttribute('data-band', '4');
+  });
+
+  test('reports CLEAR FLOOR from a high start floor', async ({ page }) => {
+    await openFreshApp(page);
+    await startTower(page, { startFloor: 41, life: 1, names: ['AKI'] });
+    await judgeTowerDarts(page, 'hit', 2); // 41F and 42F beaten
+    await judgeTower(page, 'miss');
+    await towerClickByName(page, 'やめる');
+    await towerClick(page, '.tower-panel.end button');
+
+    await expect(page.locator('.tower-result-floor')).toContainText('42');
+    await expect(page.locator('.tower-result')).toContainText('START FLOOR 41');
+    await expect(page.locator('.tower-result')).toContainText('START LIFE 1');
   });
 });
 
