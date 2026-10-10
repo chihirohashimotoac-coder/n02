@@ -1,0 +1,1147 @@
+/*
+ * n02 BOARD & BROADCAST - the visual layer.
+ *
+ * Loaded after every other stylesheet. It changes how screens look and nothing else: no rule here
+ * hides, reorders or resizes a control a handler depends on, and every decorative piece is a
+ * pseudo-element or background with pointer-events: none, so it can never take a tap or a click.
+ *
+ * Vocabulary, all of it from the steel-tip board and the broadcast that frames it:
+ *   - tungsten   the barrel: the dark chrome plates (top bar, player plates, menu bar, keypad)
+ *   - steel      the spider wire: the light canvas, hairlines, the wire watermark on mode tiles
+ *   - chalk      the surfaces scores are written on
+ *   - ring       the double ring's alternating red/green, used once per screen as a signature edge
+ *   - throw lime the existing "whose throw it is" colour, kept exactly where it always was
+ * Decorative board art lives only here (--board-art, --spider-mask). The TOWER board, the Cricket
+ * board and the Pentathlon hit pads are input surfaces and are not touched by this file.
+ */
+
+:root {
+  --tungsten: #1a1f22;
+  --tungsten-2: #252c30;
+  --tungsten-3: #313a3f;
+  --tungsten-line: #ffffff1c;
+  --on-tungsten: #f1f4f2;
+  --on-tungsten-muted: #aab4af;
+  --chalk: #fbfcfb;
+  --ring-red: #b8322a;
+  --ring-green: #14784a;
+  --ring-wire: #8f9895;
+  /* The signature edge: double-ring segments with a hair of wire between them. */
+  --ring-edge: repeating-linear-gradient(
+    90deg,
+    var(--ring-red) 0 22px,
+    var(--ring-wire) 22px 23px,
+    var(--ring-green) 23px 45px,
+    var(--ring-wire) 45px 46px
+  );
+  --throw: var(--player-active-bg);
+
+  /* Mode accents. Each comes from what the mode already was: 01 owns the board green, checkout
+     the red of the double you finish on, Pentathlon a medal bronze, 個別練習 a cool steel blue,
+     PRACTICE the COUNT-UP amber and TOWER its own night blue. */
+  --mode-x01: #0d503a;
+  --mode-checkout: #a3271f;
+  --mode-pent: #85600f;
+  --mode-single: #2f5670;
+  --mode-practice: #a54c08;
+
+  --board-art: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-200 -200 400 400'%3E%3Ccircle r='200' fill='%231f2427'/%3E%3Cg fill='none' transform='rotate(-99)'%3E%3Ccircle r='57.45' stroke='%23ece3cb' stroke-width='83.1'/%3E%3Ccircle r='57.45' stroke='%2315191b' stroke-width='83.1' stroke-dasharray='18.048 18.048'/%3E%3Ccircle r='103' stroke='%2314784a' stroke-width='8'/%3E%3Ccircle r='103' stroke='%23b8322a' stroke-width='8' stroke-dasharray='32.358 32.358'/%3E%3Ccircle r='134.5' stroke='%23ece3cb' stroke-width='55'/%3E%3Ccircle r='134.5' stroke='%2315191b' stroke-width='55' stroke-dasharray='42.254 42.254'/%3E%3Ccircle r='166' stroke='%2314784a' stroke-width='8'/%3E%3Ccircle r='166' stroke='%23b8322a' stroke-width='8' stroke-dasharray='52.150 52.150'/%3E%3C/g%3E%3Ccircle r='15.9' fill='%2314784a'/%3E%3Ccircle r='6.35' fill='%23b8322a'/%3E%3Cg fill='none' stroke='%238f9895' stroke-width='1.2'%3E%3Ccircle r='170'/%3E%3Ccircle r='162'/%3E%3Ccircle r='107'/%3E%3Ccircle r='99'/%3E%3Ccircle r='15.9'/%3E%3C/g%3E%3C/svg%3E");
+  --spider-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-200 -200 400 400'%3E%3Cg fill='none' stroke='%23000' stroke-width='2.4'%3E%3Ccircle r='6.35'/%3E%3Ccircle r='15.9'/%3E%3Ccircle r='99'/%3E%3Ccircle r='107'/%3E%3Ccircle r='162'/%3E%3Ccircle r='170'/%3E%3Cpath d='M2.5 -15.7L26.6 -167.9M7.2 -14.2L77.2 -151.5M11.2 -11.2L120.2 -120.2M14.2 -7.2L151.5 -77.2M15.7 -2.5L167.9 -26.6M15.7 2.5L167.9 26.6M14.2 7.2L151.5 77.2M11.2 11.2L120.2 120.2M7.2 14.2L77.2 151.5M2.5 15.7L26.6 167.9M-2.5 15.7L-26.6 167.9M-7.2 14.2L-77.2 151.5M-11.2 11.2L-120.2 120.2M-14.2 7.2L-151.5 77.2M-15.7 2.5L-167.9 26.6M-15.7 -2.5L-167.9 -26.6M-14.2 -7.2L-151.5 -77.2M-11.2 -11.2L-120.2 -120.2M-7.2 -14.2L-77.2 -151.5M-2.5 -15.7L-26.6 -167.9'/%3E%3C/g%3E%3C/svg%3E");
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root[data-theme='neon'] {
+  --tungsten: #050806;
+  --tungsten-2: #0c130f;
+  --tungsten-3: #14201a;
+  --on-tungsten-muted: #8fb3a0;
+  --chalk: #101512;
+  --throw: #2ee58a;
+  --ring-red: #ff4d6d;
+  --ring-green: #2ee58a;
+  --ring-wire: #050806;
+  --mode-x01: #2ee58a;
+  --mode-checkout: #ff6a7f;
+  --mode-pent: #ffc14d;
+  --mode-single: #6fc3ff;
+  --mode-practice: #ffb020;
+}
+
+:root[data-theme='navy'] {
+  --tungsten: #141d38;
+  --tungsten-2: #1d2949;
+  --tungsten-3: #283657;
+  --on-tungsten-muted: #b9c2d8;
+  --throw: #f0d98a;
+  --ring-red: #b08a2c;
+  --ring-green: #f0d98a;
+  --ring-wire: #141d38;
+  --mode-x01: #1d2f5e;
+  --mode-checkout: #8c2f2a;
+  --mode-pent: #8a6d24;
+  --mode-single: #335c7d;
+  --mode-practice: #8a5a10;
+}
+
+/* ================================================================ base */
+
+body {
+  background:
+    radial-gradient(120% 60% at 50% -12%, #ffffffb3, transparent 60%),
+    var(--canvas);
+  font-family: var(--font-ui);
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+}
+[data-theme='neon'] body {
+  background:
+    radial-gradient(120% 60% at 50% -12%, #2ee58a12, transparent 60%),
+    var(--canvas);
+}
+[data-theme='navy'] body {
+  background:
+    radial-gradient(120% 60% at 50% -12%, #ffffffb3, transparent 60%),
+    var(--canvas);
+}
+
+:where(button, [role='button'], a, input, select):focus-visible {
+  outline-color: var(--accent-text);
+}
+
+/* ================================================================ top bar */
+
+.topbar,
+[data-theme='neon'] .topbar {
+  background: var(--tungsten);
+  color: var(--on-tungsten);
+  border-bottom: 0;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  height: 76px;
+}
+.topbar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -4px;
+  height: 4px;
+  background: var(--ring-edge);
+  pointer-events: none;
+}
+.brand {
+  color: var(--on-tungsten);
+  gap: 16px;
+}
+/* The mark: a full board, drawn rather than glyphed. */
+.brand::before {
+  content: '';
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--board-art) center / contain no-repeat;
+  box-shadow: 0 0 0 2px var(--tungsten-3);
+}
+.brand strong {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-display);
+  font-weight: 900;
+  letter-spacing: -0.035em;
+  font-size: 36px;
+}
+.brand span,
+[data-theme='neon'] .brand span {
+  background: var(--tungsten-line);
+  height: 30px;
+}
+.brand em {
+  color: var(--on-tungsten-muted);
+  font-stretch: var(--stretch-title);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  font-size: 17px;
+}
+.topbar .subtle-button,
+[data-theme='neon'] .topbar .subtle-button {
+  background: var(--tungsten-2);
+  color: var(--on-tungsten);
+  border-color: var(--tungsten-line);
+}
+.topbar .subtle-button:hover {
+  background: var(--tungsten-3);
+  color: var(--on-tungsten);
+  border-color: var(--on-tungsten-muted);
+}
+
+/* ================================================================ panels & headings */
+
+.panel {
+  border-color: var(--line);
+  border-radius: 16px;
+}
+.section-heading h1,
+.section-heading h2 {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.section-heading h1 {
+  font-size: 30px;
+}
+/* An eyebrow reads as a broadcast caption: a short ring-coloured tick, then the words. */
+.eyebrow {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  letter-spacing: 0.12em;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.eyebrow::before {
+  content: '';
+  width: 14px;
+  height: 4px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, var(--ring-red) 0 50%, var(--ring-green) 50% 100%);
+  flex: none;
+}
+.status-chip {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+  font-weight: 700;
+}
+.field-section {
+  border-top-color: var(--line);
+}
+.field-section h2 {
+  font-size: 17px;
+  font-weight: 800;
+}
+
+/* ================================================================ mode select (home)
+   Two feature tiles for the scorers people open n02 for, then the three other doors as a lower
+   row. Same buttons, same order, same handlers - only the grid placement differs. */
+
+.mode-grid.pent-mode-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+.mode-grid > .mode-card {
+  grid-column: span 2;
+  --mode: var(--mode-x01);
+  isolation: isolate;
+  overflow: hidden;
+  align-items: flex-start;
+  justify-content: flex-end;
+  text-align: left;
+  gap: 4px;
+  min-height: 132px;
+  padding: 18px 18px 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 0 #ffffff inset, 0 1px 2px #141c1810;
+}
+.mode-grid > .mode-card:nth-child(-n + 2) {
+  grid-column: span 3;
+  min-height: 188px;
+  padding: 22px 22px 20px;
+}
+.mode-grid > .mode-card:nth-child(2) {
+  --mode: var(--mode-checkout);
+}
+.mode-grid > .mode-card[data-mode='pentathlon'] {
+  --mode: var(--mode-pent);
+}
+.mode-grid > .mode-card[data-mode='pentathlon-single'] {
+  --mode: var(--mode-single);
+}
+.mode-grid > .mode-card[data-mode='practice'] {
+  --mode: var(--mode-practice);
+}
+/* Wire watermark: the spider of a board, in the mode's colour, cropped by the tile's corner. */
+.mode-grid > .mode-card::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  width: 230px;
+  height: 230px;
+  right: -78px;
+  top: -86px;
+  background: var(--mode);
+  opacity: 0.13;
+  -webkit-mask: var(--spider-mask) center / contain no-repeat;
+  mask: var(--spider-mask) center / contain no-repeat;
+  pointer-events: none;
+  transition: transform 0.5s var(--ease-out), opacity 0.2s;
+}
+.mode-grid > .mode-card:nth-child(-n + 2)::before {
+  width: 330px;
+  height: 330px;
+  right: -96px;
+  top: -120px;
+}
+/* The mode's colour bar along the foot of the tile. */
+.mode-grid > .mode-card::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 4px;
+  background: var(--mode);
+  opacity: 0.85;
+  pointer-events: none;
+}
+.mode-grid > .mode-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--mode) 45%, var(--line));
+  box-shadow: 0 1px 0 #ffffff inset, 0 14px 28px -16px #141c1866;
+}
+.mode-grid > .mode-card:hover::before {
+  transform: rotate(9deg);
+  opacity: 0.2;
+}
+.mode-grid > .mode-card:active {
+  transform: translateY(0);
+}
+.mode-grid > .mode-card.selected {
+  border: 1px solid var(--mode);
+  background: var(--surface);
+  box-shadow:
+    0 0 0 2px var(--mode),
+    0 18px 34px -18px color-mix(in srgb, var(--mode) 70%, transparent);
+}
+.mode-grid > .mode-card.selected::after {
+  height: 6px;
+  opacity: 1;
+}
+.mode-grid > .mode-card.selected::before {
+  opacity: 0.22;
+}
+
+/* The tile's numeral is its title: big, set in the display face, in the mode's colour. */
+.mode-grid .mode-icon {
+  width: auto;
+  height: auto;
+  margin-bottom: auto;
+  background: none;
+  border-radius: 0;
+  color: var(--mode);
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-display);
+  font-weight: 900;
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  place-items: start;
+}
+.mode-grid > .mode-card:nth-child(-n + 2) .mode-icon {
+  font-size: 56px;
+}
+.mode-grid > .mode-card strong {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.005em;
+  line-height: 1.25;
+}
+.mode-grid > .mode-card:nth-child(-n + 2) strong {
+  font-size: 22px;
+}
+.mode-grid > .mode-card small {
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+.mode-grid .checkmark {
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  background: var(--throw);
+  color: var(--player-active-ink);
+  box-shadow: 0 0 0 2px var(--surface);
+  font-weight: 900;
+}
+.mode-grid .checkmark.pent-resume-mark {
+  background: var(--mode);
+  color: #fff;
+}
+
+/* neon / navy: the tiles keep their theme surface, everything else above carries over. */
+[data-theme='neon'] .mode-grid > .mode-card,
+[data-theme='neon'] .mode-grid > .mode-card.selected {
+  background: var(--surface);
+  box-shadow: none;
+}
+[data-theme='neon'] .mode-grid > .mode-card.selected {
+  box-shadow: 0 0 0 2px var(--mode);
+}
+[data-theme='neon'] .mode-grid > .mode-card:hover {
+  border-color: var(--mode);
+}
+[data-theme='neon'] .mode-grid .checkmark.pent-resume-mark {
+  color: #04140b;
+}
+
+/* ================================================================ buttons */
+
+.primary-button {
+  font-family: var(--font-ui);
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  border-radius: 12px;
+  background: var(--accent-fill);
+  box-shadow:
+    inset 0 1px 0 #ffffff26,
+    inset 0 -3px 0 #00000033,
+    0 12px 24px -14px color-mix(in srgb, var(--accent-fill) 85%, transparent);
+  transition:
+    transform 0.12s var(--ease-out),
+    box-shadow 0.12s,
+    filter 0.12s;
+}
+.primary-button:hover {
+  filter: brightness(1.08);
+}
+.primary-button:active {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 1px 0 #ffffff1a,
+    inset 0 -1px 0 #00000033;
+}
+.subtle-button,
+.secondary-button,
+.resume-button {
+  border-radius: 10px;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+.resume-button {
+  border: 1px dashed color-mix(in srgb, var(--accent-text) 55%, var(--line));
+}
+.resume-button span {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================ form controls */
+
+.field input,
+.field select,
+.name-input {
+  border-color: var(--line);
+  border-radius: 10px;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.field input,
+.field select {
+  font-variant-numeric: tabular-nums;
+}
+.field input:hover,
+.field select:hover {
+  border-color: color-mix(in srgb, var(--accent-text) 40%, var(--line));
+}
+
+/* ================================================================ recent form (stats)
+   A scoreboard rather than a card stack: the numbers are set in the display face, and the strip
+   of three is a tungsten plate. */
+
+.stats-panel .metric-card {
+  border-radius: 12px;
+}
+.metric-card strong,
+.stat-strip strong {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-score);
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+.metric-card strong small {
+  font-stretch: 100%;
+}
+.stats-panel .stat-strip,
+[data-theme='neon'] .stats-panel .stat-strip {
+  background: var(--tungsten);
+  border-color: var(--tungsten);
+  border-radius: 12px;
+  color: var(--on-tungsten);
+}
+.stats-panel .stat-strip strong,
+[data-theme='neon'] .stats-panel .stat-strip strong {
+  color: var(--on-tungsten);
+}
+.stats-panel .stat-strip span {
+  color: var(--on-tungsten-muted);
+}
+.stats-panel .stat-strip div {
+  border-color: var(--tungsten-line);
+}
+
+/* ================================================================ game screen (01 / checkout /
+   Pentathlon X01 share this shell)
+   Geometry is untouched: every height, inset and grid track below comes from app.css, so the
+   keypad, the sheet and the footer sit exactly where they always did. This only re-dresses them. */
+
+/* Player plates: tungsten, with the thrower lit in lime exactly as before. */
+.n01-game-header {
+  background: var(--tungsten);
+  box-shadow: 0 6px 18px #0000002e;
+}
+.n01-game-header::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -3px;
+  height: 3px;
+  background: var(--ring-edge);
+  pointer-events: none;
+}
+.n01-player-name {
+  opacity: 1;
+  color: var(--on-tungsten-muted);
+}
+.n01-player-name strong {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.n01-player-name span {
+  border-color: var(--tungsten-line);
+  font-weight: 700;
+}
+.n01-player-name.active {
+  color: var(--player-active-ink);
+}
+.n01-player-name em {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  background: var(--tungsten);
+  color: var(--throw);
+  letter-spacing: 0.1em;
+}
+.n01-leg-center {
+  background: var(--tungsten-2);
+  border-inline-color: var(--tungsten-line);
+}
+.n01-leg-center small {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  font-weight: 700;
+  color: var(--on-tungsten-muted);
+  opacity: 1;
+}
+.n01-leg-center strong {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-score);
+  font-weight: 900;
+  font-size: 34px;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+}
+
+.n01-game-meta strong {
+  font-weight: 800;
+}
+
+/* The sheet: figures in the display face, tabular, so a column of scores lines up digit for digit. */
+.n01-score-table th {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  letter-spacing: 0.06em;
+}
+.n01-score-table td,
+.n01-score-table td.scored button,
+.n01-score-table td.scored input {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+.n01-score-table td.scored button,
+.n01-score-table td.scored input {
+  font-stretch: var(--stretch-score);
+  font-weight: 600;
+}
+.n01-score-table td.scored button.starter-picker {
+  font-family: var(--font-ui);
+  font-stretch: 100%;
+}
+.n01-score-table td.to-go {
+  font-stretch: var(--stretch-score);
+  font-weight: 700;
+}
+.n01-score-table td.darts {
+  font-stretch: var(--stretch-score);
+}
+.n01-score-table .ton-score {
+  border-color: color-mix(in srgb, var(--ring-red) 55%, #c8cbc9);
+}
+
+/* Remaining: the number read from the oche. Semi-condensed black, so it can be set bigger than
+   before without growing its box. */
+.n01-game-footer {
+  border-top: 0;
+}
+.n01-game-footer::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  inset: -3px 0 auto;
+  height: 3px;
+  background: var(--tungsten);
+  pointer-events: none;
+}
+.n01-left-table strong {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-score);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+.n01-left-table > div.active {
+  box-shadow:
+    inset 0 6px 0 var(--throw),
+    inset 0 7px 0 #00000014;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--throw) 26%, var(--surface)), var(--surface) 70%);
+}
+.n01-left-table span {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.n01-left-table span.checkout-route {
+  color: var(--accent-text);
+  font-stretch: var(--stretch-title);
+  font-weight: 900;
+}
+
+/* Menu bar and keypad: tungsten keys. Only colour, type and an inset highlight change - the keys
+   keep their grid cell, so every hit area is the one it was. */
+.n01-menu-table {
+  background: var(--tungsten);
+  border-top-color: var(--tungsten);
+}
+.n01-menu-table button {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  letter-spacing: 0.02em;
+  border-right-color: var(--tungsten-line);
+}
+.n01-menu-table button:hover,
+.n01-menu-table button.selected {
+  background: var(--tungsten-3);
+  box-shadow: inset 0 -3px 0 var(--throw);
+}
+.n01-key-table {
+  background: var(--tungsten-2);
+}
+.n01-key-table button {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-score);
+  font-weight: 700;
+  border-top-color: #ffffff14;
+  border-right-color: #00000040;
+  box-shadow: inset 0 1px 0 #ffffff0d;
+  transition: background 0.08s;
+}
+.n01-key-table button:active {
+  background: var(--tungsten-3);
+}
+.n01-key-table button.enter {
+  background: var(--accent-fill);
+  font-stretch: var(--stretch-title);
+  letter-spacing: 0.04em;
+}
+.n01-key-table button.enter:active {
+  background: var(--green-dark);
+}
+[data-theme='navy'] .n01-key-table button.enter {
+  background: #b08a2c;
+  color: #14224a;
+}
+[data-theme='navy'] .n01-key-table button.enter:active {
+  background: #96751f;
+}
+
+/* neon / navy keep their own plates; the keypad and menu follow --tungsten, which each theme sets. */
+[data-theme='neon'] .n01-menu-table,
+[data-theme='navy'] .n01-menu-table {
+  background: var(--tungsten);
+}
+[data-theme='neon'] .n01-key-table,
+[data-theme='navy'] .n01-key-table {
+  background: var(--tungsten-2);
+}
+[data-theme='neon'] .n01-left-table > div.active {
+  box-shadow: inset 0 6px 0 #2ee58a;
+  background: linear-gradient(180deg, #2ee58a1f, #101512 70%);
+}
+[data-theme='navy'] .n01-left-table > div.active {
+  box-shadow: inset 0 6px 0 #d4af4e;
+  background: linear-gradient(180deg, #f0d98a4d, #fff 70%);
+}
+[data-theme='neon'] .n01-player-name em {
+  color: #2ee58a;
+}
+[data-theme='navy'] .n01-player-name em {
+  color: #f0d98a;
+}
+
+/* ================================================================ result card
+   Only the Leg / match dialogs: PentathlonResult also renders a .result-card (the shareable
+   .pent-share-card, which is drawn into the share image), and that one keeps its own look.
+   A broadcast lower-third: a tungsten plate carries the caption and the board, the winner's name
+   is the headline, and the two numbers sit underneath in the display face. */
+
+.result-backdrop {
+  background: #0a0f0ca6;
+}
+.result-card:not(.pent-share-card),
+[data-theme='neon'] .result-card:not(.pent-share-card) {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--chalk);
+  border: 0;
+  border-radius: 18px;
+  padding: 0 30px 26px;
+  box-shadow:
+    0 0 0 1px #00000014,
+    0 40px 90px -20px #000000a6;
+}
+.result-card:not(.pent-share-card)::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: 112px;
+  background:
+    var(--ring-edge) left bottom / 100% 4px no-repeat,
+    radial-gradient(140% 120% at 50% 0%, var(--tungsten-3), var(--tungsten) 70%);
+  pointer-events: none;
+}
+.result-card:not(.pent-share-card) .result-icon {
+  position: relative;
+  margin-top: 22px;
+  width: 64px;
+  height: 64px;
+  background: var(--board-art) center / contain no-repeat;
+  color: transparent;
+  font-size: 0;
+  box-shadow:
+    0 0 0 3px var(--tungsten),
+    0 0 0 5px var(--throw),
+    0 10px 24px #00000059;
+}
+.result-card:not(.pent-share-card) > p {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  letter-spacing: 0.14em;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent-text);
+  margin-top: 42px;
+}
+.result-card:not(.pent-share-card) h2 {
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.result-card:not(.pent-share-card) .result-numbers {
+  margin: 20px 0 22px;
+  border-block: 1px solid var(--line);
+  padding: 12px 0;
+}
+.result-card:not(.pent-share-card) .result-numbers strong {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-score);
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  font-size: 34px;
+  line-height: 1.1;
+}
+.result-card:not(.pent-share-card) .result-numbers span {
+  font-size: 11px;
+  font-weight: 700;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .result-card:not(.pent-share-card) {
+    animation: n02-plate-in 0.32s var(--ease-out) both;
+  }
+}
+@keyframes n02-plate-in {
+  from {
+    transform: translateY(10px) scale(0.985);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* Modal cards share the same chalk surface and corner. */
+.n01-modal-card {
+  border-radius: 16px;
+}
+.n01-modal-card h2 {
+  font-weight: 800;
+}
+.n01-modal-card.menu-list > button kbd,
+.keyboard-help kbd {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+}
+.n01-stats-head strong,
+.n01-stats-row strong,
+.n01-stats-row span {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================ PRACTICE hub
+   The playable menus become tiles of the same family as the home screen: a wire watermark in the
+   card's accent and a foot bar. COMING SOON keeps its hatched, plainly-unavailable look. */
+
+.practice-card {
+  border-radius: 14px;
+  isolation: isolate;
+  overflow: hidden;
+}
+.practice-card strong {
+  font-stretch: var(--stretch-title);
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  line-height: 1.12;
+}
+.practice-card-sub,
+.practice-card-badge,
+.practice-card-lock {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+}
+.practice-card.playable {
+  --card-accent: var(--cu-accent);
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--card-accent) 55%, var(--line));
+  box-shadow: inset 0 -4px 0 var(--card-accent);
+}
+.practice-card.playable[data-practice='tower'] {
+  --card-accent: #2f6ea5;
+}
+.practice-card.playable[data-practice='tower'] .practice-card-badge {
+  background: #1d4f7c;
+  color: #fff;
+}
+.practice-card.playable[data-practice='tower'] .practice-card-sub,
+.practice-card.playable[data-practice='tower'] .practice-card-go {
+  color: #1d4f7c;
+}
+.practice-card.playable::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  width: 220px;
+  height: 220px;
+  right: -80px;
+  bottom: -96px;
+  background: var(--card-accent);
+  opacity: 0.12;
+  -webkit-mask: var(--spider-mask) center / contain no-repeat;
+  mask: var(--spider-mask) center / contain no-repeat;
+  pointer-events: none;
+  transition: transform 0.5s var(--ease-out);
+}
+@media (hover: hover) {
+  .practice-card.playable:hover {
+    box-shadow:
+      inset 0 -4px 0 var(--card-accent),
+      0 16px 30px -16px #141c1866;
+  }
+  .practice-card.playable:hover::before {
+    transform: rotate(9deg);
+  }
+}
+[data-theme='neon'] .practice-card.playable[data-practice='tower'] {
+  --card-accent: #6fc3ff;
+}
+[data-theme='neon'] .practice-card.playable[data-practice='tower'] .practice-card-badge {
+  background: #6fc3ff;
+  color: #04121d;
+}
+[data-theme='neon'] .practice-card.playable[data-practice='tower'] .practice-card-sub,
+[data-theme='neon'] .practice-card.playable[data-practice='tower'] .practice-card-go {
+  color: #8fd0ff;
+}
+
+/* ================================================================ COUNT-UP
+   Keeps its amber; the chrome it shares with 通常01 (menu bar, keypad) becomes the same tungsten,
+   and its numerals the same semi-condensed display figures. */
+
+.countup-identity strong,
+.countup-identity span,
+.countup-round-badge,
+.countup-total-label,
+.countup-total-meta,
+.countup-total-name em,
+.countup-menu button {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+}
+.countup-round-badge strong,
+.countup-total-value,
+.countup-table td,
+.countup-table td.scored button,
+.countup-cell-entry,
+.countup-keypad button {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-score);
+  font-variant-numeric: tabular-nums;
+}
+.countup-menu,
+[data-theme='neon'] .countup-menu,
+[data-theme='navy'] .countup-menu {
+  background: var(--tungsten);
+}
+.countup-menu button {
+  border-right-color: var(--tungsten-line);
+}
+.countup-keypad,
+[data-theme='neon'] .countup-keypad,
+[data-theme='navy'] .countup-keypad {
+  background: var(--tungsten-2);
+}
+
+/* ================================================================ Pentathlon */
+
+.pent-preset-card,
+.pent-single-card {
+  border-radius: 14px;
+}
+.pent-preset-card h3,
+.pent-preset-card strong,
+.pent-single-card strong {
+  font-stretch: var(--stretch-title);
+}
+.pent-single-card {
+  border-left: 4px solid var(--mode-single);
+}
+.pent-single-card:hover {
+  border-color: var(--mode-single);
+}
+.pent-single-card.selected {
+  border-color: var(--mode-single);
+  box-shadow: inset 0 0 0 1px var(--mode-single);
+}
+.pent-single-card .checkmark {
+  background: var(--throw);
+  color: var(--player-active-ink);
+}
+
+/* Player plates on the discipline screens: the figure is the display face, and whose turn it is
+   reads exactly the way it does in 通常01 - a tungsten THROW tag with lime type. */
+.pent-player-value,
+.pent-aim-target,
+.pent-cricket-board button,
+.pent-quick-btn {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+.pent-player-value {
+  font-stretch: var(--stretch-score);
+  font-weight: 900;
+}
+.pent-aim-target {
+  font-stretch: var(--stretch-title);
+}
+.pent-badge {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  letter-spacing: 0.06em;
+}
+.pent-badge.throw {
+  background: var(--tungsten);
+  color: var(--throw);
+}
+[data-theme='neon'] .pent-badge.throw {
+  color: #2ee58a;
+}
+[data-theme='navy'] .pent-badge.throw {
+  color: #f0d98a;
+}
+
+/* ================================================================ TOWER chrome
+   Only the header and the result card's type. The stairwell, the board and its regions are the
+   mode's own artwork and input surface, and stay exactly as tower.css draws them. */
+
+.tower-identity strong,
+.tower-identity span,
+.tower-floor-badge small,
+.tower-menu button {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+}
+.tower-floor-badge strong {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-score);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================ result screens (COUNT-UP,
+   Pentathlon, TOWER): the headline figures share the scoreboard face. */
+
+.countup-result-card strong,
+.pent-winner-banner strong,
+.tower-result-floor,
+.tower-result-card strong {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Winner plates read as the broadcast's result caption: dark plate, ring edge underneath. */
+.countup-verdict {
+  position: relative;
+  overflow: hidden;
+  padding-bottom: 16px;
+}
+.countup-verdict::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 4px;
+  background: var(--ring-edge);
+  pointer-events: none;
+}
+.countup-verdict span,
+.countup-verdict strong {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+}
+.pent-result-row.head {
+  background: var(--tungsten);
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  box-shadow: inset 0 -3px 0 var(--throw);
+}
+.pent-result-row > span.value,
+.pent-result-stat {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+}
+.pent-winner-banner span {
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+}
+
+/* ================================================================ mobile home */
+
+@media (width <= 720px) {
+  .topbar {
+    height: 62px;
+  }
+  .brand {
+    gap: 10px;
+  }
+  .brand::before {
+    width: 30px;
+    height: 30px;
+  }
+  .brand strong {
+    font-size: 27px;
+  }
+  .brand span {
+    height: 22px;
+  }
+  .brand em {
+    font-size: 13px;
+  }
+  .section-heading h1 {
+    font-size: 24px;
+  }
+  /* Two feature tiles side by side under the thumb, the other three as slim rows. */
+  .mode-grid.pent-mode-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .mode-grid > .mode-card,
+  .mode-grid > .mode-card:nth-child(-n + 2) {
+    grid-column: span 1;
+    min-height: 150px;
+    padding: 16px 14px 14px;
+  }
+  .mode-grid > .mode-card:nth-child(n + 3) {
+    grid-column: 1 / -1;
+    min-height: 68px;
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    column-gap: 12px;
+    row-gap: 2px;
+    align-content: center;
+    padding: 12px 44px 12px 14px;
+  }
+  .mode-grid > .mode-card:nth-child(n + 3) .mode-icon {
+    grid-row: 1 / 3;
+    align-self: center;
+    margin: 0;
+    font-size: 30px;
+    text-align: center;
+    justify-self: center;
+  }
+  .mode-grid > .mode-card:nth-child(n + 3)::before {
+    width: 150px;
+    height: 150px;
+    right: -50px;
+    top: -40px;
+  }
+  .mode-grid > .mode-card:nth-child(n + 3)::after {
+    inset: 0 auto 0 0;
+    width: 4px;
+    height: auto;
+  }
+  .mode-grid > .mode-card:nth-child(-n + 2) .mode-icon {
+    font-size: 44px;
+  }
+  .mode-grid > .mode-card:nth-child(-n + 2)::before {
+    width: 240px;
+    height: 240px;
+    right: -120px;
+    top: -110px;
+    opacity: 0.1;
+  }
+  .mode-grid > .mode-card:nth-child(-n + 2) strong {
+    font-size: 17px;
+  }
+  .mode-grid > .mode-card strong {
+    font-size: 16px;
+  }
+  .mode-grid > .mode-card small {
+    font-size: 11px;
+  }
+  .mode-grid .checkmark {
+    top: 10px;
+    right: 10px;
+    width: 26px;
+    height: 26px;
+  }
+  .mode-grid > .mode-card:nth-child(n + 3) .checkmark {
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  .result-card:not(.pent-share-card) {
+    padding: 0 22px 22px;
+  }
+}
+
+/* ================================================================ motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-grid > .mode-card:hover,
+  .primary-button:active {
+    transform: none;
+  }
+  .mode-grid > .mode-card:hover::before {
+    transform: none;
+  }
+}

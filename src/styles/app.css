@@ -13,21 +13,25 @@
  */
 :root {
   /* ---- palette (pre-existing; also the theme override surface) */
-  --canvas: #f5f4ef;
+  /* BOARD & BROADCAST: the light theme's canvas is brushed steel under arena light rather than paper,
+     so the board-black chrome and the chalk-white score surfaces both read as objects on it. */
+  --canvas: #e5e9e6;
   --surface: #fff;
-  --surface-soft: #f0f3ee;
-  --ink: #171a18;
+  --surface-soft: #eef1ee;
+  --ink: #15191b;
   /* Nudged from #69716c: that cleared 4.5:1 on white but only reached 4.49 on --surface-soft and
      4.22 on the score sheet's header fill, so every small label on a tinted surface sat just under
      AA. This value clears 4.5:1 on all four surfaces it is used over. */
-  --muted: #646c67;
-  --line: #d9ddd7;
+  /* Darkened again with the steel canvas: #646c67 reached only 4.4:1 on it. This value clears
+     4.5:1 on the canvas, --surface-soft, the sheet header fill and white. */
+  --muted: #59615c;
+  --line: #d2d8d3;
   --green: #0d503a;
   --green-dark: #083c2c;
   --green-soft: #e6eee8;
   --amber: #a96505;
   --danger: #a43a32;
-  --shadow: 0 18px 50px #19241e12;
+  --shadow: 0 1px 2px #141c1812, 0 14px 34px -14px #141c182e;
 
   /* ---- semantic roles
      Named by what they mean, so a screen asks for "the colour of a heading" rather than for green.
@@ -93,9 +97,18 @@
   /* ---- typography
      Numbers are tabular everywhere they are compared down a column: score sheets, remaining
      scores, totals, stats tables. --font-num is the one place that decides it. */
-  --font-ui:
-    'Noto Sans JP', 'Yu Gothic UI', system-ui, -apple-system, sans-serif;
-  --font-num: var(--font-ui);
+  /* Latin and figures come from Archivo (fonts.css); every Japanese glyph falls through to the
+     platform's own Japanese family, so mixed strings like 「プレイヤー1」 pair the two cleanly. */
+  --font-jp:
+    'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Noto Sans CJK JP', 'Yu Gothic UI',
+    'Meiryo', system-ui, -apple-system, sans-serif;
+  --font-ui: 'n02 Archivo', var(--font-jp);
+  --font-num: 'n02 Archivo', var(--font-jp);
+  /* Archivo's width axis does the typographic work: expanded for the wordmark and game titles,
+     semi-condensed for scores so four digits stay huge inside half a phone screen. */
+  --stretch-display: 118%;
+  --stretch-title: 108%;
+  --stretch-score: 86%;
   --numeric: tabular-nums;
   --weight-regular: 400;
   --weight-medium: 650;

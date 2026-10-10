@@ -2,12 +2,14 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { purgeLegacyCache } from './pwa/legacyCache';
+import './styles/fonts.css';
 import './styles/global.css';
 import './styles/app.css';
 import './styles/pentathlon.css';
 import './styles/practice.css';
 import './styles/tower.css';
 import './styles/award.css';
+import './styles/brand.css';
 
 void purgeLegacyCache();
 
