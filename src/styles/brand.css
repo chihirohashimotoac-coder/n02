@@ -687,14 +687,16 @@ body {
 }
 
 /* ================================================================ result card
+   Only the Leg / match dialogs: PentathlonResult also renders a .result-card (the shareable
+   .pent-share-card, which is drawn into the share image), and that one keeps its own look.
    A broadcast lower-third: a tungsten plate carries the caption and the board, the winner's name
    is the headline, and the two numbers sit underneath in the display face. */
 
 .result-backdrop {
   background: #0a0f0ca6;
 }
-.result-card,
-[data-theme='neon'] .result-card {
+.result-card:not(.pent-share-card),
+[data-theme='neon'] .result-card:not(.pent-share-card) {
   position: relative;
   overflow: hidden;
   isolation: isolate;
@@ -706,7 +708,7 @@ body {
     0 0 0 1px #00000014,
     0 40px 90px -20px #000000a6;
 }
-.result-card::before {
+.result-card:not(.pent-share-card)::before {
   content: '';
   position: absolute;
   z-index: -1;
@@ -717,7 +719,7 @@ body {
     radial-gradient(140% 120% at 50% 0%, var(--tungsten-3), var(--tungsten) 70%);
   pointer-events: none;
 }
-.result-card .result-icon {
+.result-card:not(.pent-share-card) .result-icon {
   position: relative;
   margin-top: 22px;
   width: 64px;
@@ -730,7 +732,7 @@ body {
     0 0 0 5px var(--throw),
     0 10px 24px #00000059;
 }
-.result-card > p {
+.result-card:not(.pent-share-card) > p {
   font-family: var(--font-num);
   font-stretch: var(--stretch-title);
   letter-spacing: 0.14em;
@@ -739,19 +741,19 @@ body {
   color: var(--accent-text);
   margin-top: 42px;
 }
-.result-card h2 {
+.result-card:not(.pent-share-card) h2 {
   font-size: 32px;
   font-weight: 900;
   letter-spacing: -0.01em;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
-.result-card .result-numbers {
+.result-card:not(.pent-share-card) .result-numbers {
   margin: 20px 0 22px;
   border-block: 1px solid var(--line);
   padding: 12px 0;
 }
-.result-card .result-numbers strong {
+.result-card:not(.pent-share-card) .result-numbers strong {
   font-family: var(--font-num);
   font-stretch: var(--stretch-score);
   font-variant-numeric: tabular-nums;
@@ -759,12 +761,12 @@ body {
   font-size: 34px;
   line-height: 1.1;
 }
-.result-card .result-numbers span {
+.result-card:not(.pent-share-card) .result-numbers span {
   font-size: 11px;
   font-weight: 700;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .result-card {
+  .result-card:not(.pent-share-card) {
     animation: n02-plate-in 0.32s var(--ease-out) both;
   }
 }
@@ -1127,7 +1129,7 @@ body {
     top: 50%;
     transform: translateY(-50%);
   }
-  .result-card {
+  .result-card:not(.pent-share-card) {
     padding: 0 22px 22px;
   }
 }
