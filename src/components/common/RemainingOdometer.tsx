@@ -30,8 +30,12 @@ function motionAllowed(): boolean {
 export default function RemainingOdometer({ value, roll }: { value: number; roll: RemainingRoll | null }) {
   const [landed, setLanded] = useState<RemainingRoll | null>(null);
   const rootRef = useRef<HTMLElement>(null);
+  const allowed = motionAllowed();
+  // A commit shown at once (reduced motion, no animation support) is settled there and then, so
+  // it can never roll later just because the setting changed in the meantime.
+  if (roll !== null && roll !== landed && !allowed) setLanded(roll);
   // Only a roll into the value actually shown, and only once.
-  const rolling = roll !== null && roll !== landed && roll.to === value && motionAllowed() ? roll : null;
+  const rolling = roll !== null && roll !== landed && roll.to === value && allowed ? roll : null;
 
   useLayoutEffect(() => {
     if (rolling === null) return;

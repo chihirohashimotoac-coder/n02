@@ -129,6 +129,24 @@ describe('RemainingOdometer', () => {
     expect(strong.innerHTML).toBe('401');
   });
 
+  it('never replays a commit shown under reduced motion once motion is allowed again', () => {
+    const animate = stubAnimate();
+    setReducedMotion(true);
+    const commit = roll(501, 401);
+    const { strong, update } = renderInStrong(401, commit);
+    expect(strong.innerHTML).toBe('401');
+
+    // The OS setting is turned off; any later re-render still carries the same, settled commit.
+    setReducedMotion(false);
+    update(401, commit);
+    expect(animate).not.toHaveBeenCalled();
+    expect(strong.innerHTML).toBe('401');
+
+    // A new commit after that does roll.
+    update(321, roll(401, 321));
+    expect(animate).toHaveBeenCalledTimes(3);
+  });
+
   it('shows the value at once where the browser cannot animate', () => {
     const { strong } = renderInStrong(401, roll(501, 401));
     expect(strong.innerHTML).toBe('401');
