@@ -10,6 +10,8 @@ import {
 import { InvalidVisitError, resolveVisit } from '../../domain/x01Core';
 import { classifyAward } from '../../domain/awards';
 import type { AwardPresentation } from '../common/AwardOverlay';
+import RemainingOdometer from '../common/RemainingOdometer';
+import { detectPentathlonX01Roll, useRemainingRolls } from '../common/remainingRoll';
 import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../../domain/darts';
 import { DISCIPLINE_RULE_TEXT } from '../../domain/pentathlon/ruleText';
 import type { X01SoloState, X01SoloInput } from '../../domain/pentathlon/engines/x01Solo';
@@ -90,6 +92,8 @@ export default function PentathlonX01Play({
   const activeState = current.progress[active].state as X01SoloState;
   const solo = session.playerCount === 1;
   const players: PlayerIndex[] = solo ? [0] : [0, 1];
+  // The big remaining numbers roll into a committed visit; display-only, read from the session alone.
+  const remainingRolls = useRemainingRolls(session, detectPentathlonX01Roll);
 
   /**
    * Every played cell in table order, so the arrow keys can walk the score sheet. Each player's
@@ -518,7 +522,9 @@ export default function PentathlonX01Play({
               session.showRoute && !progress.finished ? suggestCheckoutRoute(state.remaining) : null;
             return (
               <div key={index} className={isActive ? 'active' : ''}>
-                <strong>{state.remaining}</strong>
+                <strong>
+                  <RemainingOdometer value={state.remaining} roll={remainingRolls[index]} />
+                </strong>
                 {route ? (
                   <span className="checkout-route">{route.map(dartLabel).join(' - ')}</span>
                 ) : (
