@@ -22,6 +22,8 @@ interface Props {
    * shared stylesheet, so with this variant the buttons must be DIRECT children of the dialog.
    */
   variant?: 'default' | 'menu-list';
+  /** Stricter key handling for the X01 play screens; see useDialogFocus. Off by default. */
+  guardKeys?: boolean;
   children: ReactNode;
 }
 
@@ -40,10 +42,11 @@ export default function PentathlonModal({
   onKeyDown,
   returnFocusTo,
   variant = 'default',
+  guardKeys,
   children,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
-  useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo });
+  useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo, guardKeys });
 
   return (
     <div className="n01-modal-backdrop pent-modal-backdrop" onClick={onClose}>

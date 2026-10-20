@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PentathlonModal from './PentathlonModal';
+import { isFieldOwned, isInertKeystroke, isNativeActivation } from '../common/keyboardPolicy';
 import { getEngine } from '../../domain/pentathlon/presets';
 import {
   currentDisciplineId,
@@ -287,16 +288,16 @@ export default function PentathlonX01Play({
   useEffect(() => {
     if (modal !== 'none') return;
     const handler = (event: KeyboardEvent) => {
-      // Never act on the Enter that merely commits an IME conversion, and never let a held key
-      // repeat-fire an action (a held U would otherwise unwind the whole attempt).
-      if (event.isComposing || event.keyCode === 229 || event.repeat) return;
+      // Never act on the Enter that merely commits an IME conversion, never let a held key
+      // repeat-fire an action (a held U would otherwise unwind the whole attempt), and leave Ctrl /
+      // Meta / Alt chords to the browser.
+      if (isInertKeystroke(event)) return;
 
-      // Never steal a key from a real text field, and leave a focused button its native
-      // Enter/Space/Tab activation - otherwise Enter on the ☰ button would open the menu AND
-      // commit the score sitting in the entry.
-      const target = event.target as HTMLElement | null;
-      if (target?.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target?.tagName ?? '')) return;
-      if (target?.tagName === 'BUTTON' && ['Enter', ' ', 'Tab'].includes(event.key)) return;
+      // Never steal a key from a real text field - the score sheet's own read-only entry box is not
+      // one - and leave a focused button its native Enter/Space/Tab activation - otherwise Enter on
+      // the ☰ button would open the menu AND commit the score sitting in the entry.
+      if (isFieldOwned(event.target)) return;
+      if (isNativeActivation(event)) return;
 
       if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
@@ -560,6 +561,7 @@ export default function PentathlonX01Play({
 
       {modal === 'finish-darts' && pendingFinish !== null && (
         <PentathlonModal
+          guardKeys
           label="上がり本数を選択"
           variant="menu-list"
           returnFocusTo={scrollRef}
@@ -592,6 +594,7 @@ export default function PentathlonX01Play({
 
       {modal === 'menu' && (
         <PentathlonModal
+          guardKeys
           label="ゲームメニュー"
           variant="menu-list"
           returnFocusTo={scrollRef}
@@ -699,6 +702,7 @@ export default function PentathlonX01Play({
 
       {modal === 'rules' && (
         <PentathlonModal
+          guardKeys
           label={`${DISCIPLINE_RULE_TEXT[disciplineId].title}のルール`}
           onClose={() => setModal('menu')}
         >
@@ -711,7 +715,7 @@ export default function PentathlonX01Play({
       )}
 
       {modal === 'edit' && edit !== null && (
-        <PentathlonModal label="過去得点の修正" returnFocusTo={scrollRef} onClose={closeEditor}>
+        <PentathlonModal label="過去得点の修正" returnFocusTo={scrollRef} onClose={closeEditor} guardKeys>
           <h2>過去得点を修正</h2>
           <p className="pent-edit-target">
             {session.names[edit.player]}・{edit.visitIndex + 1} ラウンド目
@@ -725,7 +729,7 @@ export default function PentathlonX01Play({
               value={editScore}
               onChange={(event) => setEditScore(event.target.value)}
               onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (isInertKeystroke(event.nativeEvent)) return;
                 if (event.key === 'Enter') {
                   event.preventDefault();
                   commitEdit(editEffectiveDarts);
@@ -784,6 +788,7 @@ export default function PentathlonX01Play({
 
       {modal === 'stats' && (
         <PentathlonModal
+          guardKeys
           label="この種目の成績"
           returnFocusTo={scrollRef}
           onClose={() => setModal('none')}

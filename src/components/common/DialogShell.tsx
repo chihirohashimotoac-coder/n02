@@ -20,6 +20,8 @@ interface Props {
    * commits a score rather than re-opening the menu.
    */
   returnFocusTo?: RefObject<HTMLElement | null>;
+  /** Stricter key handling for the X01 play screens; see useDialogFocus. Off by default. */
+  guardKeys?: boolean;
   children: ReactNode;
 }
 
@@ -37,10 +39,11 @@ export default function DialogShell({
   backdropClassName,
   cardClassName,
   returnFocusTo,
+  guardKeys,
   children,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
-  useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo });
+  useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo, guardKeys });
 
   return (
     <div className={backdropClassName}>

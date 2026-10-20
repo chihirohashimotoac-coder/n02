@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
+import { isInertKeystroke } from './keyboardPolicy';
 
 /**
  * Everything inside a dialog that can hold focus, in document order. `:not([disabled])` matters:
@@ -27,6 +28,17 @@ interface Options {
    * after UNDO. Falls back to the trigger when the element is missing.
    */
   returnFocusTo?: RefObject<HTMLElement | null>;
+  /**
+   * Opt-in for 通常01・チェックアウト練習・ペンタスロン X01, whose dialogs sit over a screen that
+   * commits a score on Enter. When set:
+   *
+   * - an IME keystroke, a held-key repeat or a Ctrl/Meta/Alt chord never closes the dialog or
+   *   reaches `onKeyDown` (a held Enter/Space on a focused button also has its repeated native
+   *   click suppressed);
+   * - no keystroke aimed at the dialog reaches the screen behind it - including Tab, and including
+   *   keys typed into the dialog's own fields, which are stopped only after React has handled them.
+   */
+  guardKeys?: boolean;
 }
 
 /**
@@ -43,7 +55,7 @@ interface Options {
  * チェックアウト練習 and COUNT-UP now share the same behaviour through this hook while keeping
  * their own existing markup and styles.
  */
-export function useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo }: Options): void {
+export function useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo, guardKeys = false }: Options): void {
   // Captured on mount so focus can go back exactly where it came from - usually the trigger button.
   const returnFocusRef = useRef<HTMLElement | null>(null);
   // Callers pass these as inline closures, so keeping them in refs lets the key listener be
@@ -87,13 +99,31 @@ export function useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo }: O
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      // A focused text field inside the dialog owns its own keys, including any Enter-to-commit
+      // handler React has attached to it. React delegates to the root container, which is INSIDE
+      // window, so swallowing the event here would stop that handler from ever running. Letting it
+      // through is safe: every gameplay key listener in the app either ignores events whose target
+      // is an INPUT/SELECT/TEXTAREA, or unregisters itself entirely while a dialog is open. With
+      // guardKeys, the bubble-phase listener below also stops it once React is done with it.
+      const target = event.target as HTMLElement | null;
+      const inOwnField =
+        target !== null &&
+        cardRef.current?.contains(target) === true &&
+        (target.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName));
+
       if (event.key === 'Escape') {
+        if (guardKeys && isInertKeystroke(event)) {
+          // Escape that cancels an IME conversion, a held Escape or a chord: the dialog stays.
+          if (!inOwnField) event.stopPropagation();
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         onCloseRef.current();
         return;
       }
       if (event.key === 'Tab') {
+        if (guardKeys && !inOwnField) event.stopPropagation();
         const items = focusables();
         // 0 focusables: nothing to cycle between, so Tab must not be allowed to leave for the
         // screen behind. 1 focusable: both branches below land back on that same element.
@@ -114,17 +144,14 @@ export function useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo }: O
         }
         return;
       }
-      // A focused text field inside the dialog owns its own keys, including any Enter-to-commit
-      // handler React has attached to it. React delegates to the root container, which is INSIDE
-      // window, so swallowing the event here would stop that handler from ever running. Letting it
-      // through is safe: every gameplay key listener in the app either ignores events whose target
-      // is an INPUT/SELECT/TEXTAREA, or unregisters itself entirely while a dialog is open.
-      const target = event.target as HTMLElement | null;
-      const inOwnField =
-        target !== null &&
-        cardRef.current?.contains(target) === true &&
-        (target.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName));
       if (inOwnField) return;
+
+      if (guardKeys && isInertKeystroke(event)) {
+        // No dialog action. A held Enter/Space would still repeat a focused button's native click.
+        if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
 
       // Anything else belongs to this dialog alone. It still reaches the focused control's own
       // default action (Enter/Space activating a button), but is stopped before the gameplay
@@ -137,5 +164,17 @@ export function useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo }: O
     // keystrokes aimed at an open dialog.
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [cardRef, focusables]);
+  }, [cardRef, focusables, guardKeys]);
+
+  useEffect(() => {
+    if (!guardKeys) return;
+    // Keys typed into the dialog's own fields were let through the capture listener so React can
+    // run their handlers. document's bubble phase comes after React's root and before window, so
+    // stopping them here keeps them from the gameplay listener behind the dialog.
+    const block = (event: KeyboardEvent) => {
+      if (event.target instanceof Node && cardRef.current?.contains(event.target)) event.stopPropagation();
+    };
+    document.addEventListener('keydown', block);
+    return () => document.removeEventListener('keydown', block);
+  }, [cardRef, guardKeys]);
 }
