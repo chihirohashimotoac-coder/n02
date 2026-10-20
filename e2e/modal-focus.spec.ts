@@ -64,7 +64,11 @@ test.describe('通常01・チェックアウト練習のダイアログ', () => 
     await enterGameScore(page, 60);
     await expect(page.locator('.n01-left-table strong').first()).toHaveText('441');
 
+    // Where the statistics sit beside the sheet, Stats shows the columns and their 詳細 button opens
+    // the dialog; elsewhere Stats opens the dialog itself.
     await page.locator('.n01-menu-table button', { hasText: 'Stats' }).click();
+    const detail = page.locator('.x01-side-stats-detail').first();
+    if (await detail.isVisible()) await detail.click();
     await expect(page.locator('.n01-stats-modal')).toBeVisible();
 
     // Digits must not queue into the keypad behind the dialog, and U must not undo the 60.

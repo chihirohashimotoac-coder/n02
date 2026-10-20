@@ -615,10 +615,18 @@ test.describe('キーボードショートカット', () => {
     await page.keyboard.press('Backspace'); // BackSpace also closes a dialog
     await expect(page.locator('.n01-modal-card')).toHaveCount(0);
 
+    // S is the Stats button: the side columns where they fit, the 詳細 dialog where they do not.
     await page.keyboard.press('s');
-    await expect(page.locator('.n01-modal-card')).toContainText('対戦成績');
-    await page.keyboard.press('Escape');
-    await expect(page.locator('.n01-modal-card')).toHaveCount(0);
+    const columns = page.locator('.x01-side-stats');
+    if ((await columns.count()) > 0) {
+      await expect(columns.first()).toBeVisible();
+      await page.keyboard.press('s');
+      await expect(columns.first()).toBeHidden();
+    } else {
+      await expect(page.locator('.n01-modal-card')).toContainText('詳細統計');
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.n01-modal-card')).toHaveCount(0);
+    }
   });
 
   test('N で新しいゲームへ戻る', async ({ page }) => {
