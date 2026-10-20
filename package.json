@@ -13,6 +13,7 @@
     "typecheck": "tsc -b --force",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:n01": "node scripts/fetch-n01-reference.mjs && N01_REFERENCE_REQUIRED=1 vitest run src/domain/x01Stats.n01.test.ts",
     "test:e2e": "playwright test",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
   },

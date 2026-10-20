@@ -134,9 +134,13 @@ test('capture computed styles', async ({ page }) => {
     await page.keyboard.press('Escape');
 
     await page.locator('.n01-menu-table button', { hasText: 'Stats' }).click();
+    await page.waitForSelector('.x01-side-stats');
+    await dump(page, `${theme} 01-stats-side`, out);
+    await page.locator('.x01-side-stats-detail').first().click();
     await page.waitForSelector('.n01-stats-modal');
     await dump(page, `${theme} 01-stats`, out);
     await page.keyboard.press('Escape');
+    await page.locator('.n01-menu-table button', { hasText: 'Stats' }).click();
 
     await applyTheme(page, theme);
     await openPracticeHub(page);

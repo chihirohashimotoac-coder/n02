@@ -11,7 +11,6 @@ import {
   resumePreviousLeg,
   setLegStarter,
   swapCurrentLegScores,
-  threeDartAverage,
   undoLastAction,
   type X01MatchState,
 } from '../domain/x01Engine';
@@ -24,6 +23,9 @@ import AwardOverlay, { type AwardPresentation } from './common/AwardOverlay';
 import { useAwardPreload } from './common/useAwardPreload';
 import { classifyAward } from '../domain/awards';
 import { loadAwardDisplay, saveAwardDisplay } from '../storage/awardSettings';
+import { selectX01Stats } from '../domain/x01Stats';
+import { X01StatsDetailTable, X01StatsSidePanel } from './X01StatsPanels';
+import { sidePanelId, STATS_DIALOG_ID, useX01StatsLayout } from './x01StatsLayout';
 
 interface Props {
   state: X01MatchState;
@@ -65,6 +67,19 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   const [awardsEnabled, setAwardsEnabled] = useState(loadAwardDisplay);
   const [award, setAward] = useState<AwardPresentation | null>(null);
   const awardId = useRef(0);
+  /**
+   * Whether the player has asked for the statistics. Display-only and local to this screen: not a
+   * setting, not part of the match, the save or Undo, so a new match, a reload and a resumed save
+   * all start with it off, while the next leg, an Undo, a correction or a rotation keep it.
+   */
+  const [statsEnabled, setStatsEnabled] = useState(false);
+  const statsLayout = useX01StatsLayout();
+  const sideStatsLayout = statsLayout !== 'dialog';
+  const sideStatsShown = statsEnabled && sideStatsLayout;
+  // Recomputed from the state on every change, so an Undo, a correction or a rewind is reflected
+  // as soon as it happens. One selector feeds the columns, the dialog and the footer's 3DA.
+  const basicStats = useMemo(() => selectX01Stats(state, 'basic'), [state]);
+  const detailStats = useMemo(() => selectX01Stats(state, 'details'), [state]);
 
   const activePlayer = state.players[state.active];
   // A round-limit leg must be resolved before anything else, so that prompt is derived from
@@ -134,6 +149,38 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
       return next;
     });
   }, []);
+
+  /**
+   * The Stats button and its <kbd>S</kbd> key. Beside the sheet it switches the two columns on and
+   * off; where there is no room for them it opens the 詳細 dialog directly. It only ever changes
+   * what is shown: the entry, 使用ダーツ, the parked cell, the throw and a COM turn are untouched.
+   */
+  const pressStats = useCallback(() => {
+    if (sideStatsLayout) {
+      setStatsEnabled((enabled) => !enabled);
+      return;
+    }
+    setStatsEnabled(true);
+    setModal('stats');
+  }, [sideStatsLayout]);
+
+  /**
+   * The on-screen button. Focus then goes back to the score sheet, as it does when any dialog here
+   * closes: left on the button, the next Enter - the key that commits a score - would switch the
+   * columns again instead.
+   */
+  const clickStats = useCallback(() => {
+    pressStats();
+    if (sideStatsLayout) scrollRef.current?.focus({ preventScroll: true });
+  }, [pressStats, sideStatsLayout]);
+
+  const openStatsDetail = useCallback(() => setModal('stats'), []);
+
+  /** Closing the 詳細 dialog keeps the columns where they are shown, and is "Stats off" where not. */
+  const closeStatsDetail = useCallback(() => {
+    setModal('none');
+    if (!sideStatsLayout) setStatsEnabled(false);
+  }, [sideStatsLayout]);
 
   // Only once a game is under way, only this mode's awards, and only when idle.
   useAwardPreload('x01', awardsEnabled);
@@ -386,9 +433,17 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
       // Gameplay keys. Never steal a key from a real text field - the score sheet's own read-only
       // entry box is not one, so clicking it leaves typing working - and leave a focused button its
       // native Enter/Space/Tab activation.
-      if (isComTurn) return;
       if (isFieldOwned(target)) return;
+      // Stats only changes what is shown, so it is offered on a COM turn too; scoring is not.
+      if (event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        pressStats();
+        return;
+      }
+      if (isComTurn) return;
       if (isNativeActivation(event)) return;
+      // A focused statistics column scrolls with the keyboard like any other scroll area.
+      if (target?.closest('.x01-side-stats') && STATS_SCROLL_KEYS.has(event.key)) return;
 
       if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
@@ -445,10 +500,6 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
               event.preventDefault();
               onExit({ clearSave: true });
               break;
-            case 's':
-              event.preventDefault();
-              setModal('stats');
-              break;
             case 'u':
               event.preventDefault();
               onChange(undoLastAction(state));
@@ -474,6 +525,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     openEditor,
     openFinishDialog,
     pressKey,
+    pressStats,
     activeSelection,
     showNotice,
     state,
@@ -520,7 +572,9 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   }
 
   return (
-    <section className="n01-game-shell">
+    <section
+      className={`n01-game-shell x01-play${sideStatsShown ? ` x01-stats-on x01-stats-${statsLayout}` : ''}`}
+    >
       {/* Source order is load-bearing: the header is a 3-column grid (player | leg | player). */}
       <header className="n01-game-header">
         <div className={`n01-player-name ${state.active === 0 ? 'active' : ''}`}>
@@ -601,6 +655,19 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         </div>
       </div>
 
+      {sideStatsLayout &&
+        ([0, 1] as const).map((player) => (
+          <X01StatsSidePanel
+            key={player}
+            player={player}
+            name={state.players[player].name}
+            view={basicStats}
+            compact={statsLayout === 'compact'}
+            hidden={!statsEnabled}
+            onOpenDetail={openStatsDetail}
+          />
+        ))}
+
       <footer className="n01-game-footer">
         <div className="n01-left-table">
           {([0, 1] as const).map((index) => (
@@ -609,7 +676,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
               {routes[index] ? (
                 <span className="checkout-route">{routes[index]!.map(dartLabel).join(' - ')}</span>
               ) : (
-                <span>3DA {threeDartAverage(state.players[index]).toFixed(1)}</span>
+                <span>3DA {basicStats.ok ? basicStats.players[index].averageValue.toFixed(1) : '—'}</span>
               )}
             </div>
           ))}
@@ -622,7 +689,13 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
           <button type="button" onClick={openFinishDialog}>
             Finish
           </button>
-          <button type="button" onClick={() => setModal('stats')}>
+          <button
+            type="button"
+            onClick={clickStats}
+            aria-pressed={sideStatsLayout ? statsEnabled : undefined}
+            aria-controls={sideStatsLayout ? `${sidePanelId(0)} ${sidePanelId(1)}` : undefined}
+            aria-haspopup={sideStatsLayout ? undefined : 'dialog'}
+          >
             Stats
           </button>
           <button type="button" aria-label="メニュー" onClick={() => setModal('menu')}>
@@ -887,37 +960,25 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
       {effectiveModal === 'stats' && (
         <DialogShell
           guardKeys
-          label="対戦成績"
+          label="詳細統計"
           backdropClassName="n01-modal-backdrop"
           returnFocusTo={scrollRef}
-          cardClassName="n01-modal-card n01-stats-modal"
-          onClose={() => setModal('none')}
+          cardClassName="n01-modal-card n01-stats-modal x01-stats-detail"
+          onClose={closeStatsDetail}
           onKeyDown={(event) => {
             if (event.key === 'Backspace') {
               event.preventDefault();
-              setModal('none');
+              closeStatsDetail();
             }
           }}
         >
-          <h2>対戦成績</h2>
-          <div className="n01-stats-table">
-            <div className="n01-stats-head">
-              <strong>{state.players[0].name}</strong>
-              <span>STATS</span>
-              <strong>{state.players[1].name}</strong>
-            </div>
-            <StatsRow label="3DA" values={([0, 1] as const).map((i) => threeDartAverage(state.players[i]).toFixed(2))} />
-            <StatsRow label="LEGS" values={([0, 1] as const).map((i) => String(state.players[i].legs))} />
-            <StatsRow label="DARTS" values={([0, 1] as const).map((i) => String(state.players[i].totalDarts))} />
-            <StatsRow label="100+" values={([0, 1] as const).map((i) => String(state.players[i].ton00Count))} />
-            <StatsRow label="140+" values={([0, 1] as const).map((i) => String(state.players[i].ton40Count))} />
-            <StatsRow label="180" values={([0, 1] as const).map((i) => String(state.players[i].ton80Count))} />
-            <StatsRow
-              label="HIGH OUT"
-              values={([0, 1] as const).map((i) => String(state.players[i].highestFinish || '—'))}
-            />
+          <h2 id={STATS_DIALOG_ID}>詳細統計</h2>
+          <div className="x01-stats-detail-body" role="region" tabIndex={0} aria-labelledby={STATS_DIALOG_ID}>
+            <X01StatsDetailTable names={[state.players[0].name, state.players[1].name]} view={detailStats} />
           </div>
-          <button type="button" className="n01-modal-primary" onClick={() => setModal('none')}>
+          {/* Focus opens on 閉じる, so Enter closes it as it always has; Tab reaches the table to
+              scroll it from the keyboard. */}
+          <button type="button" className="n01-modal-primary" autoFocus onClick={closeStatsDetail}>
             閉じる
           </button>
         </DialogShell>
@@ -1044,15 +1105,8 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
 
 }
 
-function StatsRow({ label, values }: { label: string; values: string[] }) {
-  return (
-    <div className="n01-stats-row">
-      <strong>{values[0]}</strong>
-      <span>{label}</span>
-      <strong>{values[1]}</strong>
-    </div>
-  );
-}
+/** Keys that scroll a focused statistics column instead of walking the score sheet. */
+const STATS_SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 interface RowCell {
   visitIndex: number;

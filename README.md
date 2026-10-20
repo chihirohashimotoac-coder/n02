@@ -30,6 +30,7 @@ npm install
 npm run dev        # 開発サーバー
 npm run verify     # lint + typecheck + unit test + build
 npm run test       # Vitest（ドメインロジックの単体テスト）
+npm run test:n01   # 01統計をn01(Web)の参照コードと照合（参照ファイルを取得してから実行）
 npm run test:e2e   # Playwright（既存モードの回帰 + ペンタスロン通し）
 npm run build      # 本番ビルド → リポジトリ直下へ配置
 ```
@@ -42,6 +43,7 @@ src/
     darts.ts           1投単位のダーツ表現・チェックアウト判定
     x01Core.ts         01の共通処理（Bust / チェックアウト / 使用ダーツ数）
     x01Engine.ts       通常01・チェックアウト練習の対戦エンジン
+    x01Stats.ts        通常01・チェックアウト練習のプレイ中統計（n01 Web版と同じ定義・読み取り専用）
     pentathlon/
       types.ts         Pentathlon共通型・DisciplineEngineインターフェース
       session.ts       Session Controller（種目進行・先攻計算・Undo）

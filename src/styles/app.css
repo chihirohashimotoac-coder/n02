@@ -2902,3 +2902,243 @@ select:focus-visible {
     overflow-y: auto;
   }
 }
+
+/* ================================================================ 通常01・チェックアウト練習: statistics
+
+   Two columns beside the score sheet (GameScreen, `.x01-play` only - Pentathlon X01 renders the
+   same .n01-* shell and is not affected). One width, --x01-side, places all of it: the columns
+   are that wide, and the score sheet, the remaining-score row and the navy line between them are
+   inset by exactly that much, so their left and right edges always coincide.
+
+   Only the WIDTH of the sheet and the remaining row changes. Their heights, paddings and every
+   font-size stay as app.css / brand.css set them; those are vw / fixed sizes, never relative to
+   the narrower middle, so no score gets smaller when Stats is switched on. The columns run from
+   under the header's ring edge down to the top of the menu bar, beside the remaining row, while
+   the menu bar and the keypad keep their full width. */
+.x01-play {
+  --x01-side: 0px;
+  /* The top of the menu bar on a mouse / keyboard: .n01-menu-table is 62px. */
+  --x01-stats-bottom: 62px;
+  --x01-stats-bg: var(--sheet-head-bg);
+  --x01-stats-value: #101820;
+}
+/* A touch tablet keeps the keypad under the menu bar (see the coarse-pointer block above). */
+@media (width > 720px) and (hover: none) and (pointer: coarse) {
+  .x01-play {
+    --x01-stats-bottom: calc(48px + 218px + max(12px, env(safe-area-inset-bottom, 0px)));
+  }
+}
+.x01-play.x01-stats-side {
+  --x01-side: 160px;
+}
+.x01-play.x01-stats-compact {
+  --x01-side: 112px;
+}
+.x01-play.x01-stats-on .n01-score-area {
+  left: var(--x01-side);
+  right: var(--x01-side);
+}
+.x01-play.x01-stats-on .n01-left-table {
+  margin-inline: var(--x01-side);
+}
+.x01-play.x01-stats-on .n01-game-footer::before {
+  left: var(--x01-side);
+  right: var(--x01-side);
+}
+
+/* Scroll areas scroll - wheel, trackpad, touch and the keyboard on a focused area - without
+   drawing a bar or reserving an invisible gutter for one. */
+.x01-play .n01-score-scroll,
+.x01-side-stats,
+.x01-stats-detail-body {
+  scrollbar-width: none;
+  scrollbar-gutter: auto;
+}
+.x01-play .n01-score-scroll::-webkit-scrollbar,
+.x01-side-stats::-webkit-scrollbar,
+.x01-stats-detail-body::-webkit-scrollbar {
+  display: none;
+}
+
+.x01-side-stats {
+  z-index: 5;
+  background: var(--x01-stats-bg);
+  overscroll-behavior: contain;
+  flex-direction: column;
+  width: var(--x01-side);
+  display: flex;
+  position: absolute;
+  /* 84px header + its 3px ring edge, which stays visible across the full width. */
+  top: 87px;
+  bottom: var(--x01-stats-bottom);
+  overflow-y: auto;
+}
+.x01-side-stats[hidden] {
+  display: none;
+}
+.x01-side-stats.left {
+  border-right: 1px solid var(--sheet-line);
+  left: 0;
+}
+.x01-side-stats.right {
+  border-left: 1px solid var(--sheet-line);
+  right: 0;
+}
+.x01-side-stats:focus-visible {
+  outline: var(--focus-ring-strong);
+  outline-offset: -3px;
+}
+.x01-side-stats-title {
+  z-index: 1;
+  background: var(--tungsten);
+  color: var(--on-tungsten-muted);
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  letter-spacing: 0.14em;
+  text-align: center;
+  flex: none;
+  margin: 0;
+  padding: 5px 0;
+  font-size: 10px;
+  font-weight: 800;
+  position: sticky;
+  top: 0;
+}
+.x01-side-stats dl {
+  flex: 1 0 auto;
+  margin: 0;
+}
+.x01-side-stats dl > div {
+  border-bottom: 1px solid var(--sheet-line);
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 12px 5px;
+  display: flex;
+}
+.x01-side-stats dt {
+  color: var(--muted);
+  font-family: var(--font-num);
+  font-stretch: var(--stretch-title);
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  font-weight: 800;
+}
+.x01-side-stats dd {
+  color: var(--x01-stats-value);
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-stretch: var(--stretch-score);
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.x01-side-stats .rate dd {
+  flex-direction: column;
+  display: flex;
+}
+.x01-side-stats .x01-rate-fraction,
+.x01-stats-detail .n01-stats-row strong span.x01-rate-fraction {
+  color: var(--x01-stats-value);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 700;
+}
+.x01-stats-compact .x01-side-stats dl > div {
+  padding: 6px 8px 5px;
+}
+.x01-stats-compact .x01-side-stats dd {
+  font-size: 20px;
+}
+.x01-side-stats-detail {
+  border: 1px solid var(--sheet-line);
+  background: var(--surface);
+  min-height: var(--control-min);
+  color: var(--accent-text);
+  font-family: var(--font-ui);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex: none;
+  margin: 6px 8px 8px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.x01-side-stats-detail:focus-visible {
+  outline: var(--focus-ring-strong);
+  outline-offset: 2px;
+}
+.x01-stats-unavailable {
+  color: var(--x01-stats-value);
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.x01-stats-unavailable small {
+  color: var(--muted);
+  margin-top: 6px;
+  font-size: 11px;
+  display: block;
+}
+
+/* The 詳細 dialog: the title and 閉じる stay put, the table scrolls between them. */
+.n01-modal-card.x01-stats-detail {
+  flex-direction: column;
+  display: flex;
+  overflow: hidden;
+}
+.x01-stats-detail-body {
+  overscroll-behavior: contain;
+  flex: auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.x01-stats-detail-body:focus-visible {
+  outline: var(--focus-ring-strong);
+  outline-offset: -3px;
+}
+.x01-stats-detail .n01-modal-primary {
+  flex: none;
+}
+.x01-stats-detail .n01-stats-row strong {
+  color: var(--x01-stats-value);
+}
+.x01-stats-detail .n01-stats-row.rate strong {
+  flex-direction: column;
+  padding: 4px 0;
+  line-height: 1.15;
+  display: flex;
+}
+/* The rate's two lines are spans inside the figure: keep them figures, not row labels. */
+.x01-stats-detail .n01-stats-row strong span.x01-rate-percent {
+  color: var(--x01-stats-value);
+  font-size: inherit;
+  font-weight: inherit;
+}
+.x01-stats-detail .n01-stats-row strong span.x01-rate-fraction {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* neon draws these on a dark surface, so the figures take the theme's own light ink there. */
+[data-theme="neon"] .x01-play {
+  --x01-stats-bg: #17231b;
+  --x01-stats-value: var(--ink);
+}
+[data-theme="neon"] .x01-stats-detail .n01-stats-table {
+  background: #101512;
+  border-color: #26382d;
+}
+[data-theme="neon"] .x01-stats-detail .n01-stats-row {
+  border-color: #26382d;
+}
+[data-theme="neon"] .x01-side-stats,
+[data-theme="neon"] .x01-side-stats dl > div {
+  border-color: #26382d;
+}
+[data-theme="neon"] .x01-side-stats-detail {
+  background: #101512;
+  border-color: #3a5a47;
+  color: #2ee58a;
+}

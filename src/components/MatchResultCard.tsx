@@ -1,5 +1,6 @@
-import { useRef } from 'react';
-import { threeDartAverage, type X01MatchState } from '../domain/x01Engine';
+import { useMemo, useRef } from 'react';
+import type { X01MatchState } from '../domain/x01Engine';
+import { selectX01Stats, type X01PlayerStatsDisplay } from '../domain/x01Stats';
 import { shareNodeAsImage } from '../share/shareCard';
 
 interface Props {
@@ -11,6 +12,11 @@ interface Props {
 export default function MatchResultCard({ state, onNewMatch, onBackToMenu }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const winner = state.matchWinner;
+  // The same selector as the play screen, so 3DA, LEGS, 100+, 140+, 180 and HIGH OUT here are the
+  // figures the player was just looking at. DARTS is the darts actually thrown, from the engine.
+  const stats = useMemo(() => selectX01Stats(state, 'basic'), [state]);
+  const figure = (read: (player: X01PlayerStatsDisplay) => string | number): [string, string] =>
+    stats.ok ? [String(read(stats.players[0])), String(read(stats.players[1]))] : ['—', '—'];
 
   return (
     <div className="result-backdrop" role="dialog" aria-modal="true" aria-label="マッチ結果">
@@ -30,19 +36,13 @@ export default function MatchResultCard({ state, onNewMatch, onBackToMenu }: Pro
             <span>TOTAL</span>
             <strong>{state.players[1].name}</strong>
           </div>
-          <Row label="3DA" values={[threeDartAverage(state.players[0]).toFixed(2), threeDartAverage(state.players[1]).toFixed(2)]} />
-          <Row label="LEGS" values={[String(state.players[0].legs), String(state.players[1].legs)]} />
+          <Row label="3DA" values={figure((p) => p.average)} />
+          <Row label="LEGS" values={figure((p) => p.legs)} />
           <Row label="DARTS" values={[String(state.players[0].totalDarts), String(state.players[1].totalDarts)]} />
-          <Row label="100+" values={[String(state.players[0].ton00Count), String(state.players[1].ton00Count)]} />
-          <Row label="140+" values={[String(state.players[0].ton40Count), String(state.players[1].ton40Count)]} />
-          <Row label="180" values={[String(state.players[0].ton80Count), String(state.players[1].ton80Count)]} />
-          <Row
-            label="HIGH OUT"
-            values={[
-              String(state.players[0].highestFinish || '—'),
-              String(state.players[1].highestFinish || '—'),
-            ]}
-          />
+          <Row label="100+" values={figure((p) => p.ton00)} />
+          <Row label="140+" values={figure((p) => p.ton40)} />
+          <Row label="180" values={figure((p) => p.ton80)} />
+          <Row label="HIGH OUT" values={figure((p) => p.highFinish)} />
         </div>
 
         {state.completed.length > 0 && (
