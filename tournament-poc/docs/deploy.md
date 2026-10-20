@@ -80,6 +80,8 @@ Google の画面の文言は言語設定や時期によって変わることが�
 | 次のユーザーとして実行 | **自分** |
 | アクセスできるユーザー | **全員**（Google アカウントへのログイン不要） |
 
+閲覧者用の `appsscript.json` には、高度なサービス「Google Sheets API」（v4）の利用が書かれています。貼り付けて保存すると、エディタ左の「サービス」に「Sheets」が表示されます（表示されない場合は「サービス」の「＋」から Google Sheets API を追加し、ID は `Sheets` のまま）。追加費用はかかりません。
+
 権限の承認では、スプレッドシートについて**参照（表示）のみ**の権限が要求されることを確認し、**「すべて選択」にチェック**してから続行してください（チェックがないと閲覧画面が「通信エラー」になります）。編集の権限が表示された場合は `appsscript.json` の貼り付けを見直してください。
 
 表示された **ウェブアプリの URL（`…/exec`）** が閲覧者に配布する URL です。
@@ -120,6 +122,8 @@ function checkSheet() {
   Logger.log('OK: ' + ss.getName());
 }
 ```
+
+閲覧者用は `SpreadsheetApp` ではなく Sheets API で読むため、閲覧者用で確かめる場合は `var ss = …` と次の行を `Logger.log(Sheets.Spreadsheets.Values.get(id, 'PublicSnapshots').range);` に置き換えます。
 
 運営者用で `SPREADSHEET_ID` をまだ設定していない場合は、`id` の行を `var id = '（スプレッドシートの ID）';` に置き換えて実行します。
 

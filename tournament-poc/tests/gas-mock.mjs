@@ -391,6 +391,29 @@ export function loadProject(app, options = {}) {
       getActiveSpreadsheet: () => null,
       flush() {},
     },
+    // 高度なサービス「Google Sheets API」（values.get のみ）。既定の FORMATTED_VALUE を近似し、値を文字列で返す
+    Sheets: {
+      Spreadsheets: {
+        Values: {
+          get(id, range) {
+            store.stats.opens++;
+            if (store.failOpen) throw new Error('API call to sheets.spreadsheets.values.get failed with error: Internal error (simulated)');
+            const book = store.get(id);
+            if (!book) throw new Error('API call to sheets.spreadsheets.values.get failed with error: Requested entity was not found.');
+            const sheet = book.getSheetByName(range);
+            if (!sheet) throw new Error(`API call to sheets.spreadsheets.values.get failed with error: Unable to parse range: ${range}`);
+            store.stats.reads++;
+            const fmt = (v) => (v === true ? 'TRUE' : v === false ? 'FALSE' : v instanceof Date ? v.toISOString() : v === undefined || v === null ? '' : String(v));
+            const values = sheet.rows.slice(0, sheet.getLastRow()).map((line) => {
+              const out = line.map(fmt);
+              while (out.length && out[out.length - 1] === '') out.pop();
+              return out;
+            });
+            return values.length ? { range, majorDimension: 'ROWS', values } : { range, majorDimension: 'ROWS' };
+          },
+        },
+      },
+    },
     PropertiesService: { getScriptProperties: () => project.properties },
     CacheService: { getScriptCache: () => project.cache },
     LockService: { getScriptLock: () => createLock(project) },

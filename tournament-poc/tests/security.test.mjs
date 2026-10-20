@@ -21,6 +21,9 @@ test('閲覧者用プロジェクトには書き込み・初期化・管理用�
   for (const api of ['setValues', 'setValue(', 'appendRow', 'deleteRow', 'insertSheet', 'clearContents', '.clear(', 'setProperty', 'deleteProperty', 'UrlFetchApp', 'DriveApp', 'MailApp', 'GmailApp', 'ScriptApp']) {
     assert.ok(!code.includes(api), `viewer must not use ${api}`);
   }
+  // 読み込みは Sheets API（参照専用スコープで使える）だけ。SpreadsheetApp は編集スコープを要求するので使わない
+  assert.doesNotMatch(code, /SpreadsheetApp\.\w+\(/);
+  assert.match(code, /Sheets\.Spreadsheets\.Values\.get\(/);
   for (const fn of ['adminCall', 'initializeStorage_', 'actionSaveMatchResult_', 'requireAdmin_']) {
     assert.throws(() => viewer.run(fn), /not found|private/, fn);
   }
@@ -31,6 +34,7 @@ test('マニフェスト: 閲覧者用は読み取り専用スコープのみ・
   const admin = JSON.parse(read('dist/admin/appsscript.json'));
   assert.deepEqual(viewer.oauthScopes, ['https://www.googleapis.com/auth/spreadsheets.readonly']);
   assert.deepEqual(viewer.webapp, { executeAs: 'USER_DEPLOYING', access: 'ANYONE_ANONYMOUS' });
+  assert.deepEqual(viewer.dependencies.enabledAdvancedServices, [{ userSymbol: 'Sheets', serviceId: 'sheets', version: 'v4' }]);
   assert.deepEqual(admin.webapp, { executeAs: 'USER_DEPLOYING', access: 'MYSELF' });
   assert.deepEqual([...admin.oauthScopes].sort(), ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/userinfo.email']);
 });

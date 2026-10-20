@@ -3,6 +3,7 @@
  *
  * このプロジェクトは読み取り専用。
  * - OAuth スコープは spreadsheets.readonly のみ（appsscript.json で固定）。書き込み API を呼ぶ権限そのものを持たない
+ * - 読み込みは Sheets API（高度なサービス「Google Sheets API」）の values.get。SpreadsheetApp は使わない
  * - google.script.run から呼べる関数は doGet と getPublicSnapshot の 2 つだけ
  * - 読むのは運営者用アプリが作った PublicSnapshots シート（公開してよい項目だけの JSON）だけ
  *
@@ -13,7 +14,7 @@
  */
 
 var VIEWER_CONFIG = Object.freeze({
-  APP_VERSION: '0.1.0',
+  APP_VERSION: '0.1.1',
   CACHE_TTL_SEC: 20,
   STALE_TTL_SEC: 21600, // CacheService の上限（6 時間）
   NONE_TTL_SEC: 20,
@@ -187,12 +188,17 @@ function refreshFromSheet_(cache) {
 function readPublishedEntries_() {
   var id = (PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || '').trim();
   if (!/^[A-Za-z0-9_-]{25,100}$/.test(id)) throw new Error('SPREADSHEET_ID is not configured');
-  var sheet = SpreadsheetApp.openById(id).getSheetByName(VIEWER_CONFIG.SHEET_NAME);
-  if (!sheet) return [];
-  var lastRow = sheet.getLastRow();
-  var lastCol = sheet.getLastColumn();
-  if (lastRow < 2 || lastCol < 1) return [];
-  var values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  // SpreadsheetApp.openById は読むだけでも spreadsheets（編集を含む）スコープを要求するため、
+  // 参照専用スコープ（spreadsheets.readonly）で使える Sheets API（高度なサービス）で読む。
+  var values;
+  try {
+    values = Sheets.Spreadsheets.Values.get(id, VIEWER_CONFIG.SHEET_NAME).values || [];
+  } catch (e) {
+    // 運営側でまだ初期化していない（シートがない）場合は「公開中の大会なし」として扱う
+    if (/Unable to parse range/i.test(String(e && e.message))) return [];
+    throw e;
+  }
+  if (values.length < 2) return [];
   var header = values[0].map(function (h) {
     return String(h).trim();
   });

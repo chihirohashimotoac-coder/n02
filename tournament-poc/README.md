@@ -123,6 +123,7 @@ n02 から外部リンクで使う「トーナメント・ロビン・リーグ�
 ## 5. 安全性の要点（詳細は [docs/security.md](docs/security.md)）
 
 - 運営者用と閲覧者用を**別プロジェクト**に分離。閲覧者用のコードには書き込み処理が存在せず、権限も `spreadsheets.readonly` のみ。
+  読み込みには高度なサービス「Google Sheets API」の `values.get` を使います（`SpreadsheetApp.openById` は読むだけでも編集を含むスコープを要求することが、実環境で確認できたため）。
 - `google.script.run` から呼べる関数は各プロジェクト 2 つだけ（運営者用: `doGet` `adminCall`、閲覧者用: `doGet` `getPublicSnapshot`）。
 - 運営者用は Google 側で「自分のみ」に制限したうえで、**`adminCall` の呼び出しごとにサーバー側でメールアドレスを検証**（取得できなければ拒否）。
 - 書き込みはスクリプトロックで直列化し、版番号（rev）が古ければ拒否（同時更新による上書きを防止）。`requestId` で二重送信を無視。
