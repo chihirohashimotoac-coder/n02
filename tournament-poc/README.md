@@ -39,6 +39,9 @@ n02 から外部リンクで使う「トーナメント・ロビン・リーグ�
                 └──────────────────────────────┘
 ```
 
+閲覧者に配る URL は、GitHub Pages に置いた閲覧ページ（`dist/pages/`）です。このページは閲覧者用アプリの `?format=json` からデータだけを取得します。
+Apps Script の画面（`…/exec`）を直接配らないのは、**ブラウザで複数の Google アカウントにログインしていると、URL が `/macros/u/1/…` に書き換えられて開けない**ことが実環境で分かったためです（ページ側は Cookie を送らないので影響を受けません）。
+
 運営者が結果を保存すると、運営者用アプリが「公開してよい項目だけ」で組み立てた JSON を `PublicSnapshots` シートに書きます。
 閲覧者用アプリはその JSON だけを読み、キャッシュして配ります。選手のメモ・履歴・操作者のメールアドレスなどは、閲覧者用アプリからは読めない構造です。
 
@@ -52,6 +55,8 @@ n02 から外部リンクで使う「トーナメント・ロビン・リーグ�
 | `admin/src/client/*` | 運営画面の HTML / CSS / JavaScript |
 | `viewer/src/server/00_viewer.js` | 閲覧者用のサーバー側ソース（読み取り・キャッシュ） |
 | `viewer/src/client/*` | 閲覧画面の HTML / CSS / JavaScript（自動更新・再試行） |
+| `dist/pages/` | **GitHub Pages に置く閲覧ページ**（`index.html` `viewer.css` `viewer.js` と、`config.js` の見本） |
+| `viewer/src/pages/` | 閲覧ページ用の設定見本・README |
 | `tools/build.mjs` | `src/` から `dist/` を生成（`--check` で一致確認） |
 | `tools/preview-server.mjs` | Google に接続せずにブラウザで動作確認するためのローカルサーバー |
 | `tools/loadtest.mjs` | 実際のデプロイ URL に N 人分の閲覧画面を開いて計測する負荷試験スクリプト |

@@ -354,9 +354,13 @@
       ui.message.textContent = text;
     }
 
+    var config = win.TPOC_CONFIG || null;
+    var fetchJson = config ? createFetchTransport(win, config.endpoint) : null;
+
     function fetchSnapshot(req, ok, fail) {
       req.eventId = view.eventId || undefined;
-      win.google.script.run.withSuccessHandler(ok).withFailureHandler(fail).getPublicSnapshot(req);
+      if (fetchJson) fetchJson(req, ok, fail);
+      else win.google.script.run.withSuccessHandler(ok).withFailureHandler(fail).getPublicSnapshot(req);
     }
 
     var params = {};
@@ -454,7 +458,14 @@
       win.__tpocViewer = { poller: poller, metrics: metrics };
     }
 
-    if (win.google && win.google.script && win.google.script.url) {
+    if (config && !ENDPOINT_PATTERN.test(String(config.endpoint || ''))) {
+      showMessage('設定エラー: config.js の endpoint に閲覧者用 Web アプリの URL（https://script.google.com/macros/s/…/exec）を設定してください。');
+      return;
+    }
+    if (!(win.google && win.google.script) || config) {
+      params = readSearchParams(win.location && win.location.search);
+      boot();
+    } else if (win.google.script.url) {
       win.google.script.url.getLocation(function (loc) {
         params = (loc && loc.parameter) || {};
         boot();
@@ -464,14 +475,58 @@
     }
   }
 
+  var ENDPOINT_PATTERN = /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/;
+
+  function readSearchParams(search) {
+    var out = {};
+    String(search || '')
+      .replace(/^\?/, '')
+      .split('&')
+      .forEach(function (pair) {
+        if (!pair) return;
+        var i = pair.indexOf('=');
+        var k = decodeURIComponent((i < 0 ? pair : pair.slice(0, i)).replace(/\+/g, ' '));
+        var v = i < 0 ? '' : decodeURIComponent(pair.slice(i + 1).replace(/\+/g, ' '));
+        if (!Object.prototype.hasOwnProperty.call(out, k)) out[k] = v;
+      });
+    return out;
+  }
+
+  /**
+   * GitHub Pages など Google の外に置いた閲覧ページ用の通信。
+   * 閲覧者用 Web アプリの ?format=json を fetch で読む。Cookie を送らない（credentials: 'omit'）ので、
+   * ブラウザが複数の Google アカウントにログインしていても匿名アクセスとして扱われる。
+   */
+  function createFetchTransport(win, endpoint) {
+    return function (req, ok, fail) {
+      var q = ['format=json'];
+      if (req.eventId) q.push('event=' + encodeURIComponent(req.eventId));
+      if (req.knownVersion) q.push('known=' + encodeURIComponent(req.knownVersion));
+      win
+        .fetch(endpoint + '?' + q.join('&'), { method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'follow' })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(
+          function (data) {
+            ok(data);
+          },
+          fail
+        );
+    };
+  }
+
   global.TPViewer = {
+    readSearchParams: readSearchParams,
+    createFetchTransport: createFetchTransport,
     createPoller: createPoller,
     renderEvent: renderEvent,
     formatTime: formatTime,
     STATUS_LABEL: STATUS_LABEL,
   };
 
-  if (global.document && global.google && global.google.script) {
+  if (global.document && ((global.google && global.google.script) || global.TPOC_CONFIG)) {
     if (global.document.readyState === 'loading') {
       global.document.addEventListener('DOMContentLoaded', function () {
         startApp(global.document, global);

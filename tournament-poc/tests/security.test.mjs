@@ -148,3 +148,15 @@ test('画面のスクリプトはデータを innerHTML で埋め込まない（
     assert.ok(!/\.innerHTML\s*=|insertAdjacentHTML|document\.write|\beval\(|new Function/.test(code), file);
   }
 });
+
+test('GitHub Pages 用の閲覧ページ: インラインのスクリプトなし・CSP で通信先を Apps Script に限定・Cookie を送らない', () => {
+  const html = read('dist/pages/index.html');
+  assert.doesNotMatch(html, /<script>(?!<\/script>)|<script(?![^>]*src=)[^>]*>/, 'インラインのスクリプトがある');
+  assert.doesNotMatch(html, /<style>/);
+  const csp = html.match(/Content-Security-Policy" content="([^"]+)"/)[1];
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /script-src 'self'(;|$)/);
+  assert.match(csp, /connect-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com(;|$)/);
+  assert.match(read('dist/pages/viewer.js'), /credentials: 'omit'/);
+  assert.equal(read('dist/pages/viewer.js').includes(read('viewer/src/client/viewer.js')), true, '閲覧画面と同じスクリプト');
+});

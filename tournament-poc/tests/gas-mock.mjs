@@ -429,6 +429,21 @@ export function loadProject(app, options = {}) {
         return Array.from(createHash('md5').update(text, 'utf8').digest()).map((b) => (b > 127 ? b - 256 : b));
       },
     },
+    ContentService: {
+      MimeType: { JSON: 'application/json' },
+      createTextOutput(text) {
+        const out = {
+          text,
+          mimeType: 'text/plain',
+          setMimeType(m) {
+            out.mimeType = m;
+            return out;
+          },
+          getContent: () => out.text,
+        };
+        return out;
+      },
+    },
     HtmlService: {
       createHtmlOutputFromFile(name) {
         if (name !== 'Index') throw new Error('No HTML file named ' + name);

@@ -86,6 +86,19 @@ Google の画面の文言は言語設定や時期によって変わることが�
 
 表示された **ウェブアプリの URL（`…/exec`）** が閲覧者に配布する URL です。
 
+## 3.5 閲覧ページを GitHub Pages に置く（閲覧者に配る URL）
+
+Apps Script の画面（`…/exec`）は、ブラウザで複数の Google アカウントにログインしていると開けません（実環境で確認）。
+閲覧者には、GitHub Pages に置いた閲覧ページの URL を配ります。データは閲覧者用 Web アプリの `?format=json` から取得します。
+
+1. GitHub に公開リポジトリ（例: `n02-tournament-viewer`）を作る。
+2. `tournament-poc/dist/pages/` の `index.html` `viewer.css` `viewer.js` `README.md` を置く。
+3. `config.example.js` を `config.js` という名前で置き、`endpoint` を閲覧者用 Web アプリの URL（`…/exec`）に書き換える。
+4. リポジトリの「Settings」→「Pages」→「Build and deployment」で「Deploy from a branch」、ブランチ `main`・フォルダ `/ (root)` を選んで「Save」。
+5. 数分後に表示される `https://<ユーザー名>.github.io/<リポジトリ名>/` が閲覧者に配る URL です。
+
+閲覧者用 Web アプリの URL が変わると閲覧ページが動かなくなるので、コードの更新は必ず「デプロイを管理」→「新バージョン」で行ってください。
+
 ## 4. 運営画面で初期設定
 
 1. 運営者用 URL を開きます（同じ Google アカウントでログインしたブラウザ）。

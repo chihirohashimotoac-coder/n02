@@ -18,7 +18,7 @@
  */
 
 var VIEWER_CONFIG = Object.freeze({
-  APP_VERSION: '0.1.1',
+  APP_VERSION: '0.2.0',
   CACHE_TTL_SEC: 20,
   STALE_TTL_SEC: 21600, // CacheService の上限（6 時間）
   NONE_TTL_SEC: 20,
@@ -34,7 +34,19 @@ var VIEWER_CONFIG = Object.freeze({
 var VIEWER_EVENT_ID_PATTERN_ = /^EVT-[A-Z0-9]{4,32}$/;
 var DEFAULT_KEY_ = '_default';
 
-function doGet() {
+/**
+ * ?format=json のときは画面ではなく公開データ（getPublicSnapshot と同じ内容）を JSON で返す。
+ * Google の外（GitHub Pages）に置いた閲覧ページが fetch で読むための口。
+ * ブラウザで複数の Google アカウントにログインしていると、Apps Script の画面（HtmlService）は
+ * URL が /macros/u/1/… に書き換えられて開けないことが実環境で分かったため、閲覧ページを外に出せるようにした。
+ * fetch は Cookie を送らない（匿名アクセス）ので、この問題の影響を受けない。
+ */
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  if (p.format === 'json') {
+    var res = getPublicSnapshot({ eventId: p.event || '', knownVersion: p.known || '' });
+    return ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON);
+  }
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('n02 Tournament')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');

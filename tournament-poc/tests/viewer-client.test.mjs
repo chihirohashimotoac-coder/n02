@@ -252,3 +252,30 @@ test('負荷の試算（模擬）: 50 人 × 60 分、運営が毎分結果を�
   assert.ok(maxSameSecond <= 10, `同じ 1 秒に集中したリクエスト数 = ${maxSameSecond}`);
   console.log(`[simulation] requests/min=${perMinute.toFixed(1)} spreadsheetOpens/min=${(opens / 60).toFixed(2)} maxPerSecond=${maxSameSecond}`);
 });
+
+test('URL のパラメータ（?event=…&interval=…）を読む', () => {
+  const read = ctx.TPViewer.readSearchParams;
+  assert.deepEqual({ ...read('?event=EVT-ABC123&interval=15') }, { event: 'EVT-ABC123', interval: '15' });
+  assert.deepEqual({ ...read('') }, {});
+  assert.deepEqual({ ...read('?a=1&a=2&b') }, { a: '1', b: '' });
+  assert.equal(read('?q=%E5%A4%A7%E4%BC%9A+1').q, '大会 1');
+});
+
+test('fetch の通信: Cookie を送らず ?format=json を読み、HTTP エラー・JSON でない応答は失敗にする', async () => {
+  const calls = [];
+  const responses = [
+    { ok: true, status: 200, json: async () => ({ ok: true, version: 'v1' }) },
+    { ok: false, status: 500, json: async () => ({}) },
+    { ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } },
+  ];
+  const win = { fetch: async (url, opts) => (calls.push({ url, opts }), responses[calls.length - 1]) };
+  const transport = ctx.TPViewer.createFetchTransport(win, 'https://script.google.com/macros/s/ABC/exec');
+  const run = (req) => new Promise((resolve) => transport(req, (d) => resolve({ ok: d }), (e) => resolve({ fail: e.message })));
+  assert.deepEqual(await run({ eventId: 'EVT-ABC123', knownVersion: 'v0' }), { ok: { ok: true, version: 'v1' } });
+  assert.equal(calls[0].url, 'https://script.google.com/macros/s/ABC/exec?format=json&event=EVT-ABC123&known=v0');
+  assert.equal(calls[0].opts.credentials, 'omit');
+  assert.equal(calls[0].opts.cache, 'no-store');
+  assert.deepEqual(await run({}), { fail: 'HTTP 500' });
+  assert.equal(calls[1].url, 'https://script.google.com/macros/s/ABC/exec?format=json');
+  assert.match((await run({})).fail, /Unexpected token/);
+});

@@ -1,0 +1,469 @@
+/* このファイルは tools/build.mjs が生成したものです。直接編集しないでください。 */
+:root {
+  --bg: #f4f3ee;
+  --surface: #ffffff;
+  --surface-2: #f0efe9;
+  --ink: #1b1f1d;
+  --ink-2: #4c5551;
+  --line: #d9d7cf;
+  --brand: #0d503a;
+  --brand-ink: #ffffff;
+  --accent: #b5401f;
+  --live: #a45a00;
+  --live-bg: #fff1dc;
+  --final: #0d503a;
+  --final-bg: #e1f1e9;
+  --sched: #5d6662;
+  --sched-bg: #ecebe6;
+  --check: #8a1c1c;
+  --check-bg: #fbe3e3;
+  --warn-bg: #fff4d6;
+  --warn-ink: #5c4300;
+  --error-bg: #fbe3e3;
+  --error-ink: #7a1414;
+  --radius: 12px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111513;
+    --surface: #1a1f1d;
+    --surface-2: #222826;
+    --ink: #eef1ef;
+    --ink-2: #aab4af;
+    --line: #333b38;
+    --brand: #1f7a5a;
+    --accent: #ff8a65;
+    --live: #ffc46b;
+    --live-bg: #3a2c12;
+    --final: #7fe0b3;
+    --final-bg: #163329;
+    --sched: #aab4af;
+    --sched-bg: #262c2a;
+    --check: #ff9c9c;
+    --check-bg: #3b1d1d;
+    --warn-bg: #3a3015;
+    --warn-ink: #ffe3a3;
+    --error-bg: #3b1d1d;
+    --error-ink: #ffc0c0;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.topbar {
+  background: var(--brand);
+  color: var(--brand-ink);
+  padding: 16px;
+}
+
+.topbar__inner,
+.statusbar,
+.content,
+.banner {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.brand {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.event-title {
+  margin: 2px 0 6px;
+  font-size: clamp(20px, 4.5vw, 28px);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.event-meta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.event-status:empty,
+#event-date:empty {
+  display: none;
+}
+
+.event-status {
+  font-weight: 600;
+}
+
+.rule-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+}
+
+.statusbar__times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.statusbar__times div {
+  display: flex;
+  gap: 6px;
+}
+
+.statusbar__times dt {
+  font-weight: 600;
+}
+
+.statusbar__times dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.refresh {
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--brand);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.refresh:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.refresh:focus-visible,
+.chip:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.banner {
+  margin: 0 16px 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+@media (min-width: 1232px) {
+  .banner {
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+.banner--warn,
+.banner--info {
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+.banner--error {
+  background: var(--error-bg);
+  color: var(--error-ink);
+}
+
+.content {
+  padding: 0 16px 32px;
+}
+
+.filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.chip {
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.chip[aria-pressed='true'] {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--brand-ink);
+}
+
+.message {
+  padding: 24px 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  text-align: center;
+}
+
+.groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
+  gap: 16px;
+}
+
+.group {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  min-width: 0;
+}
+
+.group__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.group__title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.group__progress {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.summary {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.summary th,
+.summary td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.summary thead th {
+  font-size: 12px;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.summary td {
+  font-variant-numeric: tabular-nums;
+  width: 5.5em;
+  text-align: center;
+}
+
+.summary tbody th {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.matches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.match {
+  display: grid;
+  grid-template-columns: 2.4em minmax(0, 1fr) auto minmax(0, 1fr) 5.2em;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.match__round {
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.match__player {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.match__player--2 {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.match__name {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.match__player.is-winner .match__name {
+  font-weight: 700;
+}
+
+.win-mark {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--final);
+  color: var(--surface);
+}
+
+.match__score {
+  display: flex;
+  gap: 4px;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 3.6em;
+  justify-content: center;
+}
+
+.legs.is-winner {
+  color: var(--final);
+}
+
+.legs-sep {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+
+.status {
+  justify-self: end;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.status--scheduled {
+  color: var(--sched);
+  background: var(--sched-bg);
+}
+
+.status--live {
+  color: var(--live);
+  background: var(--live-bg);
+  border: 1px solid var(--live);
+}
+
+.status--final {
+  color: var(--final);
+  background: var(--final-bg);
+}
+
+.status--check {
+  color: var(--check);
+  background: var(--check-bg);
+}
+
+.match--live {
+  box-shadow: inset 3px 0 0 var(--live);
+}
+
+.empty {
+  color: var(--ink-2);
+}
+
+.footnote {
+  margin-top: 20px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* スマートフォン: 回戦・状態を 1 行目、対戦を 2 行目に */
+@media (max-width: 560px) {
+  .group {
+    padding: 12px 10px;
+  }
+
+  .match {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas:
+      'round round status'
+      'p1 score p2';
+    row-gap: 4px;
+  }
+
+  .match__round {
+    grid-area: round;
+  }
+
+  .match__player--1 {
+    grid-area: p1;
+  }
+
+  .match__score {
+    grid-area: score;
+  }
+
+  .match__player--2 {
+    grid-area: p2;
+  }
+
+  .status {
+    grid-area: status;
+  }
+}

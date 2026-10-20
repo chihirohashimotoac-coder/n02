@@ -84,6 +84,23 @@ const server = http.createServer(async (req, res) => {
 <li><a href="/admin?as=anonymous">運営者用画面に匿名でアクセスした場合</a></li></ul>`);
     }
     if (req.method === 'GET' && url.pathname === '/__gas-shim.js') return send(res, 200, 'text/javascript; charset=utf-8', SHIM);
+    // GitHub Pages 用の閲覧ページ（dist/pages）。endpoint は架空の script.google.com の URL にしてあり、
+    // 画面テストではブラウザ側でその通信を /viewer-json に振り替える（CSP をそのまま検証するため）。
+    if (req.method === 'GET' && url.pathname.startsWith('/pages/')) {
+      const name = url.pathname.slice('/pages/'.length) || 'index.html';
+      if (name === 'config.js') {
+        return send(res, 200, 'text/javascript; charset=utf-8', "window.TPOC_CONFIG = { endpoint: 'https://script.google.com/macros/s/PREVIEW/exec' };");
+      }
+      const types = { 'index.html': 'text/html; charset=utf-8', 'viewer.css': 'text/css; charset=utf-8', 'viewer.js': 'text/javascript; charset=utf-8' };
+      if (!types[name]) return send(res, 404, 'text/plain', 'not found');
+      return send(res, 200, types[name], readFileSync(join(ROOT, 'dist', 'pages', name), 'utf8'));
+    }
+    // 閲覧者用 Web アプリの ?format=json と同じ処理（doGet）
+    if (req.method === 'GET' && url.pathname === '/viewer-json') {
+      if (env.fault.viewer === 'fail') return send(res, 503, 'text/html; charset=utf-8', '<html>Service Unavailable</html>');
+      const out = env.viewer.fn('doGet')({ parameter: Object.fromEntries(url.searchParams) });
+      return send(res, 200, 'application/json', out.getContent());
+    }
     if (req.method === 'GET' && (url.pathname === '/admin' || url.pathname === '/viewer')) {
       const app = url.pathname.slice(1);
       // doGet と同じ判定を通す（運営者用は権限がなければアプリの HTML を返さない）

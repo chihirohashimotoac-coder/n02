@@ -166,3 +166,31 @@ test('キャッシュに入らない大きさの公開データでも応答は�
   assert.equal(res.data.groups.length, 16);
   assert.ok(p.viewer.logs.some((l) => l[0] === 'warn' && String(l[1]).includes('too large')));
 });
+
+test('?format=json: 閲覧ページ（GitHub Pages）用に公開データを JSON で返す', () => {
+  const p = published();
+  const out = p.viewer.fn('doGet')({ parameter: { format: 'json' } });
+  assert.equal(out.mimeType, 'application/json');
+  const res = JSON.parse(out.getContent());
+  assert.equal(res.ok, true);
+  assert.equal(res.data.event.id, p.eventId);
+  assert.equal(res.data.groups.length, 4);
+  // event・known の指定は getPublicSnapshot と同じ扱い
+  const byId = JSON.parse(p.viewer.fn('doGet')({ parameter: { format: 'json', event: p.eventId, known: res.version } }).getContent());
+  assert.equal(byId.notModified, true);
+  const bad = JSON.parse(p.viewer.fn('doGet')({ parameter: { format: 'json', event: '<x>' } }).getContent());
+  assert.equal(bad.error.code, 'BAD_REQUEST');
+  // format 指定がなければ従来どおり画面を返す
+  assert.match(p.viewer.fn('doGet')({ parameter: {} }).getContent(), /getPublicSnapshot/);
+  assert.match(p.viewer.fn('doGet')().getContent(), /getPublicSnapshot/);
+});
+
+test('?format=json: シートが読めないときも内部情報を含まない固定文言の JSON を返す', () => {
+  const p = published();
+  p.viewer.cache.clear();
+  p.store.failOpen = true;
+  const text = p.viewer.fn('doGet')({ parameter: { format: 'json' } }).getContent();
+  const res = JSON.parse(text);
+  assert.equal(res.error.code, 'UNAVAILABLE');
+  assert.doesNotMatch(text, /simulated|sheets\.spreadsheets|stack/i);
+});
