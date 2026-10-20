@@ -19,6 +19,7 @@ import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../domai
 import { appendHistory, removeLatestHistory } from '../storage/matchStorage';
 import MatchResultCard from './MatchResultCard';
 import DialogShell from './common/DialogShell';
+import { isFieldOwned, isInertKeystroke, isNativeActivation } from './common/keyboardPolicy';
 import AwardOverlay, { type AwardPresentation } from './common/AwardOverlay';
 import { useAwardPreload } from './common/useAwardPreload';
 import { classifyAward } from '../domain/awards';
@@ -47,6 +48,12 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
    * its backdrop where the player cannot read it.
    */
   const [editError, setEditError] = useState<string | null>(null);
+  /**
+   * Whether the 修正 field opens with its value selected, so typing replaces the old score instead
+   * of being appended to it. Not when the editor was opened by typing a digit over a parked cell:
+   * that digit is already the first one of the new score.
+   */
+  const editSelectOnFocus = useRef(true);
   const [remainingEntryMode, setRemainingEntryMode] = useState(false);
   /** 使用ダーツ for the visit being entered - 3 unless the player says otherwise, reset after each visit. */
   const [dartsUsed, setDartsUsed] = useState(3);
@@ -259,6 +266,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
       if (!visit) return;
       setSelectedVisit(index);
       setEditIndex(index);
+      editSelectOnFocus.current = seedDigit === undefined;
       setEditScore(seedDigit ?? String(visit.score));
       setEditDarts(visit.darts);
       setEditError(null);
@@ -350,9 +358,10 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   // Keyboard support mirrors the on-screen keypad.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      // Never act on the Enter that merely commits an IME conversion, and never let a held key
-      // repeat-fire an action (a held U would otherwise unwind the whole leg).
-      if (event.isComposing || event.keyCode === 229 || event.repeat) return;
+      // Never act on the Enter that merely commits an IME conversion, never let a held key
+      // repeat-fire an action (a held U would otherwise unwind the whole leg), and leave Ctrl /
+      // Meta / Alt chords to the browser - Ctrl+N must not also abandon the match.
+      if (isInertKeystroke(event)) return;
 
       const target = event.target as HTMLElement | null;
       const onButton = target?.tagName === 'BUTTON';
@@ -374,11 +383,12 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         return;
       }
 
-      // Gameplay keys. Never steal a key from a real text field, and leave a focused button its
+      // Gameplay keys. Never steal a key from a real text field - the score sheet's own read-only
+      // entry box is not one, so clicking it leaves typing working - and leave a focused button its
       // native Enter/Space/Tab activation.
       if (isComTurn) return;
-      if (target?.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target?.tagName ?? '')) return;
-      if (onButton && ['Enter', ' ', 'Tab'].includes(event.key)) return;
+      if (isFieldOwned(target)) return;
+      if (isNativeActivation(event)) return;
 
       if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
@@ -491,6 +501,13 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   const routes = state.settings.showRoute
     ? ([0, 1] as const).map((index) => suggestCheckoutRoute(state.players[index].remaining))
     : [null, null];
+
+  // The menu's UNDO row and its <kbd>U</kbd> key run this one action.
+  const undoFromMenu = () =>
+    closeMenuWith(() => {
+      onChange(undoLastAction(state));
+      showNotice('直前の入力を取り消しました。');
+    });
 
   if (state.matchWinner !== null) {
     return (
@@ -633,6 +650,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
 
       {effectiveModal === 'finish-darts' && pendingFinish !== null && (
         <DialogShell
+          guardKeys
           label="上がり本数を選択"
           backdropClassName="n01-modal-backdrop"
           returnFocusTo={scrollRef}
@@ -672,6 +690,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
 
       {effectiveModal === 'round-limit' && (
         <DialogShell
+          guardKeys
           label="Legの勝敗を選択"
           backdropClassName="n01-modal-backdrop"
           returnFocusTo={scrollRef}
@@ -721,6 +740,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
 
       {effectiveModal === 'menu' && (
         <DialogShell
+          guardKeys
           label="ゲームメニュー"
           backdropClassName="n01-modal-backdrop"
           returnFocusTo={scrollRef}
@@ -745,6 +765,9 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
             } else if (event.key === '4') {
               event.preventDefault();
               closeMenuWith(() => onChange(declareDraw(state)));
+            } else if (event.key.toLowerCase() === 'u' && state.undo.length > 0) {
+              event.preventDefault();
+              undoFromMenu();
             } else if (event.key.toLowerCase() === 'a') {
               event.preventDefault();
               closeMenuWith(toggleAwards);
@@ -800,12 +823,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
           <button
             type="button"
             disabled={state.undo.length === 0}
-            onClick={() =>
-              closeMenuWith(() => {
-                onChange(undoLastAction(state));
-                showNotice('直前の入力を取り消しました。');
-              })
-            }
+            onClick={undoFromMenu}
           >
             <kbd>U</kbd>{'　'}直前の入力を戻す
           </button>
@@ -868,6 +886,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
 
       {effectiveModal === 'stats' && (
         <DialogShell
+          guardKeys
           label="対戦成績"
           backdropClassName="n01-modal-backdrop"
           returnFocusTo={scrollRef}
@@ -906,6 +925,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
 
       {effectiveModal === 'edit' && editIndex !== null && (
         <DialogShell
+          guardKeys
           label="過去得点の修正"
           backdropClassName="n01-modal-backdrop"
           returnFocusTo={scrollRef}
@@ -920,9 +940,12 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
               inputMode="numeric"
               autoFocus
               value={editScore}
+              onFocus={(event) => {
+                if (editSelectOnFocus.current) event.currentTarget.select();
+              }}
               onChange={(event) => setEditScore(event.target.value)}
               onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                if (isInertKeystroke(event.nativeEvent)) return;
                 if (event.key === 'Enter') {
                   event.preventDefault();
                   commitEdit();
@@ -966,6 +989,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
 
       {state.legResult && !awaitingRoundLimit && (
         <DialogShell
+          guardKeys
           label="Leg結果"
           backdropClassName="result-backdrop"
           returnFocusTo={scrollRef}

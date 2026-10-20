@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { getEngine } from '../../domain/pentathlon/presets';
 import { computeNextStarter, sessionDisciplines } from '../../domain/pentathlon/session';
 import DisciplineResultTable from './DisciplineResultTable';
+import { isInertKeystroke } from '../common/keyboardPolicy';
 import type { PentathlonSession } from '../../domain/pentathlon/types';
 
 interface Props {
@@ -19,7 +20,7 @@ export default function DisciplineResult({ session, onNext, onUndo, canUndo, onE
    *
    * Held-down keys are ignored: the turn that ended the discipline was very likely committed with
    * Enter itself, and an auto-repeat from that same press would otherwise skip this screen before
-   * it has been read.
+   * it has been read. So are the Enter that only commits an IME conversion and Ctrl/Meta/Alt+Enter.
    *
    * A focused control keeps its own Enter. Otherwise tabbing to 戻る or 中断してメニューへ and
    * pressing Enter would be swallowed here and advance the pentathlon instead of doing what the
@@ -27,7 +28,7 @@ export default function DisciplineResult({ session, onNext, onUndo, canUndo, onE
    */
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Enter' || event.repeat) return;
+      if (event.key !== 'Enter' || isInertKeystroke(event)) return;
       const target = event.target as Element | null;
       if (target?.closest?.('button, a, input, select, textarea, [contenteditable]')) return;
       event.preventDefault();
