@@ -84,7 +84,8 @@ function actionConfigureStorage_(ctx, payload) {
   try {
     SpreadsheetApp.openById(id).getName();
   } catch (e) {
-    throw appError_('STORAGE_UNAVAILABLE', 'そのスプレッドシートを開けませんでした。ID と、デプロイしたアカウントの権限を確認してください。');
+    console.error('configureStorage openById failed', e && e.message);
+    throw appError_('STORAGE_UNAVAILABLE', 'そのスプレッドシートを開けませんでした。ID と、デプロイしたアカウントの権限を確認してください。' + googleReason_(e));
   }
   PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', id);
   return actionBootstrap_(ctx);

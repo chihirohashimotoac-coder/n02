@@ -14,7 +14,7 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.1.0',
+  APP_VERSION: '0.1.1',
   SCHEMA_VERSION: 1,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
@@ -458,8 +458,14 @@ function openStorage_() {
     return SpreadsheetApp.openById(id);
   } catch (e) {
     console.error('openById failed', e && e.message);
-    throw appError_('STORAGE_UNAVAILABLE', 'データ保存先のスプレッドシートを開けませんでした。ID と権限を確認してください。');
+    throw appError_('STORAGE_UNAVAILABLE', 'データ保存先のスプレッドシートを開けませんでした。ID と権限を確認してください。' + googleReason_(e));
   }
+}
+
+/** 運営画面（本人のみ）に出す、Google 側のエラー文。閲覧者用には使わない */
+function googleReason_(e) {
+  var msg = e && e.message ? String(e.message).slice(0, 300) : '';
+  return msg ? '（Google からのエラー: ' + msg + '）' : '';
 }
 
 function headerOf_(sheet) {
@@ -1268,7 +1274,8 @@ function actionConfigureStorage_(ctx, payload) {
   try {
     SpreadsheetApp.openById(id).getName();
   } catch (e) {
-    throw appError_('STORAGE_UNAVAILABLE', 'そのスプレッドシートを開けませんでした。ID と、デプロイしたアカウントの権限を確認してください。');
+    console.error('configureStorage openById failed', e && e.message);
+    throw appError_('STORAGE_UNAVAILABLE', 'そのスプレッドシートを開けませんでした。ID と、デプロイしたアカウントの権限を確認してください。' + googleReason_(e));
   }
   PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', id);
   return actionBootstrap_(ctx);

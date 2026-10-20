@@ -18,8 +18,14 @@ function openStorage_() {
     return SpreadsheetApp.openById(id);
   } catch (e) {
     console.error('openById failed', e && e.message);
-    throw appError_('STORAGE_UNAVAILABLE', 'データ保存先のスプレッドシートを開けませんでした。ID と権限を確認してください。');
+    throw appError_('STORAGE_UNAVAILABLE', 'データ保存先のスプレッドシートを開けませんでした。ID と権限を確認してください。' + googleReason_(e));
   }
+}
+
+/** 運営画面（本人のみ）に出す、Google 側のエラー文。閲覧者用には使わない */
+function googleReason_(e) {
+  var msg = e && e.message ? String(e.message).slice(0, 300) : '';
+  return msg ? '（Google からのエラー: ' + msg + '）' : '';
 }
 
 function headerOf_(sheet) {
