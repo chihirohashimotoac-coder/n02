@@ -263,17 +263,21 @@ test('閲覧者に返すデータに非公開情報（メモ・操作者・履�
     assert.ok(!text.includes(secret), `公開データに ${secret} が含まれている`);
   }
   // 公開データに含めてよいキーの一覧（これ以外が増えたら見直す）
+  const ALLOWED = new Set([
+    'advanced', 'bestOf', 'champion', 'check', 'complete', 'cycles', 'dataUpdatedAt', 'dateLabel', 'entrants', 'event', 'final', 'format', 'groups',
+    'id', 'label', 'legs', 'legsAgainst', 'legsFor', 'legsToWin', 'live', 'lost', 'matches', 'name', 'order', 'p1', 'p2', 'pending', 'played',
+    'playerId', 'players', 'progress', 'provisional', 'rank', 'round', 'roundBestOf', 'rounds', 'rule', 'scheduled', 'schema', 'seed', 'setBestOf',
+    'sets', 'setsAgainst', 'setsFor', 'setsToWin', 'source', 'stage', 'stages', 'standings', 'status', 'summary', 'thirdPlace', 'tiebreakers',
+    'tied', 'total', 'type', 'winnerId', 'won',
+  ]);
   const keys = new Set();
   const walk = (v) => {
     if (Array.isArray(v)) v.forEach(walk);
     else if (v && typeof v === 'object') Object.entries(v).forEach(([k, x]) => (keys.add(k), walk(x)));
   };
   walk(res.data);
-  assert.deepEqual([...keys].sort(), [
-    'bestOf', 'check', 'dataUpdatedAt', 'dateLabel', 'event', 'final', 'groups', 'id', 'legs', 'legsAgainst', 'legsFor', 'legsToWin', 'live',
-    'lost', 'matches', 'name', 'order', 'p1', 'p2', 'played', 'playerId', 'players', 'progress', 'provisional', 'round', 'rule', 'scheduled',
-    'schema', 'stage', 'status', 'summary', 'total', 'type', 'winnerId', 'won',
-  ].sort());
+  const extra = [...keys].filter((k) => !ALLOWED.has(k));
+  assert.deepEqual(extra, [], '公開データに想定外の項目');
 });
 
 test('閲覧者用の doGet は書き込み関数を呼ぶコードを含まない HTML を返す', () => {

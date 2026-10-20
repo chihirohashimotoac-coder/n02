@@ -88,22 +88,40 @@ Apps Script の画面（`…/exec`）は、ブラウザで複数の Google ア�
 
 | 操作 | 内容 |
 | --- | --- |
-| 大会の作成（誰でも） | 大会名・開催日・主催者名（任意・非公開）・対戦形式・グループ数。作成コードが設定されていれば入力。作成後に運営用 URL を 1 回だけ表示 |
+| 大会の作成（誰でも） | 大会名・開催日・主催者名（任意・非公開）・大会の形式（下記のひな形）・対戦形式。作成コードが設定されていれば入力。作成後に運営用 URL を 1 回だけ表示 |
 | 大会の編集 | 大会名・開催日・状態（準備中 / 開催中 / 終了）・公開 / 非公開・運営メモ（非公開）・運営用 URL の再発行 |
-| ルール | Best of N Legs（1〜21 の奇数）、暫定ルールの表示。結果入力後は Best of を変更不可 |
+| ルール | 段階ごとに Leg 制（Best of N Legs）またはセット制（Best of N セット・各セット Best of M Legs）。トーナメントは回戦ごとに Best of を上書き可能。暫定ルールの表示。結果入力後は変更不可 |
+| 形式（段階） | 「ロビン」「リーグ」「トーナメント」を最大 8 段階まで追加・削除・名前変更。順位の決め方、進出ルール、総当たりの回数、ラウンド表示名、3 位決定戦を段階ごとに設定 |
 | 選手 | 一括登録（1 行 1 名）・名前変更・削除（対戦カードに入っている選手は削除不可） |
-| ロビングループ | グループ数・名前、登録順の自動割当、手動割当、グループ内総当たりの対戦カード作成・削除（結果入力後は削除不可） |
-| 試合結果 | 取得 Leg 数の入力、「進行中として保存」「確定」「未開始に戻す」、確定済みの「訂正」 |
+| 組み合わせ（ロビン・リーグ） | グループ数・名前、登録順の自動割当、手動割当、総当たりの対戦カード作成・削除（結果入力後は削除不可）、順位表、同順位の手動決定、「順位を確定して進出させる」・取り消し |
+| 組み合わせ（トーナメント） | 出場者の選択とシード順の並べ替え（進出者は自動登録）、トーナメント表の作成・削除。不戦勝は上位シードに自動配置 |
+| 試合結果 | 取得 Leg 数（セット制は取得セット数と Leg 合計）の入力、「進行中として保存」「確定」「未開始に戻す」、確定済みの「訂正」。トーナメントは確定で勝者（3 位決定戦は敗者）が次の試合へ自動で進む。次の試合が始まっていれば訂正不可 |
 | 進行状況 | 全体・グループ別の確定 / 進行中 / 未開始の数、公開状態、この大会の閲覧ページへのリンク、変更履歴 |
 | サンプル | 16 名・4 人 × 4 グループ・Best of 5（暫定）の検証用大会をボタン 1 つで作成 |
 | 管理者（`#admin`） | 保存先の設定・初期化、全大会の一覧と管理、閲覧者用 URL、閲覧ページの既定表示の大会、運営用 URL の再発行 |
 
 ### 閲覧者用 Web 画面（ログイン不要）
 
-大会名・開催日・状態・ルール（暫定表示）、グループごとの選手と勝-敗・Leg 得-失（確定試合のみ）、対戦組み合わせ・取得 Leg 数・試合状態・勝者、
-データ更新時刻・取得時刻・次回自動更新までの秒数、手動更新ボタン、通信失敗時の表示。PC・スマートフォン対応、ダークモード対応。
+大会名・開催日・状態・ルール（暫定表示）、段階ごとの見出しとルール、グループごとの順位表（順位・勝-敗・セット / Leg 得-失。確定試合のみ）、
+対戦組み合わせ・ラウンド表示名（「第 1 節」など）・取得 Leg / セット数・試合状態・勝者、トーナメント表（回戦ごと・3 位決定戦・優勝者）、
+段階・グループでの絞り込み、データ更新時刻・取得時刻・次回自動更新までの秒数、手動更新ボタン、通信失敗時の表示。PC・スマートフォン対応、ダークモード対応。
 
-順位の決定方法は確定していないため、**順位は表示していません**（勝-敗と Leg 数のみ。並びは登録順）。
+順位は主催者が設定した決め方（既定: 勝数 → Leg 差 → 直接対決 → 得 Leg）で計算し、決まらない場合は「同」と表示します（主催者が手動で決定可能）。
+
+### 組める大会形式（v0.4.0）
+
+| 項目 | 設定できる内容 |
+| --- | --- |
+| ひな形（作成時） | ロビンのみ / ロビン → A・B トーナメント / トーナメントのみ / リーグ。作成後に「形式」タブで自由に変更 |
+| 段階の種類 | ロビン（グループ内総当たり）・リーグ（全員総当たり・節ごと）・シングルエリミネーション（トーナメント）。最大 8 段階 |
+| 複数段階 | 段階を並べ、ロビン / リーグの順位で後の段階へ進出（例: 各組 1〜2 位 → A トーナメント、3 位以下 → B トーナメント）。進出者は「組 1 位 → 2 位 …」の順にシード |
+| 順位の決め方 | 勝数・Leg 差・得 Leg・セット差・得セット・直接対決（並んだ選手どうしの成績）を任意の順で。最後は主催者が手動で決定 |
+| 2 回総当たり | 総当たりの回数 1 / 2（2 回目は先攻・後攻を入れ替え） |
+| リーグの節 | 節（ラウンド）ごとの表示名を自由に設定（空欄なら「第 n 節」） |
+| Best of | 段階ごと（ロビン・リーグ・トーナメント）、トーナメントは回戦ごと（例: 決勝だけ Best of 7） |
+| セット制 | Best of N セット・各セット Best of M Legs。Leg 合計は成立しうる範囲だけ受け付ける |
+| 3 位決定戦 | トーナメントごとに有無を設定 |
+| シード・不戦勝 | 出場者の並び順がシード。2 のべき乗に満たない人数は上位シードが不戦勝（2〜128 名） |
 
 ### 試合結果の判定（Best of N）
 
@@ -127,12 +145,12 @@ Apps Script の画面（`…/exec`）は、ブラウザで複数の Google ア�
 | シート | 主な列 | 後続フェーズへの備え |
 | --- | --- | --- |
 | Events | event_id, name, date_label, status, is_public, is_featured, rule_id, is_sample, organizer_name, admin_key_hash, admin_key_issued_at, notes | 複数大会を並行管理可能。主催者ごとの運営用の鍵（ハッシュ） |
-| Rules | rule_id, event_id, name, format, best_of, is_provisional | format に将来 Sets 制などを追加 |
+| Rules | rule_id, event_id, name, format, best_of, set_best_of, is_provisional | format: best_of_legs / best_of_sets。段階ごとに 1 行 |
 | Players | player_id, event_id, display_name, external_ref, notes | external_ref で n02 の選手と対応付け |
-| Stages | stage_id, event_id, name, type, order, rule_id, parent_stage_id, config_json | type: round_robin / single_elimination / league。parent_stage_id でロビン → A・B トーナメントを接続 |
+| Stages | stage_id, event_id, name, type, order, rule_id, parent_stage_id, config_json | type: round_robin / league / single_elimination。config_json に総当たり回数・順位の決め方・進出ルール・3 位決定戦・回戦ごとの Best of・ラウンド表示名 |
 | Groups | group_id, event_id, stage_id, name, order | — |
-| Entries | entry_id, event_id, stage_id, group_id, player_id, seed | ステージへの出場枠。トーナメントのシード配置に流用 |
-| Matches | match_id, event_id, stage_id, group_id, round, order, player1/2_id, player1/2_legs, status, winner_id, rule_id, next_match_id, next_match_slot, external_ref, confirmed_at | next_match_id/slot でブラケットの勝ち上がり、rule_id で試合ごとのルール、external_ref で n02 の試合と対応 |
+| Entries | entry_id, event_id, stage_id, group_id, player_id, seed, manual_order, source_label | 段階への出場枠。seed はトーナメントのシード、manual_order は手動の順位、source_label は「グループA 1位」などの進出元 |
+| Matches | match_id, event_id, stage_id, group_id, round, order, label, player1/2_id, player1/2_legs, player1/2_sets, status, winner_id, rule_id, next_match_id/slot, loser_next_match_id/slot, external_ref, confirmed_at | next_match_* で勝者、loser_next_match_*（3 位決定戦）で敗者の行き先。external_ref で n02 の試合と対応 |
 | History | history_id, at, actor, action, entity, entity_id, event_id, before_json, after_json | 監査・訂正の追跡 |
 | PublicSnapshots | event_id, is_default, version, published_at, chunk_count, chunk_01〜10 | 閲覧者向けの公開データ（最大 40 万文字） |
 
@@ -168,8 +186,8 @@ npm run preview             # http://127.0.0.1:4180/ でローカル確認（Goo
 
 ## 7. 今回実装していないもの（後続フェーズ）
 
-本格的なトーナメント自動生成、ロビン順位による A・B トーナメントへの振り分け、順位決定方法、リーグの自動スケジュール生成、
-n02 との試合結果の自動同期、Firebase 連携、大会の削除（Phase 1 は「非公開・終了」で代替）、棄権・不戦勝の扱い、共同主催者（運営用 URL を共有すれば複数人で運営は可能）。
+ダブルエリミネーション、スイスドロー、試合ごとの棄権・不戦勝の入力（トーナメントの人数不足による不戦勝は対応済み）、日時・ボードの割り当て、
+n02 との試合結果の自動同期、Firebase 連携、大会の削除（Phase 1 は「非公開・終了」で代替）、共同主催者（運営用 URL を共有すれば複数人で運営は可能）。
 
 ## 8. 既知の制約
 

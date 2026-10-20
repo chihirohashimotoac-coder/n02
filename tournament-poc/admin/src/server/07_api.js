@@ -30,6 +30,15 @@ function adminActions_() {
     clearMatches: { fn: actionClearMatches_, scope: 'event', mutating: true },
     saveMatchResult: { fn: actionSaveMatchResult_, scope: 'event', mutating: true },
     republish: { fn: actionRepublish_, scope: 'event', mutating: true },
+    addStage: { fn: actionAddStage_, scope: 'event', mutating: true },
+    updateStage: { fn: actionUpdateStage_, scope: 'event', mutating: true },
+    deleteStage: { fn: actionDeleteStage_, scope: 'event', mutating: true },
+    setManualOrder: { fn: actionSetManualOrder_, scope: 'event', mutating: true },
+    confirmAdvancement: { fn: actionConfirmAdvancement_, scope: 'event', mutating: true },
+    undoAdvancement: { fn: actionUndoAdvancement_, scope: 'event', mutating: true },
+    setEntrants: { fn: actionSetEntrants_, scope: 'event', mutating: true },
+    generateBracket: { fn: actionGenerateBracket_, scope: 'event', mutating: true },
+    clearBracket: { fn: actionClearBracket_, scope: 'event', mutating: true },
   };
 }
 

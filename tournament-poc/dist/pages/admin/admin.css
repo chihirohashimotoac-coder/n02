@@ -44,6 +44,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -186,3 +187,28 @@ body.is-busy .busy-indicator { display: block; }
 .issued { display: grid; gap: 12px; border-color: var(--accent); }
 .issued__warn { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--check-bg); color: var(--check); font-weight: 700; }
 .issued__url { display: block; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; overflow-wrap: anywhere; user-select: all; }
+
+/* 大会形式（v0.4.0） */
+.stack--tight { gap: 8px; }
+.row--tight { gap: 6px; }
+.input--auto { width: auto; flex: 0 1 auto !important; min-width: 9em; max-width: 100%; }
+.field--inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.field--inline .field__label { flex: 0 0 auto; }
+.btn--small { min-height: 34px; padding: 4px 10px; font-size: 13px; }
+.input--tiny { width: 5em; flex: 0 0 auto !important; min-height: 34px; padding: 4px 6px; }
+.stage-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.stage-head h3 { margin: 0; overflow-wrap: anywhere; }
+.stage-editor { border-left: 4px solid var(--brand); }
+.tb-item { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.seed-row { padding: 4px 0; border-top: 1px solid var(--line); align-items: center; }
+.seed-no { flex: 0 0 2.6em; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.plain-list { margin: 0; padding-left: 1.2em; font-size: 14px; }
+.plain-list li { margin: 2px 0; overflow-wrap: anywhere; }
+.table-wrap { overflow-x: auto; }
+.table tr.sub th, .table tr.sub td { font-size: 13px; color: var(--ink-2); font-weight: 400; }
+.manual-order { padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; }
+.legs-input--small { font-size: 16px; width: 2.8em; min-height: 40px; }
+.match-editor__legs { display: flex; gap: 4px; align-items: center; }
+.match-editor--pending { opacity: .75; }
+.match-editor--check { box-shadow: inset 3px 0 0 var(--check); padding-left: 10px; }
+.status--pending { background: var(--sched-bg); color: var(--ink-2); font-weight: 600; }

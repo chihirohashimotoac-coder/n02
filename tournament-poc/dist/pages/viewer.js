@@ -3,7 +3,7 @@
 (function (global) {
   'use strict';
 
-  var STATUS_LABEL = { scheduled: '未開始', live: '進行中', final: '確定済み', check: '確認中' };
+  var STATUS_LABEL = { scheduled: '未開始', live: '進行中', final: '確定済み', check: '確認中', pending: '組み合わせ待ち' };
   var EVENT_STATUS_LABEL = { draft: '準備中', running: '開催中', finished: '終了' };
 
   function clamp(n, min, max) {
@@ -219,69 +219,185 @@
     return legs === null || legs === undefined ? '–' : String(legs);
   }
 
+  var STAGE_TYPE_LABEL = { round_robin: '総当たり', league: 'リーグ', single_elimination: 'トーナメント' };
+  var TIEBREAKER_LABEL = { wins: '勝数', leg_diff: 'Leg 差', legs_for: '得 Leg', set_diff: 'セット差', sets_for: '得セット', head_to_head: '直接対決' };
+
+  function ruleText(rule) {
+    if (!rule || !rule.bestOf) return '';
+    var text =
+      rule.format === 'sets'
+        ? 'Best of ' + rule.bestOf + ' セット（先に ' + rule.setsToWin + ' セット・各セット Best of ' + rule.setBestOf + ' Legs）'
+        : 'Best of ' + rule.bestOf + ' Legs（先に ' + rule.legsToWin + ' Leg）';
+    return text + (rule.provisional ? '・暫定ルール' : '');
+  }
+
+  function isSetMatch(m) {
+    return m.p1.sets !== null && m.p1.sets !== undefined;
+  }
+
   function renderMatch(m) {
     var final = m.status === 'final';
-    var p1Win = final && m.winnerId === m.p1.id;
-    var p2Win = final && m.winnerId === m.p2.id;
-    var showLegs = m.status === 'live' || m.status === 'final';
+    var p1Win = final && !!m.winnerId && m.winnerId === m.p1.id;
+    var p2Win = final && !!m.winnerId && m.winnerId === m.p2.id;
+    var showScore = m.status === 'live' || final;
+    var sets = isSetMatch(m);
+    var s1 = sets ? m.p1.sets : m.p1.legs;
+    var s2 = sets ? m.p2.sets : m.p2.legs;
+    var unit = sets ? 'セット' : 'Leg';
+    var name = function (p) {
+      return p.id ? p.name : '未定';
+    };
     return el('li', { className: 'match match--' + m.status, 'data-match-id': m.id }, [
-      el('span', { className: 'match__round', text: 'R' + m.round }),
-      el('span', { className: 'match__player match__player--1' + (p1Win ? ' is-winner' : '') }, [
-        el('span', { className: 'match__name', text: m.p1.name }),
+      el('span', { className: 'match__round', text: m.label || 'R' + m.round }),
+      el('span', { className: 'match__player match__player--1' + (p1Win ? ' is-winner' : '') + (m.p1.id ? '' : ' is-tbd') }, [
+        el('span', { className: 'match__name', text: name(m.p1) }),
         p1Win ? el('span', { className: 'win-mark', text: 'WIN', 'aria-label': '勝者' }) : null,
       ]),
-      el('span', { className: 'match__score', 'aria-label': showLegs ? '取得Leg ' + legsText(m.p1.legs) + '対' + legsText(m.p2.legs) : '結果なし' }, [
-        el('span', { className: 'legs' + (p1Win ? ' is-winner' : ''), text: showLegs ? legsText(m.p1.legs) : '–' }),
+      el('span', { className: 'match__score', 'aria-label': showScore ? '取得' + unit + ' ' + legsText(s1) + '対' + legsText(s2) : '結果なし' }, [
+        el('span', { className: 'legs' + (p1Win ? ' is-winner' : ''), text: showScore ? legsText(s1) : '–' }),
         el('span', { className: 'legs-sep', text: '-' }),
-        el('span', { className: 'legs' + (p2Win ? ' is-winner' : ''), text: showLegs ? legsText(m.p2.legs) : '–' }),
+        el('span', { className: 'legs' + (p2Win ? ' is-winner' : ''), text: showScore ? legsText(s2) : '–' }),
+        sets && showScore && m.p1.legs !== null && m.p2.legs !== null
+          ? el('span', { className: 'match__legs', text: '(' + legsText(m.p1.legs) + '-' + legsText(m.p2.legs) + ')', 'aria-label': 'Leg 合計' })
+          : null,
       ]),
-      el('span', { className: 'match__player match__player--2' + (p2Win ? ' is-winner' : '') }, [
+      el('span', { className: 'match__player match__player--2' + (p2Win ? ' is-winner' : '') + (m.p2.id ? '' : ' is-tbd') }, [
         p2Win ? el('span', { className: 'win-mark', text: 'WIN', 'aria-label': '勝者' }) : null,
-        el('span', { className: 'match__name', text: m.p2.name }),
+        el('span', { className: 'match__name', text: name(m.p2) }),
       ]),
       el('span', { className: 'status status--' + m.status, text: STATUS_LABEL[m.status] || '確認中' }),
     ]);
   }
 
-  function renderGroup(g) {
+  function renderGroup(g, opts) {
     var nameById = {};
     g.players.forEach(function (p) {
       nameById[p.id] = p.name;
     });
-    var rows = g.summary.map(function (s) {
-      return el('tr', null, [
-        el('th', { scope: 'row', text: nameById[s.playerId] || '' }),
-        el('td', { text: s.won + '-' + s.lost }),
-        el('td', { text: s.legsFor + '-' + s.legsAgainst }),
-      ]);
+    var sets = !!(opts && opts.sets);
+    var ranked = !!(opts && opts.ranked);
+    var standings = g.standings || g.summary || [];
+    var heads = [];
+    if (ranked) heads.push(el('th', { scope: 'col', className: 'summary__rank', text: '順位' }));
+    heads.push(el('th', { scope: 'col', text: '選手' }), el('th', { scope: 'col', text: '勝-敗' }));
+    if (sets) heads.push(el('th', { scope: 'col', text: 'セット 得-失' }));
+    heads.push(el('th', { scope: 'col', text: 'Leg 得-失' }));
+    var rows = standings.map(function (s) {
+      var cells = [];
+      // 確定試合がないうちは全員同順位になるので、順位は出さない
+      if (ranked) cells.push(el('td', { className: 'summary__rank', text: g.progress.final && s.rank ? s.rank + (s.tied ? '（同）' : '') : '–' }));
+      cells.push(el('th', { scope: 'row', text: nameById[s.playerId] || '' }), el('td', { text: s.won + '-' + s.lost }));
+      if (sets) cells.push(el('td', { text: (s.setsFor || 0) + '-' + (s.setsAgainst || 0) }));
+      cells.push(el('td', { text: s.legsFor + '-' + s.legsAgainst }));
+      return el('tr', null, cells);
     });
     var p = g.progress;
     return el('section', { className: 'group', id: 'group-' + g.id, 'aria-labelledby': 'group-title-' + g.id }, [
       el('header', { className: 'group__head' }, [
-        el('h2', { className: 'group__title', id: 'group-title-' + g.id, text: g.name }),
+        el('h3', { className: 'group__title', id: 'group-title-' + g.id, text: g.name }),
         el('span', { className: 'group__progress', text: '確定 ' + p.final + ' / ' + p.total + (p.live ? '・進行中 ' + p.live : '') }),
       ]),
       el('table', { className: 'summary' }, [
         el('caption', { className: 'visually-hidden', text: g.name + ' の成績（確定試合のみ）' }),
-        el('thead', null, [el('tr', null, [el('th', { scope: 'col', text: '選手' }), el('th', { scope: 'col', text: '勝-敗' }), el('th', { scope: 'col', text: 'Leg 得-失' })])]),
+        el('thead', null, [el('tr', null, heads)]),
         el('tbody', null, rows),
       ]),
       el('ol', { className: 'matches', 'aria-label': g.name + ' の対戦' }, g.matches.map(renderMatch)),
     ]);
   }
 
-  function renderEvent(root, data, filter) {
-    var groups = data.groups || [];
-    var visible = groups.filter(function (g) {
-      return !filter || filter === 'all' || g.id === filter;
+  function stageRanked(stage) {
+    return !!(stage && stage.tiebreakers && stage.tiebreakers.length);
+  }
+
+  function renderGroupStage(stage, groupFilter) {
+    var sets = !!(stage.rule && stage.rule.format === 'sets');
+    var groups = (stage.groups || []).filter(function (g) {
+      return !groupFilter || groupFilter === 'all' || g.id === groupFilter;
     });
+    var nodes = groups.map(function (g) {
+      return renderGroup(g, { sets: sets, ranked: stageRanked(stage) });
+    });
+    if (!stage.groups || !stage.groups.length) nodes.push(el('p', { className: 'empty', text: 'グループはまだ登録されていません。' }));
+    return el('div', { className: 'groups' }, nodes);
+  }
+
+  function renderBracket(stage) {
+    var rounds = stage.rounds || [];
+    if (!rounds.length) return el('p', { className: 'empty', text: '組み合わせはまだ決まっていません。' });
+    return el(
+      'div',
+      { className: 'bracket' },
+      rounds.map(function (r) {
+        var main = r.matches.filter(function (m) {
+          return m.label !== '3位決定戦';
+        });
+        var third = r.matches.filter(function (m) {
+          return m.label === '3位決定戦';
+        });
+        var bestOf = main[0] && main[0].bestOf;
+        return el('section', { className: 'bracket__round', 'aria-label': r.label }, [
+          el('h3', { className: 'bracket__title' }, [
+            r.label,
+            bestOf ? el('span', { className: 'bracket__bestof', text: ' Bo' + bestOf }) : null,
+          ]),
+          el('ol', { className: 'matches' }, main.map(renderMatch)),
+          third.length ? el('ol', { className: 'matches matches--third', 'aria-label': '3位決定戦' }, third.map(renderMatch)) : null,
+        ]);
+      })
+    );
+  }
+
+  function renderStage(stage, groupFilter) {
+    var p = stage.progress || { final: 0, total: 0, live: 0 };
+    var notes = [];
+    if (stage.groups && stageRanked(stage)) {
+      notes.push(
+        '順位の決め方: ' +
+          stage.tiebreakers
+            .map(function (k) {
+              return TIEBREAKER_LABEL[k] || k;
+            })
+            .join(' → ') +
+          '（並んだ場合は運営が決定。「同」は順位が未確定）'
+      );
+    }
+    if (stage.cycles > 1) notes.push('各対戦を ' + stage.cycles + ' 回行います。');
+    var body = stage.groups ? renderGroupStage(stage, groupFilter) : renderBracket(stage);
+    return el('section', { className: 'stage stage--' + stage.type, id: 'stage-' + stage.id, 'aria-labelledby': 'stage-title-' + stage.id }, [
+      stage.name
+        ? el('header', { className: 'stage__head' }, [
+            el('h2', { className: 'stage__title', id: 'stage-title-' + stage.id, text: stage.name }),
+            el('span', { className: 'stage__meta', text: [STAGE_TYPE_LABEL[stage.type] !== stage.name ? STAGE_TYPE_LABEL[stage.type] || '' : '', ruleText(stage.rule), '確定 ' + p.final + ' / ' + p.total].filter(Boolean).join('・') }),
+          ])
+        : null,
+      stage.champion ? el('p', { className: 'champion' }, [el('span', { className: 'champion__label', text: '優勝' }), el('strong', { text: stage.champion.name })]) : null,
+      body,
+      notes.length ? el('p', { className: 'stage__note', text: notes.join(' ') }) : null,
+    ]);
+  }
+
+  function legacyStage(data) {
+    return { id: 'main', name: '', type: 'round_robin', groups: data.groups || [], progress: data.progress, rule: data.rule };
+  }
+
+  function eventStages(data) {
+    return data.stages && data.stages.length ? data.stages : [legacyStage(data)];
+  }
+
+  function renderEvent(root, data, filter) {
+    var f = typeof filter === 'string' ? { stage: 'all', group: filter } : filter || {};
+    var stages = eventStages(data);
     root.textContent = '';
-    if (!groups.length) {
+    var visible = stages.filter(function (s) {
+      return !f.stage || f.stage === 'all' || s.id === f.stage;
+    });
+    if (!stages.length || (stages.length === 1 && stages[0].groups && !stages[0].groups.length)) {
       root.appendChild(el('p', { className: 'empty', text: 'グループはまだ登録されていません。' }));
       return;
     }
-    visible.forEach(function (g) {
-      root.appendChild(renderGroup(g));
+    visible.forEach(function (s) {
+      root.appendChild(renderStage(s, f.group));
     });
   }
 
@@ -305,7 +421,7 @@
       refresh: $('refresh-button'),
       message: $('message'),
     };
-    var view = { data: null, filter: 'all', lastError: null, eventId: '' };
+    var view = { data: null, filter: { stage: 'all', group: 'all' }, lastError: null, eventId: '' };
 
     function showBanner(kind, text) {
       ui.banner.hidden = !text;
@@ -313,23 +429,45 @@
       ui.banner.textContent = text || '';
     }
 
-    function renderFilter() {
-      ui.filter.textContent = '';
-      var groups = (view.data && view.data.groups) || [];
-      if (groups.length < 2) {
-        ui.filter.hidden = true;
-        return;
-      }
-      ui.filter.hidden = false;
-      [{ id: 'all', name: 'すべて' }].concat(groups).forEach(function (g) {
-        var b = el('button', { type: 'button', className: 'chip', 'aria-pressed': String(view.filter === g.id), text: g.name });
+    function chipRow(label, items, current, onPick) {
+      var row = el('div', { className: 'filter__row', role: 'group', 'aria-label': label });
+      items.forEach(function (it) {
+        var b = el('button', { type: 'button', className: 'chip', 'aria-pressed': String(current === it.id), text: it.name });
         b.addEventListener('click', function () {
-          view.filter = g.id;
+          onPick(it.id);
           renderFilter();
           renderEvent(ui.groups, view.data, view.filter);
         });
-        ui.filter.appendChild(b);
+        row.appendChild(b);
       });
+      return row;
+    }
+
+    function renderFilter() {
+      ui.filter.textContent = '';
+      var stages = view.data ? eventStages(view.data) : [];
+      if (stages.length > 1) {
+        ui.filter.appendChild(
+          chipRow('ステージ', [{ id: 'all', name: 'すべて' }].concat(stages), view.filter.stage, function (id) {
+            view.filter = { stage: id, group: 'all' };
+          })
+        );
+      }
+      // 表示中のグループ ステージが 1 つで、グループが 2 つ以上ならグループで絞り込める
+      var shown = stages.filter(function (s) {
+        return view.filter.stage === 'all' || s.id === view.filter.stage;
+      });
+      var groupStages = shown.filter(function (s) {
+        return s.groups;
+      });
+      if (groupStages.length === 1 && groupStages[0].groups.length > 1) {
+        ui.filter.appendChild(
+          chipRow('グループ', [{ id: 'all', name: 'すべて' }].concat(groupStages[0].groups), view.filter.group, function (id) {
+            view.filter = { stage: view.filter.stage, group: id };
+          })
+        );
+      }
+      ui.filter.hidden = !ui.filter.childNodes.length;
     }
 
     function renderData() {
@@ -339,12 +477,20 @@
       doc.title = d.event.name + ' | n02 Tournament';
       ui.date.textContent = d.event.dateLabel || '';
       ui.eventStatus.textContent = EVENT_STATUS_LABEL[d.event.status] || '';
-      if (d.rule) {
-        ui.rule.hidden = false;
-        ui.rule.textContent = 'Best of ' + d.rule.bestOf + ' Legs（先に ' + d.rule.legsToWin + ' Leg）' + (d.rule.provisional ? '・暫定ルール' : '');
-      } else {
-        ui.rule.hidden = true;
-      }
+      var stages = eventStages(d);
+      var known = {};
+      stages.forEach(function (s) {
+        known[s.id] = true;
+        (s.groups || []).forEach(function (g) {
+          known[g.id] = true;
+        });
+      });
+      if (view.filter.stage !== 'all' && !known[view.filter.stage]) view.filter = { stage: 'all', group: 'all' };
+      if (view.filter.group !== 'all' && !known[view.filter.group]) view.filter = { stage: view.filter.stage, group: 'all' };
+      // ステージごとにルールが違うときは、各ステージの見出しに表示する
+      var rule = stages.length === 1 ? stages[0].rule || d.rule : null;
+      ui.rule.hidden = !ruleText(rule);
+      ui.rule.textContent = ruleText(rule);
       ui.updated.textContent = formatTime(d.dataUpdatedAt);
       renderFilter();
       renderEvent(ui.groups, d, view.filter);

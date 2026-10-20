@@ -10,7 +10,7 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.3.0',
+  APP_VERSION: '0.4.0',
   SCHEMA_VERSION: 1,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
@@ -33,6 +33,8 @@ var ADMIN_CONFIG = Object.freeze({
   // 誰でも主催できるため、悪用・誤操作で保存先が膨らまないよう上限を設ける（管理者は対象外）
   MAX_EVENTS_TOTAL: 200,
   MAX_CREATES_PER_HOUR: 10,
+  MAX_STAGES: 8,
+  MAX_ELIMINATION_ENTRANTS: 128,
   MAX_REQUEST_CHARS: 100000,
 });
 
@@ -63,14 +65,20 @@ var EVENT_STATUS_LABEL = Object.freeze({
 });
 
 var STAGE_TYPE = Object.freeze({
-  ROUND_ROBIN: 'round_robin',
-  // 以下は後続フェーズ用の予約値（Phase 1 では生成しない）
-  SINGLE_ELIMINATION: 'single_elimination',
-  LEAGUE: 'league',
+  ROUND_ROBIN: 'round_robin', // ロビン（グループごとの総当たり）
+  LEAGUE: 'league', // リーグ（全員の総当たり。ラウンドを「節」と呼ぶ）
+  SINGLE_ELIMINATION: 'single_elimination', // トーナメント（勝ち抜き）
 });
 
 var RULE_FORMAT = Object.freeze({
-  BEST_OF_LEGS: 'best_of_legs',
+  BEST_OF_LEGS: 'best_of_legs', // Best of N Legs
+  BEST_OF_SETS: 'best_of_sets', // Best of N セット（各セット Best of M Legs）
+});
+
+var STAGE_TYPE_LABEL = Object.freeze({
+  round_robin: 'ロビン',
+  league: 'リーグ',
+  single_elimination: 'トーナメント',
 });
 
 /**
@@ -105,8 +113,9 @@ var SCHEMA = Object.freeze({
       ['event_id', 'text'],
       ['name', 'text'],
       ['format', 'text'],
-      ['best_of', 'int'],
+      ['best_of', 'int'], // Leg 制なら Leg 数、セット制ならセット数
       ['is_provisional', 'bool'],
+      ['set_best_of', 'int'], // セット制のとき、1 セットの Best of（Leg 数）
       ['notes', 'text'],
       ['rev', 'int'],
       ['created_at', 'text'],
@@ -164,6 +173,8 @@ var SCHEMA = Object.freeze({
       ['group_id', 'text'],
       ['player_id', 'text'],
       ['seed', 'int'],
+      ['manual_order', 'int'], // 同順位を主催者が決めたときの順番
+      ['source_label', 'text'], // 進出元（例: グループA 1位）
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
@@ -182,11 +193,16 @@ var SCHEMA = Object.freeze({
       ['player2_id', 'text'],
       ['player1_legs', 'int'],
       ['player2_legs', 'int'],
+      ['player1_sets', 'int'],
+      ['player2_sets', 'int'],
+      ['label', 'text'], // トーナメントの「準決勝」「3位決定戦」など
       ['status', 'text'],
       ['winner_id', 'text'],
       ['rule_id', 'text'], // 空欄ならステージのルール。将来の試合ごとのルール上書き用
       ['next_match_id', 'text'], // 将来: トーナメントの勝ち上がり先
       ['next_match_slot', 'int'],
+      ['loser_next_match_id', 'text'], // 敗者の行き先（3 位決定戦）
+      ['loser_next_match_slot', 'int'],
       ['external_ref', 'text'], // 将来: n02 の試合との対応
       ['rev', 'int'],
       ['created_at', 'text'],

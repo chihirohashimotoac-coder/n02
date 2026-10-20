@@ -108,6 +108,8 @@ function authorizeEventPayload_(ctx, payload) {
     eventId = findRecord_(ctx.table('Players'), requireId_(payload.playerId, '選手'), '選手').event_id;
   } else if (payload.groupId !== undefined) {
     eventId = findRecord_(ctx.table('Groups'), requireId_(payload.groupId, 'グループ'), 'グループ').event_id;
+  } else if (payload.stageId !== undefined) {
+    eventId = findRecord_(ctx.table('Stages'), requireId_(payload.stageId, '段階'), '段階').event_id;
   } else {
     throw appError_('BAD_REQUEST', '操作対象の大会が指定されていません。');
   }
@@ -117,5 +119,19 @@ function authorizeEventPayload_(ctx, payload) {
     throw appError_('NOT_FOUND', '大会が見つからないか、この大会を管理する権限がありません。');
   }
   findRecord_(ctx.table('Events'), eventId, '大会');
+  // eventId と一緒に送られた段階・グループ・試合・選手が、その大会のものであることも確かめる
+  var checks = [['stageId', 'Stages', '段階'], ['groupId', 'Groups', 'グループ'], ['matchId', 'Matches', '試合'], ['playerId', 'Players', '選手']];
+  checks.forEach(function (c) {
+    var v = payload[c[0]];
+    if (v === undefined || v === '' || v === null) return;
+    var rec = ctx.table(c[1]).byKey[requireId_(v, c[2])];
+    if (!rec || rec.event_id !== eventId) throw appError_('NOT_FOUND', c[2] + 'が見つかりません。');
+  });
+  if (Array.isArray(payload.playerIds)) {
+    payload.playerIds.forEach(function (pid) {
+      var p = isValidId_(pid) ? ctx.table('Players').byKey[pid] : null;
+      if (!p || p.event_id !== eventId) throw appError_('NOT_FOUND', '選手が見つかりません。');
+    });
+  }
   return eventId;
 }

@@ -457,7 +457,8 @@ export function loadProject(app, options = {}) {
   };
   const baseKeys = new Set(Object.getOwnPropertyNames(globals));
   const context = vm.createContext(globals);
-  const code = readFileSync(join(ROOT, 'dist', app, 'Code.gs'), 'utf8');
+  // options.codePath: 別の版のコードで動かす（版の更新の確認用）
+  const code = readFileSync(options.codePath || join(ROOT, 'dist', app, 'Code.gs'), 'utf8');
   vm.runInContext(code, context, { filename: `${app}/Code.gs` });
   project.context = context;
 

@@ -55,6 +55,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
 }
@@ -219,10 +223,15 @@ body {
 }
 
 .filter {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.filter__row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 4px 0 12px;
 }
 
 .chip {
@@ -324,7 +333,7 @@ body {
 
 .match {
   display: grid;
-  grid-template-columns: 2.4em minmax(0, 1fr) auto minmax(0, 1fr) 5.2em;
+  grid-template-columns: 4.2em minmax(0, 1fr) auto minmax(0, 1fr) 5.2em;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
@@ -334,8 +343,10 @@ body {
 
 .match__round {
   font-size: 12px;
+  line-height: 1.2;
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .match__player {
@@ -431,6 +442,169 @@ body {
   margin-top: 20px;
   font-size: 12px;
   color: var(--ink-2);
+}
+
+/* ステージ（予選・決勝トーナメントなど） */
+.stages {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stage {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+  min-width: 0;
+}
+
+.stage__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--brand);
+}
+
+.stage__title {
+  margin: 0;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.stage__meta,
+.stage__note {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin: 0;
+}
+
+.summary .summary__rank {
+  width: 4.2em;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.match__legs {
+  align-self: center;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.match__player.is-tbd .match__name {
+  color: var(--ink-2);
+  font-style: italic;
+}
+
+.match--pending {
+  opacity: 0.8;
+}
+
+.status--pending {
+  color: var(--sched);
+  background: var(--sched-bg);
+  font-weight: 600;
+}
+
+.champion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--final-bg);
+  color: var(--final);
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.champion__label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--final);
+  color: var(--surface);
+}
+
+.bracket {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.bracket__round {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.bracket__title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.bracket__bestof {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.matches--third {
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+}
+
+.bracket .match {
+  /* トーナメントは幅が狭いので、常に「回戦・状態」→「対戦」の 2 行にする */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas:
+    'round round status'
+    'p1 score p2';
+  row-gap: 4px;
+}
+
+.bracket .match__round {
+  grid-area: round;
+  visibility: hidden;
+}
+
+.matches--third .match__round {
+  visibility: visible;
+}
+
+.bracket .match__player--1 {
+  grid-area: p1;
+}
+
+.bracket .match__score {
+  grid-area: score;
+}
+
+.bracket .match__player--2 {
+  grid-area: p2;
+}
+
+.bracket .status {
+  grid-area: status;
+}
+
+/* 広い画面: トーナメントの各回戦を横に並べる */
+@media (min-width: 1000px) {
+  .bracket {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(340px, 1fr);
+    overflow-x: auto;
+  }
 }
 
 /* スマートフォン: 回戦・状態を 1 行目、対戦を 2 行目に */
