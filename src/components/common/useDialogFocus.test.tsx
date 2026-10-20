@@ -59,10 +59,13 @@ describe('useDialogFocus guardKeys', () => {
     expect(behind).not.toHaveBeenCalled();
   });
 
-  it('suppresses only the repeated native click of a held Enter / Space', () => {
+  it('suppresses the native click of a held or modified Enter / Space, not of a plain press', () => {
     const { button } = setup(true);
     expect(fireEvent.keyDown(button, { key: 'Enter', repeat: true })).toBe(false);
     expect(fireEvent.keyDown(button, { key: ' ', repeat: true })).toBe(false);
+    expect(fireEvent.keyDown(button, { key: ' ', ctrlKey: true })).toBe(false);
+    expect(fireEvent.keyDown(button, { key: 'Enter', altKey: true })).toBe(false);
+    expect(fireEvent.keyDown(button, { key: ' ', shiftKey: true })).toBe(true);
     // A single press keeps its default action (the native button click).
     expect(fireEvent.keyDown(button, { key: 'Enter' })).toBe(true);
   });

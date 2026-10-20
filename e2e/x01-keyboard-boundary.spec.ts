@@ -171,6 +171,25 @@ test.describe('通常01・チェックアウト練習', () => {
     await expect(page.locator('.n01-left-table strong').nth(1)).toHaveText('501');
   });
 
+  test('修飾付きの Enter / Space ではフォーカス中のボタンが押されない', async ({ page }) => {
+    await start01(page);
+    await enterGameScore(page, 100);
+    await enterGameScore(page, 100);
+    await page.keyboard.press('m');
+    const undo = page.getByRole('button', { name: /直前の入力を戻す/ });
+    await undo.focus();
+    for (const chord of ['Control+Space', 'Alt+Space', 'Meta+Space', 'Control+Enter', 'Alt+Enter']) {
+      await page.keyboard.press(chord);
+    }
+    await expect(dialog(page)).toContainText('メニュー');
+    await expect(page.locator('.n01-left-table strong').nth(1)).toHaveText('401');
+
+    // A plain Space is still the button's own click.
+    await page.keyboard.press('Space');
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page.locator('.n01-left-table strong').nth(1)).toHaveText('501');
+  });
+
   test('IME 変換中・修飾付きのキーはダイアログを操作しない', async ({ page }) => {
     await start01(page);
     await page.keyboard.press('m');

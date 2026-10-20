@@ -33,7 +33,7 @@ interface Options {
    * commits a score on Enter. When set:
    *
    * - an IME keystroke, a held-key repeat or a Ctrl/Meta/Alt chord never closes the dialog or
-   *   reaches `onKeyDown` (a held Enter/Space on a focused button also has its repeated native
+   *   reaches `onKeyDown`, and as Enter/Space it does not click a focused button either (its native
    *   click suppressed);
    * - no keystroke aimed at the dialog reaches the screen behind it - including Tab, and including
    *   keys typed into the dialog's own fields, which are stopped only after React has handled them.
@@ -149,8 +149,9 @@ export function useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo, gua
       if (inOwnField) return;
 
       if (guardKeys && isInertKeystroke(event)) {
-        // No dialog action. A held Enter/Space would still repeat a focused button's native click.
-        if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault();
+        // No dialog action, and no native click of a focused button either: a held Enter/Space
+        // repeats that click, and Ctrl+Space clicks it.
+        if (event.key === 'Enter' || event.key === ' ') event.preventDefault();
         event.stopPropagation();
         return;
       }
