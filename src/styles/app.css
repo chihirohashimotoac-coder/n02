@@ -1625,6 +1625,49 @@ select:focus-visible {
   font-weight: 900;
   overflow: hidden;
 }
+/*
+ * The remaining number's roll (RemainingOdometer). These elements set no typography of their own -
+ * font, size, weight, stretch, numerals, letter-spacing, line height and colour all come from the
+ * <strong> they sit in - and <i> only needs its italic undone. The number stays one run of text in
+ * flow (made transparent while the reels run), in one inline-block whose box is exactly that line,
+ * and the reels sit over it out of flow: one equal column per tabular digit, clipped to the line.
+ */
+.remaining-odometer,
+.remaining-odometer-face,
+.remaining-odometer-reels,
+.remaining-odometer-window,
+.remaining-odometer-reel {
+  font-style: inherit;
+}
+.remaining-odometer {
+  position: relative;
+  display: inline-block;
+}
+.remaining-odometer-face {
+  opacity: 0;
+}
+.remaining-odometer-reels {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.remaining-odometer-window {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  /* Top and bottom only: with the tight letter-spacing a glyph overhangs its own column, and that
+     overhang has to stay drawn exactly as the real text draws it. */
+  clip-path: inset(0 -0.5em);
+}
+.remaining-odometer-reel {
+  position: absolute;
+  inset: 0 0 auto;
+  display: block;
+  white-space: pre;
+}
+.remaining-odometer-reel::before {
+  content: attr(data-reel);
+}
 .n01-menu-table {
   border-top: 1px solid var(--line);
   background: #26342d;
