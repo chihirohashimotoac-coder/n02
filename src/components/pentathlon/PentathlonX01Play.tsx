@@ -79,6 +79,8 @@ export default function PentathlonX01Play({
   // Shown inside the edit dialog: the play screen's own error banner sits behind it, where a
   // rejected correction would go unread.
   const [editError, setEditError] = useState<string | null>(null);
+  /** Same as 通常01: the 修正 field opens selected, unless a typed digit opened it. */
+  const editSelectOnFocus = useRef(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const current = session.current!;
@@ -253,6 +255,7 @@ export default function PentathlonX01Play({
         .reduce((left, earlier) => left - earlier.score, state.startScore);
       setSelected({ player, visitIndex });
       setEdit({ player, visitIndex, remainingBefore });
+      editSelectOnFocus.current = seedDigit === undefined;
       setEditScore(seedDigit ?? String(visit.entered ?? visit.score));
       setEditDarts(visit.darts);
       setEditError(null);
@@ -727,6 +730,9 @@ export default function PentathlonX01Play({
               inputMode="numeric"
               autoFocus
               value={editScore}
+              onFocus={(event) => {
+                if (editSelectOnFocus.current) event.currentTarget.select();
+              }}
               onChange={(event) => setEditScore(event.target.value)}
               onKeyDown={(event) => {
                 if (isInertKeystroke(event.nativeEvent)) return;

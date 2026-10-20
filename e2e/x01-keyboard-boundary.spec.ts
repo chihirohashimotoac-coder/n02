@@ -231,6 +231,25 @@ test.describe('通常01・チェックアウト練習', () => {
     await expect(remaining(page)).toHaveText('456');
   });
 
+  test('セルを押して開いた修正欄は、打った数字が元の得点を置き換える', async ({ page }) => {
+    await start01(page);
+    await enterGameScore(page, 12); // P1 -> 489
+    await page.locator('.n01-score-table td.scored button').first().click();
+    const field = dialog(page).locator('input[type="number"]');
+    await expect(field).toBeFocused();
+    await page.keyboard.type('45');
+    await expect(field).toHaveValue('45');
+    await page.keyboard.press('Enter');
+    await expect(remaining(page)).toHaveText('456');
+
+    // Opened by typing over a parked cell, the typed digit stays the first one.
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.type('6');
+    await expect(field).toHaveValue('6');
+    await page.keyboard.type('0');
+    await expect(field).toHaveValue('60');
+  });
+
   test('修正の失敗・取消・Undo のあとも次の得点が正しいプレイヤーに入る', async ({ page }) => {
     await start01(page);
     await enterGameScore(page, 60); // P1 -> 441
@@ -283,6 +302,18 @@ test.describe('ペンタスロン X01', () => {
     await expect(remaining(page)).toHaveText('401');
     await expect(liveCell(page)).toHaveValue('5');
     expect(await storageSnapshot(page)).toBe(before);
+  });
+
+  test('R で開いた修正欄は、打った数字が元の得点を置き換える', async ({ page }) => {
+    await startPent501(page);
+    await enterPentScore(page, 12);
+    await page.keyboard.press('r');
+    const field = dialog(page).locator('input[type="number"]');
+    await expect(field).toHaveValue('12');
+    await page.keyboard.type('45');
+    await expect(field).toHaveValue('45');
+    await page.keyboard.press('Enter');
+    await expect(remaining(page)).toHaveText('456');
   });
 
   test('メニューは 1 が Undo のまま、U は割り当てなし', async ({ page }) => {

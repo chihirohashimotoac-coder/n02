@@ -48,6 +48,12 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
    * its backdrop where the player cannot read it.
    */
   const [editError, setEditError] = useState<string | null>(null);
+  /**
+   * Whether the 修正 field opens with its value selected, so typing replaces the old score instead
+   * of being appended to it. Not when the editor was opened by typing a digit over a parked cell:
+   * that digit is already the first one of the new score.
+   */
+  const editSelectOnFocus = useRef(true);
   const [remainingEntryMode, setRemainingEntryMode] = useState(false);
   /** 使用ダーツ for the visit being entered - 3 unless the player says otherwise, reset after each visit. */
   const [dartsUsed, setDartsUsed] = useState(3);
@@ -260,6 +266,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
       if (!visit) return;
       setSelectedVisit(index);
       setEditIndex(index);
+      editSelectOnFocus.current = seedDigit === undefined;
       setEditScore(seedDigit ?? String(visit.score));
       setEditDarts(visit.darts);
       setEditError(null);
@@ -933,6 +940,9 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
               inputMode="numeric"
               autoFocus
               value={editScore}
+              onFocus={(event) => {
+                if (editSelectOnFocus.current) event.currentTarget.select();
+              }}
               onChange={(event) => setEditScore(event.target.value)}
               onKeyDown={(event) => {
                 if (isInertKeystroke(event.nativeEvent)) return;
