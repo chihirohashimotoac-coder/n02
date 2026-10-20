@@ -180,3 +180,8 @@ body.is-busy .busy-indicator { display: block; }
   .match-editor__player--2 { flex-direction: row-reverse; }
   .match-editor__player--2 span { text-align: left; }
 }
+
+/* 運営用 URL の発行画面 */
+.issued { display: grid; gap: 12px; border-color: var(--accent); }
+.issued__warn { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--check-bg); color: var(--check); font-weight: 700; }
+.issued__url { display: block; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; overflow-wrap: anywhere; user-select: all; }

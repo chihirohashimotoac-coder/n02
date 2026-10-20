@@ -8,9 +8,10 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const check = process.argv.includes('--check');
 
+// admin は API だけの Web アプリ（画面は GitHub Pages の dist/pages/admin/）。viewer は画面も持つ
 const APPS = {
-  admin: { label: '運営者用', css: 'admin.css', js: 'admin.js' },
-  viewer: { label: '閲覧者用', css: 'viewer.css', js: 'viewer.js' },
+  admin: { label: '運営用', html: false },
+  viewer: { label: '閲覧者用', html: true, css: 'viewer.css', js: 'viewer.js' },
 };
 
 function read(path) {
@@ -26,6 +27,12 @@ function buildApp(name, spec) {
     `// ==== n02 Tournament PoC ${spec.label} Web アプリ / Code.gs ====\n` +
     `// このファイルは tools/build.mjs が ${serverDir}/*.js から生成したものです。直接編集しないでください。\n`;
   const code = header + files.map((f) => `\n// ---- ${f} ----\n` + read(`${serverDir}/${f}`)).join('');
+  if (!spec.html) {
+    return {
+      [`dist/${name}/Code.gs`]: code,
+      [`dist/${name}/appsscript.json`]: read(`${name}/appsscript.json`),
+    };
+  }
 
   const template = read(`${name}/src/client/index.html`);
   const css = read(`${name}/src/client/${spec.css}`);
@@ -49,18 +56,17 @@ function buildApp(name, spec) {
  * 通信だけを config.js の endpoint（閲覧者用 Web アプリの ?format=json）への fetch に切り替える。
  * インラインのスクリプトを持たないので、CSP で script-src 'self' に絞れる。
  */
-function buildPages() {
-  const template = read('viewer/src/client/index.html');
+function toStaticPage(templatePath, css, js, connect) {
   const csp = [
     "default-src 'none'",
     "script-src 'self'",
     "style-src 'self'",
     "img-src 'self' data:",
-    'connect-src https://script.google.com https://script.googleusercontent.com',
+    `connect-src ${connect}`,
     "base-uri 'none'",
     "form-action 'none'",
   ].join('; ');
-  let html = template
+  const html = read(templatePath)
     .replace('    <base target="_top" />\n', '')
     .replace(
       '<meta name="viewport" content="width=device-width, initial-scale=1" />',
@@ -68,16 +74,31 @@ function buildPages() {
         `    <meta http-equiv="Content-Security-Policy" content="${csp}" />\n` +
         '    <meta name="referrer" content="no-referrer" />'
     )
-    .replace(/<style>\s*\/\*@@STYLES@@\*\/\s*<\/style>/, '<link rel="stylesheet" href="viewer.css" />')
-    .replace(/<script>\s*\/\*@@SCRIPT@@\*\/\s*<\/script>/, '<script src="config.js"></script>\n    <script src="viewer.js"></script>');
-  if (html.includes('@@') || html.includes('<base')) throw new Error('pages template not converted');
+    .replace(/<style>\s*\/\*@@STYLES@@\*\/\s*<\/style>/, `<link rel="stylesheet" href="${css}" />`)
+    .replace(/<script>\s*\/\*@@SCRIPT@@\*\/\s*<\/script>/, `<script src="config.js"></script>\n    <script src="${js}"></script>`);
+  if (html.includes('@@') || html.includes('<base')) throw new Error('pages template not converted: ' + templatePath);
+  return html;
+}
+
+/**
+ * GitHub Pages に置く静的ページ（Google の外）。
+ * - 閲覧ページ（ルート）: 閲覧者用 Web アプリの ?format=json を fetch で読む
+ * - 運営ページ（admin/）: 運営用 Web アプリへ fetch（POST）で操作を送る
+ * どちらもインラインのスクリプトを持たないので、CSP で script-src 'self' に絞れる。
+ */
+function buildPages() {
+  const connect = 'https://script.google.com https://script.googleusercontent.com';
   const header = '/* このファイルは tools/build.mjs が生成したものです。直接編集しないでください。 */\n';
   return {
-    'dist/pages/index.html': html,
+    'dist/pages/index.html': toStaticPage('viewer/src/client/index.html', 'viewer.css', 'viewer.js', connect),
     'dist/pages/viewer.css': header + read('viewer/src/client/viewer.css'),
     'dist/pages/viewer.js': header + read('viewer/src/client/viewer.js'),
     'dist/pages/config.example.js': read('viewer/src/pages/config.example.js'),
     'dist/pages/README.md': read('viewer/src/pages/README.md'),
+    'dist/pages/admin/index.html': toStaticPage('admin/src/client/index.html', 'admin.css', 'admin.js', connect),
+    'dist/pages/admin/admin.css': header + read('admin/src/client/admin.css'),
+    'dist/pages/admin/admin.js': header + read('admin/src/client/admin.js'),
+    'dist/pages/admin/config.example.js': read('admin/src/pages/config.example.js'),
   };
 }
 

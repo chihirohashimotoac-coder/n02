@@ -4,7 +4,7 @@
 // 注意: これは Google の実装ではない。仕様として確認できている範囲の動作を真似たもので、
 // 実環境での動作確認（docs/test-plan.md の「実環境」項目）の代わりにはならない。
 import vm from 'node:vm';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -326,7 +326,8 @@ export function loadProject(app, options = {}) {
   };
   project.properties = createProperties(options.properties);
   project.cache = createCache(clock);
-  const html = readFileSync(join(ROOT, 'dist', app, 'Index.html'), 'utf8');
+  const htmlPath = join(ROOT, 'dist', app, 'Index.html');
+  const html = existsSync(htmlPath) ? readFileSync(htmlPath, 'utf8') : null;
 
   const htmlOutput = (content) => {
     const out = {
@@ -423,10 +424,12 @@ export function loadProject(app, options = {}) {
     },
     Utilities: {
       getUuid: () => randomUUID(),
-      DigestAlgorithm: { MD5: 'MD5' },
+      DigestAlgorithm: { MD5: 'MD5', SHA_256: 'SHA_256' },
       Charset: { UTF_8: 'UTF_8' },
       computeDigest(alg, text) {
-        return Array.from(createHash('md5').update(text, 'utf8').digest()).map((b) => (b > 127 ? b - 256 : b));
+        const algo = { MD5: 'md5', SHA_256: 'sha256' }[alg];
+        if (!algo) throw new Error('unsupported digest ' + alg);
+        return Array.from(createHash(algo).update(text, 'utf8').digest()).map((b) => (b > 127 ? b - 256 : b));
       },
     },
     ContentService: {
@@ -446,7 +449,7 @@ export function loadProject(app, options = {}) {
     },
     HtmlService: {
       createHtmlOutputFromFile(name) {
-        if (name !== 'Index') throw new Error('No HTML file named ' + name);
+        if (name !== 'Index' || html === null) throw new Error('No HTML file named ' + name);
         return htmlOutput(html);
       },
       createHtmlOutput: (content) => htmlOutput(content),
@@ -480,19 +483,31 @@ export function loadProject(app, options = {}) {
     const res = f(...JSON.parse(JSON.stringify(args)));
     return res === undefined ? undefined : JSON.parse(JSON.stringify(res));
   };
+  /** 運営用 Web アプリの doPost を、fetch で JSON を送ったときと同じ形で呼ぶ */
+  project.post = (request) => {
+    const body = typeof request === 'string' ? request : JSON.stringify(request);
+    const out = project.run('doPost', { postData: { contents: body, type: 'text/plain' } });
+    if (!out || out.mimeType !== 'application/json') throw new Error('doPost must return JSON');
+    return JSON.parse(out.text);
+  };
   return project;
 }
+
+export const ADMIN_KEY = 'test-admin-key-0123456789-abcdefghij';
 
 /** 運営者用・閲覧者用の 2 プロジェクトを同じスプレッドシートにつないで用意する */
 export function setupPair(options = {}) {
   const store = options.store || createStore();
   const clock = options.clock || createClock();
   if (!store.get()) store.add();
-  const admin = loadProject('admin', { store, clock, properties: { SPREADSHEET_ID }, ...options.admin });
+  const admin = loadProject('admin', { store, clock, properties: { SPREADSHEET_ID, ADMIN_KEY }, ...options.admin });
   const viewer = loadProject('viewer', { store, clock, properties: { SPREADSHEET_ID }, activeUser: '', ...options.viewer });
   let n = 0;
-  const call = (action, payload = {}, extra = {}) =>
-    admin.run('adminCall', { action, payload, requestId: extra.requestId || `test-request-${String(++n).padStart(8, '0')}`, ...extra.request });
+  // extra.auth: 省略 = 管理者 / 'anon' = 未認証 / { eventId, key } = 主催者 / { adminKey } など任意
+  const call = (action, payload = {}, extra = {}) => {
+    const auth = extra.auth === undefined ? { adminKey: ADMIN_KEY } : extra.auth === 'anon' ? undefined : extra.auth;
+    return admin.post({ action, payload, requestId: extra.requestId || `test-request-${String(++n).padStart(8, '0')}`, auth, ...extra.request });
+  };
   const ok = (action, payload, extra) => {
     const res = call(action, payload, extra);
     if (!res.ok) throw new Error(`${action} failed: ${res.error.code} ${res.error.message}`);

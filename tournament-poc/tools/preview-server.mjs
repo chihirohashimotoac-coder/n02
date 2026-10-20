@@ -9,7 +9,7 @@
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createStore, loadProject, ROOT, SPREADSHEET_ID } from '../tests/gas-mock.mjs';
+import { createStore, loadProject, ROOT, SPREADSHEET_ID, ADMIN_KEY } from '../tests/gas-mock.mjs';
 
 const PORT = Number(process.env.PORT || 4180);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -23,7 +23,7 @@ function reset({ configured = false } = {}) {
   env = {
     store,
     fault: { viewer: 'ok', admin: 'ok' },
-    admin: loadProject('admin', { store, clock, owner: OWNER, activeUser: OWNER, properties: configured ? { SPREADSHEET_ID } : {} }),
+    admin: loadProject('admin', { store, clock, owner: OWNER, activeUser: OWNER, properties: configured ? { SPREADSHEET_ID, ADMIN_KEY } : { ADMIN_KEY } }),
     viewer: loadProject('viewer', { store, clock, owner: OWNER, activeUser: '', properties: { SPREADSHEET_ID } }),
   };
 }
@@ -80,20 +80,41 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/') {
       return send(res, 200, 'text/html; charset=utf-8', `<!doctype html><meta charset="utf-8"><title>n02 Tournament PoC preview</title>
 <h1>n02 Tournament PoC（ローカル確認用・Google 非接続）</h1>
-<ul><li><a href="/admin">運営者用画面</a></li><li><a href="/viewer">閲覧者用画面</a></li>
-<li><a href="/admin?as=anonymous">運営者用画面に匿名でアクセスした場合</a></li></ul>`);
+<p>運営画面（/pages/admin/）と閲覧ページ（/pages/）は、Apps Script への通信を画面テストで振り替えて動かします。</p>
+<ul><li><a href="/viewer">閲覧者用画面（Apps Script の画面）</a></li></ul>`);
     }
     if (req.method === 'GET' && url.pathname === '/__gas-shim.js') return send(res, 200, 'text/javascript; charset=utf-8', SHIM);
     // GitHub Pages 用の閲覧ページ（dist/pages）。endpoint は架空の script.google.com の URL にしてあり、
     // 画面テストではブラウザ側でその通信を /viewer-json に振り替える（CSP をそのまま検証するため）。
     if (req.method === 'GET' && url.pathname.startsWith('/pages/')) {
-      const name = url.pathname.slice('/pages/'.length) || 'index.html';
+      let name = url.pathname.slice('/pages/'.length);
+      if (name === '' || name.endsWith('/')) name += 'index.html';
       if (name === 'config.js') {
         return send(res, 200, 'text/javascript; charset=utf-8', "window.TPOC_CONFIG = { endpoint: 'https://script.google.com/macros/s/PREVIEW/exec' };");
       }
-      const types = { 'index.html': 'text/html; charset=utf-8', 'viewer.css': 'text/css; charset=utf-8', 'viewer.js': 'text/javascript; charset=utf-8' };
+      if (name === 'admin/config.js') {
+        return send(res, 200, 'text/javascript; charset=utf-8', "window.TPOC_ADMIN_CONFIG = { endpoint: 'https://script.google.com/macros/s/PREVIEW-ADMIN/exec' };");
+      }
+      const types = {
+        'index.html': 'text/html; charset=utf-8',
+        'viewer.css': 'text/css; charset=utf-8',
+        'viewer.js': 'text/javascript; charset=utf-8',
+        'admin/index.html': 'text/html; charset=utf-8',
+        'admin/admin.css': 'text/css; charset=utf-8',
+        'admin/admin.js': 'text/javascript; charset=utf-8',
+      };
       if (!types[name]) return send(res, 404, 'text/plain', 'not found');
       return send(res, 200, types[name], readFileSync(join(ROOT, 'dist', 'pages', name), 'utf8'));
+    }
+    // 運営用 Web アプリの doPost と同じ処理（本文は fetch で送られた JSON 文字列のまま渡す）
+    if (req.method === 'POST' && url.pathname === '/admin-post') {
+      if (env.fault.admin === 'fail') return send(res, 503, 'text/html; charset=utf-8', '<html>Service Unavailable</html>');
+      const text = await new Promise((resolve) => {
+        let data = '';
+        req.on('data', (c) => (data += c));
+        req.on('end', () => resolve(data));
+      });
+      return send(res, 200, 'application/json', JSON.stringify(env.admin.post(text)));
     }
     // 閲覧者用 Web アプリの ?format=json と同じ処理（doGet）
     if (req.method === 'GET' && url.pathname === '/viewer-json') {
@@ -101,7 +122,7 @@ const server = http.createServer(async (req, res) => {
       const out = env.viewer.fn('doGet')({ parameter: Object.fromEntries(url.searchParams) });
       return send(res, 200, 'application/json', out.getContent());
     }
-    if (req.method === 'GET' && (url.pathname === '/admin' || url.pathname === '/viewer')) {
+    if (req.method === 'GET' && url.pathname === '/viewer') {
       const app = url.pathname.slice(1);
       // doGet と同じ判定を通す（運営者用は権限がなければアプリの HTML を返さない）
       const project = env[app];
@@ -141,6 +162,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/__fault') {
       const { app, mode } = await body(req);
       env.fault[app] = mode;
+      return send(res, 200, 'application/json', '{"ok":true}');
+    }
+    if (req.method === 'POST' && url.pathname === '/__set-admin-property') {
+      const { key, value } = await body(req);
+      env.admin.properties.setProperty(key, value);
       return send(res, 200, 'application/json', '{"ok":true}');
     }
     if (req.method === 'POST' && url.pathname === '/__expire-viewer-cache') {

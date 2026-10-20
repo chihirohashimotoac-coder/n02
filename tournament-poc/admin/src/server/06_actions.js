@@ -1,18 +1,27 @@
-/* 運営者用 API の各操作。adminCall から、認可・ロック・二重送信チェックの後に呼ばれる。 */
+/* 運営用 API の各操作。doPost から、認証・認可・ロック・二重送信チェックの後に呼ばれる。 */
 
 var SAMPLE_GROUP_COUNT_ = 4;
 var SAMPLE_PLAYER_COUNT_ = 16;
 
 /* ---------- 読み取り ---------- */
 
+/**
+ * 画面の初期表示に必要な情報。誰が呼んだかで返す範囲を変える。
+ * - 未認証: 保存先の準備ができているか・作成コードが必要か・閲覧者用 URL だけ
+ * - 主催者: 自分の大会 1 件
+ * - 管理者: 保存先の詳細と全大会
+ */
 function actionBootstrap_(ctx) {
+  var user = ctx.user;
   var storage = getStorageStatus_();
   var events = [];
-  if (storage.initialized) {
-    var c = createContext_(openStorage_(), ctx.actor);
+  if (storage.initialized && user.kind !== 'anonymous') {
+    var c = createContext_(openStorage_(), ctx.actor, user);
     var matches = c.table('Matches').rows;
     var players = c.table('Players').rows;
-    events = c.table('Events').rows.map(function (e) {
+    events = c.table('Events').rows.filter(function (e) {
+      return user.isPlatformAdmin || e.event_id === user.eventId;
+    }).map(function (e) {
       var ms = matches.filter(function (m) {
         return m.event_id === e.event_id;
       });
@@ -32,17 +41,28 @@ function actionBootstrap_(ctx) {
           return m.status === MATCH_STATUS.FINAL;
         }).length,
         updatedAt: e.updated_at,
+        organizerName: user.isPlatformAdmin ? e.organizer_name : undefined,
+        hasKey: user.isPlatformAdmin ? !!e.admin_key_hash : undefined,
       };
     });
   }
   var props = PropertiesService.getScriptProperties();
+  if (!user.isPlatformAdmin) {
+    // 保存先の情報は管理者にだけ見せる
+    storage = {
+      configured: storage.configured,
+      accessible: storage.accessible,
+      initialized: storage.initialized,
+      message: storage.initialized ? '' : '準備中です。管理者の設定が終わるまでお待ちください。',
+    };
+  }
   return {
     appVersion: ADMIN_CONFIG.APP_VERSION,
-    actor: ctx.actor,
+    role: { kind: user.kind, isPlatformAdmin: user.isPlatformAdmin, eventId: user.eventId },
+    createCodeRequired: createCodeRequired_(),
     storage: storage,
     events: events,
     viewerUrl: props.getProperty('VIEWER_URL') || '',
-    adminEmailsConfigured: !!props.getProperty('ADMIN_EMAILS'),
   };
 }
 
@@ -94,7 +114,7 @@ function actionConfigureStorage_(ctx, payload) {
 function actionInitializeStorage_(ctx) {
   var ss = openStorage_();
   var result = initializeStorage_(ss);
-  var c = createContext_(ss, ctx.actor);
+  var c = createContext_(ss, ctx.actor, ctx.user);
   recordHistory_(c, 'storage.initialize', 'Storage', '', '', null, result);
   flushHistory_(c);
   var boot = actionBootstrap_(ctx);
@@ -150,6 +170,9 @@ function createEventRecords_(ctx, input) {
     is_featured: false,
     rule_id: ruleId,
     is_sample: !!input.isSample,
+    organizer_name: input.organizerName || '',
+    admin_key_hash: '',
+    admin_key_issued_at: '',
     notes: '',
     rev: 1,
     created_at: ctx.now,
@@ -197,24 +220,65 @@ function createEventRecords_(ctx, input) {
       updated_at: ctx.now,
     });
   }
+  // 運営用の鍵はここで 1 回だけ平文で返し、シートにはハッシュだけを残す
+  var adminKey = newEventKey_();
+  event.admin_key_hash = eventKeyHash_(eventId, adminKey);
+  event.admin_key_issued_at = ctx.now;
   appendRecords_(events, [event]);
   appendRecords_(ctx.table('Rules'), [rule]);
   appendRecords_(ctx.table('Stages'), [stage]);
   appendRecords_(groupTable, groups);
   ctx.invalidate();
-  recordHistory_(ctx, 'event.create', 'Event', eventId, eventId, null, { event: event, rule: rule, groups: groups.length });
-  return { event: event, rule: rule, stage: stage, groups: groups };
+  var logged = plain_(event);
+  delete logged.admin_key_hash;
+  recordHistory_(ctx, 'event.create', 'Event', eventId, eventId, null, { event: logged, rule: rule, groups: groups.length, by: ctx.user ? ctx.user.label : '' });
+  return { event: event, rule: rule, stage: stage, groups: groups, adminKey: adminKey };
+}
+
+/** 大会作成の権限（作成コード）と上限（全体の大会数・1 時間あたりの作成数）。管理者は対象外 */
+function assertCreateAllowed_(ctx, payload) {
+  assertCanCreate_(ctx.user, payload.createCode);
+  if (ctx.user.isPlatformAdmin) return;
+  if (ctx.table('Events').rows.length >= ADMIN_CONFIG.MAX_EVENTS_TOTAL) {
+    throw appError_('LIMIT', '大会の登録数が上限に達しています。管理者に連絡してください。');
+  }
+  var cache = CacheService.getScriptCache();
+  var bucket = 'creates:' + Math.floor(Date.now() / 3600000);
+  var count = Number(cache.get(bucket) || 0);
+  if (count >= ADMIN_CONFIG.MAX_CREATES_PER_HOUR) {
+    throw appError_('LIMIT', '短時間に多くの大会が作成されたため、一時的に作成を止めています。しばらくしてからお試しください。');
+  }
+  // 書き込みはスクリプトロックの中なので、数え間違いは起きない
+  cache.put(bucket, String(count + 1), 3600);
 }
 
 function actionCreateEvent_(ctx, payload) {
+  assertCreateAllowed_(ctx, payload);
   var created = createEventRecords_(ctx, {
+    organizerName: cleanText_(payload.organizerName, '主催者名', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
     name: cleanText_(payload.name, '大会名', ADMIN_CONFIG.MAX_EVENT_NAME_LENGTH),
     dateLabel: cleanText_(payload.dateLabel, '開催日', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
     bestOf: parseBestOf_(payload.bestOf),
     provisional: payload.provisional === undefined ? true : requireBool_(payload.provisional, '暫定ルール'),
     groupCount: parseGroupCount_(payload.groupCount),
   });
-  return { eventId: created.event.event_id };
+  return { eventId: created.event.event_id, adminKey: created.adminKey };
+}
+
+/** 運営用 URL の再発行。古い URL はすぐに使えなくなる */
+function actionRotateKey_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var events = ctx.table('Events');
+  var event = findRecord_(events, eventId, '大会');
+  assertRev_(event, requireRev_(payload.rev), '大会');
+  var adminKey = newEventKey_();
+  event.admin_key_hash = eventKeyHash_(eventId, adminKey);
+  event.admin_key_issued_at = ctx.now;
+  event.rev = (event.rev || 0) + 1;
+  event.updated_at = ctx.now;
+  updateRecord_(events, event);
+  recordHistory_(ctx, 'event.rotateKey', 'Event', eventId, eventId, null, { issuedAt: ctx.now, by: ctx.user.label });
+  return { eventId: eventId, adminKey: adminKey };
 }
 
 function actionUpdateEvent_(ctx, payload) {
@@ -230,7 +294,12 @@ function actionUpdateEvent_(ctx, payload) {
   event.notes = cleanText_(payload.notes, 'メモ', ADMIN_CONFIG.MAX_NOTE_LENGTH, { allowEmpty: true });
   event.status = status;
   event.is_public = requireBool_(payload.isPublic, '公開設定');
-  event.is_featured = event.is_public && requireBool_(payload.isFeatured, '既定表示');
+  // 閲覧画面の既定表示（URL に大会指定がないときの表示）はプラットフォーム全体の設定なので、管理者だけが変えられる
+  if (ctx.user.isPlatformAdmin) {
+    event.is_featured = event.is_public && requireBool_(payload.isFeatured, '既定表示');
+  } else {
+    event.is_featured = event.is_public && event.is_featured;
+  }
   event.rev = (event.rev || 0) + 1;
   event.updated_at = ctx.now;
   updateRecord_(events, event);
@@ -619,6 +688,8 @@ function actionGenerateMatches_(ctx, payload) {
 function actionClearMatches_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   var gid = requireId_(payload.groupId, 'グループ');
+  var group = findRecord_(ctx.table('Groups'), gid, 'グループ');
+  if (group.event_id !== eventId) throw appError_('NOT_FOUND', 'グループが見つかりません。');
   var matchesTable = ctx.table('Matches');
   var targets = matchesTable.rows.filter(function (m) {
     return m.event_id === eventId && m.group_id === gid;
@@ -699,8 +770,10 @@ function actionRepublish_(ctx, payload) {
  * 選手名は架空の「サンプル選手01〜16」。結果は表示確認用に、確定・進行中・未開始を混ぜて入れる。
  */
 function actionCreateSampleEvent_(ctx, payload) {
+  assertCreateAllowed_(ctx, payload);
   var publish = payload.publish === true;
   var created = createEventRecords_(ctx, {
+    organizerName: cleanText_(payload.organizerName, '主催者名', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
     name: 'サンプル大会（PoC 検証用）',
     dateLabel: '日付未定',
     bestOf: 5,
@@ -780,5 +853,5 @@ function actionCreateSampleEvent_(ctx, payload) {
     ctx.invalidate();
   }
   recordHistory_(ctx, 'event.sample', 'Event', eventId, eventId, null, { players: names.length, matches: matches.length, publish: publish });
-  return { eventId: eventId };
+  return { eventId: eventId, adminKey: created.adminKey };
 }

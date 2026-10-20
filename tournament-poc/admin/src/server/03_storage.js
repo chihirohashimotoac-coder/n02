@@ -295,11 +295,12 @@ function getStorageStatus_() {
 }
 
 /** 1 リクエスト内でテーブルの読み込みを使い回すための入れ物 */
-function createContext_(ss, actor) {
+function createContext_(ss, actor, user) {
   var cache = {};
   return {
     ss: ss,
     actor: actor,
+    user: user || null,
     now: nowIso_(),
     history: [],
     table: function (name) {

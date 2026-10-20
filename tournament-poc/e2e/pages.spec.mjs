@@ -1,18 +1,11 @@
 // GitHub Pages 用の閲覧ページ（dist/pages）。Google の外から ?format=json を fetch で読む方式の確認
 import { test, expect } from '@playwright/test';
-import { publishedSample, setFault, expectNoHorizontalOverflow } from './helpers.mjs';
+import { publishedSample, setFault, expectNoHorizontalOverflow, routeAppsScript, VIEWER_ENDPOINT } from './helpers.mjs';
 
-const ENDPOINT = 'https://script.google.com/macros/s/PREVIEW/exec';
+const ENDPOINT = VIEWER_ENDPOINT;
 
-/** script.google.com への通信をローカルの /viewer-json に振り替え、送られた Cookie を記録する */
 async function routeToPreview(page, request, seen) {
-  await page.route(`${ENDPOINT}**`, async (route) => {
-    const headers = await route.request().allHeaders();
-    seen.push({ url: route.request().url(), cookie: headers.cookie || '' });
-    const u = new URL(route.request().url());
-    const r = await request.get(`/viewer-json${u.search}`);
-    await route.fulfill({ status: r.status(), contentType: r.headers()['content-type'], body: await r.text(), headers: { 'access-control-allow-origin': '*' } });
-  });
+  await routeAppsScript(page, request, seen);
 }
 
 test('Google にログインしていても（Cookie があっても）送らずに表示する。CSP 違反なし', async ({ page, context, request }) => {

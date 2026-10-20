@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'none'; form-action 'none'" />
+    <meta name="referrer" content="no-referrer" />
+    <title>n02 Tournament 運営</title>
+    <link rel="stylesheet" href="admin.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__inner">
+        <div>
+          <p class="brand">n02 Tournament</p>
+          <h1 class="topbar__title">運営画面</h1>
+        </div>
+        <p class="topbar__who"><span class="visually-hidden">ログイン中: </span><span id="actor"></span></p>
+      </div>
+    </header>
+    <main id="app" class="content"></main>
+    <div id="toast" class="toast-box" aria-live="polite"></div>
+    <div class="busy-indicator" aria-hidden="true">保存中…</div>
+    <script src="config.js"></script>
+    <script src="admin.js"></script>
+  </body>
+</html>

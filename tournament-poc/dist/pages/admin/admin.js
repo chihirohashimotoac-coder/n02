@@ -1,210 +1,4 @@
-<!doctype html>
-<html lang="ja">
-  <head>
-    <base target="_top" />
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>n02 Tournament 運営</title>
-    <style>
-:root {
-  --bg: #f4f3ee;
-  --surface: #ffffff;
-  --surface-2: #f0efe9;
-  --ink: #1b1f1d;
-  --ink-2: #555e5a;
-  --line: #d9d7cf;
-  --brand: #0d503a;
-  --brand-ink: #ffffff;
-  --accent: #b5401f;
-  --danger: #a31d1d;
-  --live: #a45a00;
-  --live-bg: #fff1dc;
-  --final: #0d503a;
-  --final-bg: #e1f1e9;
-  --sched-bg: #ecebe6;
-  --check: #8a1c1c;
-  --check-bg: #fbe3e3;
-  --radius: 12px;
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111513;
-    --surface: #1a1f1d;
-    --surface-2: #222826;
-    --ink: #eef1ef;
-    --ink-2: #aab4af;
-    --line: #333b38;
-    --brand: #1f7a5a;
-    --accent: #ff8a65;
-    --danger: #ff8f8f;
-    --live: #ffc46b;
-    --live-bg: #3a2c12;
-    --final: #7fe0b3;
-    --final-bg: #163329;
-    --sched-bg: #262c2a;
-    --check: #ff9c9c;
-    --check-bg: #3b1d1d;
-    color-scheme: dark;
-  }
-}
-
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-}
-h2, h3 { margin: 0 0 10px; line-height: 1.3; }
-h2 { font-size: 20px; }
-h3 { font-size: 17px; }
-p { margin: 0 0 8px; }
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.muted { color: var(--ink-2); }
-.small { font-size: 13px; }
-.error { color: var(--danger); }
-
-.topbar { background: var(--brand); color: var(--brand-ink); padding: 12px 16px; }
-.topbar__inner { max-width: 1100px; margin: 0 auto; display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
-.brand { margin: 0; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; opacity: .8; }
-.topbar__title { margin: 0; font-size: 20px; }
-.topbar__who { margin: 0; font-size: 13px; opacity: .9; overflow-wrap: anywhere; }
-
-.content { max-width: 1100px; margin: 0 auto; padding: 16px 16px 64px; }
-.stack { display: grid; gap: 14px; }
-.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; min-width: 0; }
-.panel--tight { padding: 10px 12px; display: grid; gap: 8px; }
-
-.form { display: grid; gap: 12px; max-width: 560px; }
-.field { display: grid; gap: 4px; }
-.field__label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
-.check { display: flex; align-items: center; gap: 8px; }
-.check input { width: 20px; height: 20px; }
-.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.row .input { flex: 1 1 220px; }
-
-.input {
-  font: inherit;
-  min-height: 42px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--ink);
-  width: 100%;
-  min-width: 0;
-}
-.input--short { width: 6em; flex: 0 0 auto !important; }
-textarea.input { min-height: 110px; }
-
-.btn {
-  font: inherit;
-  font-size: 15px;
-  font-weight: 600;
-  min-height: 42px;
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--surface-2);
-  color: var(--ink);
-  cursor: pointer;
-}
-.btn--primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
-.btn--ghost { background: transparent; }
-.btn--danger { color: var(--danger); border-color: var(--danger); background: transparent; }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn:focus-visible, .tab:focus-visible, .chip:focus-visible, .input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-.btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
-
-.badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; margin-right: 6px; border-radius: 999px; background: var(--sched-bg); color: var(--ink-2); }
-.badge--on { background: var(--final-bg); color: var(--final); }
-
-.event-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
-.event-card h3 { margin-bottom: 4px; overflow-wrap: anywhere; }
-.event-card__main { min-width: 0; }
-
-.event-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.event-head__title { margin: 0; overflow-wrap: anywhere; }
-
-.tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
-.tab { font: inherit; font-size: 15px; padding: 10px 14px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
-.tab[aria-current='page'] { color: var(--ink); border-bottom-color: var(--brand); font-weight: 700; }
-
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { font: inherit; font-size: 14px; min-height: 36px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
-.chip[aria-pressed='true'] { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
-
-.meter { height: 10px; border-radius: 999px; background: var(--sched-bg); overflow: hidden; margin-bottom: 8px; }
-.meter__bar { height: 100%; background: var(--brand); }
-.table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.table th, .table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
-.table thead th { font-size: 12px; color: var(--ink-2); }
-
-.match-editor { border-top: 1px solid var(--line); padding: 12px 0; display: grid; gap: 8px; }
-.match-editor--live { box-shadow: inset 3px 0 0 var(--live); padding-left: 10px; }
-.match-editor__meta { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--ink-2); }
-.match-editor__row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; }
-.match-editor__player { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
-.match-editor__player span { overflow-wrap: anywhere; font-weight: 600; }
-.match-editor__player--2 span { text-align: right; }
-.match-editor__vs { color: var(--ink-2); font-size: 13px; }
-.match-editor__winner { font-weight: 700; color: var(--final); margin: 0; }
-.match-editor__msg { color: var(--danger); font-size: 14px; margin: 0; }
-.match-editor__msg:empty { display: none; }
-.legs-input { font: inherit; font-size: 22px; font-weight: 700; width: 3.2em; min-height: 48px; text-align: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); flex: none; }
-.legs-input:disabled { background: var(--surface-2); }
-
-.status { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
-.status--scheduled { background: var(--sched-bg); color: var(--ink-2); }
-.status--live { background: var(--live-bg); color: var(--live); }
-.status--final { background: var(--final-bg); color: var(--final); }
-.status--check { background: var(--check-bg); color: var(--check); }
-
-.player-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
-.player-row .btn-row { grid-column: 1 / -1; }
-@media (min-width: 720px) {
-  .player-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; }
-  .player-row .btn-row { grid-column: auto; }
-}
-
-.history { list-style: none; margin: 0; padding: 0; }
-.history li { display: grid; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
-
-.toast-box { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: grid; gap: 8px; width: min(560px, calc(100% - 32px)); z-index: 10; }
-.toast { padding: 10px 14px; border-radius: 10px; background: var(--ink); color: var(--bg); font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
-.toast--error { background: var(--danger); color: #fff; }
-.busy-indicator { position: fixed; top: 10px; right: 10px; padding: 4px 10px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 13px; display: none; z-index: 11; }
-body.is-busy .busy-indicator { display: block; }
-
-/* スマートフォン: 選手ごとに「名前 … Leg 入力」の 1 行にする */
-@media (max-width: 560px) {
-  .match-editor__row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .match-editor__vs { display: none; }
-  .match-editor__player--2 { flex-direction: row-reverse; }
-  .match-editor__player--2 span { text-align: left; }
-}
-
-    </style>
-  </head>
-  <body>
-    <header class="topbar">
-      <div class="topbar__inner">
-        <div>
-          <p class="brand">n02 Tournament</p>
-          <h1 class="topbar__title">運営画面</h1>
-        </div>
-        <p class="topbar__who"><span class="visually-hidden">ログイン中: </span><span id="actor"></span></p>
-      </div>
-    </header>
-    <main id="app" class="content"></main>
-    <div id="toast" class="toast-box" aria-live="polite"></div>
-    <div class="busy-indicator" aria-hidden="true">保存中…</div>
-    <script>
+/* このファイルは tools/build.mjs が生成したものです。直接編集しないでください。 */
 /* n02 Tournament PoC - 運営画面（クライアント側） */
 (function (global) {
   'use strict';
@@ -324,13 +118,90 @@ body.is-busy .busy-indicator { display: block; }
     };
   }
 
+  /* ---------- 運営用 URL（#e=…&k=…）と通信 ---------- */
+
+  var EVENT_ID_PATTERN = /^EVT-[A-Z0-9]{4,32}$/;
+  var EVENT_KEY_PATTERN = /^[a-f0-9]{48,64}$/;
+  var ENDPOINT_PATTERN = /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/;
+
+  /**
+   * URL の # 以降を読む。# 以降はサーバー（GitHub Pages）にも送られず、リンク先への Referer にも含まれない。
+   *   #e=EVT-…&k=…  … 主催者（その大会の運営用 URL）
+   *   #admin        … 管理者
+   */
+  function parseHash(hash) {
+    var h = String(hash || '').replace(/^#/, '');
+    if (h === 'admin') return { mode: 'admin' };
+    var out = {};
+    h.split('&').forEach(function (pair) {
+      var i = pair.indexOf('=');
+      if (i > 0) out[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1));
+    });
+    if (EVENT_ID_PATTERN.test(out.e || '') && EVENT_KEY_PATTERN.test(out.k || '')) return { mode: 'organizer', eventId: out.e, key: out.k };
+    if (out.e || out.k) return { mode: 'invalid' };
+    return { mode: 'create' };
+  }
+
+  function organizerUrl(loc, eventId, key) {
+    return loc.origin + loc.pathname + '#e=' + encodeURIComponent(eventId) + '&k=' + encodeURIComponent(key);
+  }
+
+  /** GitHub Pages から運営用 Web アプリ（doPost）へ JSON を送る。Cookie は送らない */
+  function createFetchRunner(win, endpoint, getAuth) {
+    return function (request, ok, fail) {
+      var body = { action: request.action, payload: request.payload, requestId: request.requestId, auth: getAuth() };
+      win
+        .fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(body),
+          credentials: 'omit',
+          cache: 'no-store',
+          redirect: 'follow',
+        })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(
+          function (data) {
+            ok(data);
+          },
+          fail
+        );
+    };
+  }
+
   /* ---------- アプリ ---------- */
 
-  function startApp(doc, runner) {
-    var api = createApi(runner);
+  function startApp(doc, win, config) {
     var root = doc.getElementById('app');
     var toastBox = doc.getElementById('toast');
-    var state = { boot: null, eventId: '', detail: null, tab: 'progress', busy: false, matchFilter: 'all', statusFilter: 'open', editing: {} };
+    var state = {
+      route: parseHash(win.location.hash),
+      adminKey: '',
+      boot: null,
+      eventId: '',
+      detail: null,
+      tab: 'progress',
+      busy: false,
+      matchFilter: 'all',
+      statusFilter: 'open',
+      editing: {},
+      issued: null, // 直前に発行した運営用 URL { eventId, url, name }
+    };
+    try {
+      state.adminKey = win.sessionStorage.getItem('tpoc-admin-key') || '';
+    } catch (e) {
+      state.adminKey = '';
+    }
+
+    function currentAuth() {
+      if (state.route.mode === 'organizer') return { eventId: state.route.eventId, key: state.route.key };
+      if (state.route.mode === 'admin' && state.adminKey) return { adminKey: state.adminKey };
+      return undefined;
+    }
+    var api = createApi(createFetchRunner(win, config.endpoint, currentAuth));
 
     function toast(kind, text) {
       var item = el('div', { className: 'toast toast--' + kind, role: kind === 'error' ? 'alert' : 'status', text: text });
@@ -349,6 +220,20 @@ body.is-busy .busy-indicator { display: block; }
     }
 
     function handleError(err) {
+      if (err && (err.code === 'AUTH_INVALID' || err.code === 'AUTH_REQUIRED')) {
+        if (state.route.mode === 'admin') {
+          state.adminKey = '';
+          try {
+            win.sessionStorage.removeItem('tpoc-admin-key');
+          } catch (e) {
+            /* 保存できない環境では何もしない */
+          }
+        }
+        state.authError = err.message;
+        state.boot = null;
+        render();
+        return;
+      }
       toast('error', (err && err.message) || 'エラーが発生しました。');
       if (err && (err.code === 'CONFLICT' || err.code === 'NOT_FOUND' || err.code === 'ALREADY_FINAL') && state.eventId) {
         loadDetail(state.eventId);
@@ -362,7 +247,12 @@ body.is-busy .busy-indicator { display: block; }
       return api
         .mutate(action, payload)
         .then(function (data) {
+          if (data && data.adminKey) rememberIssued(data);
           if (data && data.duplicate) {
+            if (data.adminKey) {
+              render();
+              return data;
+            }
             if (state.eventId) return loadDetail(state.eventId);
             return loadBoot();
           }
@@ -382,14 +272,34 @@ body.is-busy .busy-indicator { display: block; }
         });
     }
 
+    /** 大会作成・再発行で受け取った鍵から運営用 URL を作る。主催者本人の画面なら、以後の通信も新しい鍵に切り替える */
+    function rememberIssued(data) {
+      var url = organizerUrl(win.location, data.eventId, data.adminKey);
+      state.issued = { eventId: data.eventId, url: url, name: data.detail ? data.detail.event.name : '' };
+      if (state.route.mode === 'organizer' && state.route.eventId === data.eventId) {
+        state.route = { mode: 'organizer', eventId: data.eventId, key: data.adminKey };
+        win.history.replaceState(null, '', url);
+      }
+    }
+
     function loadBoot() {
+      if (state.route.mode === 'admin' && !state.adminKey) {
+        render();
+        return Promise.resolve();
+      }
       return api
         .query('bootstrap')
         .then(function (data) {
           state.boot = data;
+          state.authError = '';
+          if (state.route.mode === 'organizer') {
+            state.eventId = state.route.eventId;
+            return loadDetail(state.route.eventId);
+          }
           render();
         })
         .catch(function (err) {
+          if (err && (err.code === 'AUTH_INVALID' || err.code === 'AUTH_REQUIRED' || err.code === 'AUTH_NOT_CONFIGURED')) return handleError(err);
           root.textContent = '';
           root.appendChild(el('p', { className: 'panel error', text: (err && err.message) || '読み込みに失敗しました。' }));
           root.appendChild(el('button', { className: 'btn', type: 'button', text: '再読み込み', onClick: loadBoot }));
@@ -423,31 +333,154 @@ body.is-busy .busy-indicator { display: block; }
       loadBoot();
     }
 
+    function goTo(hash) {
+      win.location.hash = hash;
+    }
+
+    win.addEventListener('hashchange', function () {
+      state.route = parseHash(win.location.hash);
+      state.boot = null;
+      state.detail = null;
+      state.eventId = '';
+      state.issued = null;
+      state.authError = '';
+      render();
+      loadBoot();
+    });
+
     /* ---------- 描画 ---------- */
 
     function render() {
       root.textContent = '';
       var who = doc.getElementById('actor');
-      if (who && state.boot) who.textContent = state.boot.actor;
+      if (who) who.textContent = { admin: '管理者', organizer: '主催者', create: '', invalid: '' }[state.route.mode] || '';
+      if (state.issued) {
+        root.appendChild(renderIssued());
+        setBusy(state.busy);
+        return;
+      }
+      if (state.route.mode === 'invalid') {
+        root.appendChild(renderMessage('運営用 URL が正しくありません', 'URL が途中で切れていないか確認してください。最後までコピーした URL を開き直してください。'));
+        return;
+      }
+      if (state.authError) {
+        if (state.route.mode === 'admin') {
+          root.appendChild(renderAdminLogin(state.authError));
+          return;
+        }
+        root.appendChild(renderMessage('この運営用 URL は使えません', state.authError + ' 紛失・再発行の場合は管理者に連絡してください。'));
+        return;
+      }
+      if (state.route.mode === 'admin' && !state.adminKey) {
+        root.appendChild(renderAdminLogin(''));
+        return;
+      }
       if (!state.boot) {
         root.appendChild(el('p', { className: 'panel', text: '読み込み中…' }));
         return;
       }
       var s = state.boot.storage;
       if (!s.configured || !s.accessible || !s.initialized) {
-        root.appendChild(renderSetup(s));
+        root.appendChild(state.boot.role.isPlatformAdmin ? renderSetup(s) : renderMessage('準備中です', s.message || '管理者の設定が終わるまでお待ちください。'));
         return;
       }
       if (state.eventId) root.appendChild(renderEvent());
-      else root.appendChild(renderHome());
+      else if (state.route.mode === 'admin') root.appendChild(renderAdminHome());
+      else if (state.route.mode === 'organizer') root.appendChild(el('p', { className: 'panel', text: '読み込み中…' }));
+      else root.appendChild(renderCreate());
       setBusy(state.busy);
+    }
+
+    function renderMessage(title, text) {
+      return el('section', { className: 'panel' }, [
+        el('h2', { text: title }),
+        el('p', { text: text }),
+        el('p', null, [el('a', { href: '#', text: '新しい大会を作る' })]),
+      ]);
+    }
+
+    function renderAdminLogin(error) {
+      var input = el('input', { type: 'password', id: 'admin-key', className: 'input', autocomplete: 'current-password' });
+      return el('section', { className: 'panel' }, [
+        el('h2', { text: '管理者' }),
+        el('p', { className: 'muted', text: '運営用 Apps Script のスクリプト プロパティ ADMIN_KEY に設定した文字列を入力してください。このタブを閉じるまで記憶します。' }),
+        error ? el('p', { className: 'error', text: error }) : null,
+        el('form', {
+          className: 'row',
+          onSubmit: function (e) {
+            e.preventDefault();
+            state.adminKey = input.value.trim();
+            try {
+              win.sessionStorage.setItem('tpoc-admin-key', state.adminKey);
+            } catch (err) {
+              /* 保存できない環境では、このページを開いている間だけ有効 */
+            }
+            state.authError = '';
+            render();
+            loadBoot();
+          },
+        }, [el('label', { className: 'visually-hidden', for: 'admin-key', text: '管理者の鍵' }), input, el('button', { className: 'btn btn--primary', type: 'submit', text: '開く' })]),
+      ]);
+    }
+
+    /** 運営用 URL の表示（大会作成・再発行の直後に 1 回だけ） */
+    function renderIssued() {
+      var issued = state.issued;
+      var box = el('code', { className: 'issued__url', id: 'issued-url', text: issued.url });
+      var saved = el('input', { type: 'checkbox', id: 'issued-saved' });
+      var go = el('button', { className: 'btn btn--primary', type: 'button', text: 'この大会の運営画面を開く', disabled: true });
+      saved.addEventListener('change', function () {
+        go.disabled = !saved.checked;
+      });
+      go.addEventListener('click', function () {
+        state.issued = null;
+        if (win.location.href === issued.url) {
+          render();
+        } else {
+          win.location.href = issued.url;
+        }
+      });
+      var copy = el('button', { className: 'btn', type: 'button', text: 'URL をコピー' });
+      copy.addEventListener('click', function () {
+        var done = function () {
+          copy.textContent = 'コピーしました';
+        };
+        try {
+          win.navigator.clipboard.writeText(issued.url).then(done, function () {
+            selectText(box);
+          });
+        } catch (e) {
+          selectText(box);
+        }
+      });
+      var back = state.route.mode === 'admin'
+        ? el('button', { className: 'btn btn--ghost', type: 'button', text: '大会一覧に戻る', onClick: function () { state.issued = null; render(); } })
+        : null;
+      return el('section', { className: 'panel issued' }, [
+        el('h2', { text: '運営用 URL' + (issued.name ? '（' + issued.name + '）' : '') }),
+        el('p', { className: 'issued__warn', text: 'この URL を知っている人は、誰でもこの大会を運営（結果の入力・変更）できます。他人に教えないでください。この画面を閉じると、同じ URL は二度と表示されません。' }),
+        box,
+        el('div', { className: 'btn-row' }, [copy]),
+        el('label', { className: 'check' }, [saved, ' URL をブックマーク、またはメモに保存しました']),
+        el('div', { className: 'btn-row' }, [go, back]),
+        el('p', { className: 'muted small', text: '紛失した場合は、管理者に再発行を依頼してください（再発行すると古い URL は使えなくなります）。' }),
+      ]);
+    }
+
+    function selectText(node) {
+      var r = doc.createRange();
+      r.selectNodeContents(node);
+      var s = win.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      toast('ok', '選択しました。Ctrl+C（Mac は ⌘C）でコピーしてください。');
     }
 
     function renderSetup(s) {
       var panel = el('section', { className: 'panel' }, [el('h2', { text: '初期セットアップ' })]);
       if (!s.configured) {
         var input = el('input', { type: 'text', id: 'spreadsheet-id', className: 'input', autocomplete: 'off', placeholder: 'https://docs.google.com/spreadsheets/d/…' });
-        panel.appendChild(el('p', { text: 'データ保存用のスプレッドシート（PoC 専用の空のもの）の共有リンク、または ID を入力してください。スプレッドシートを開く必要はありません（Google ドライブで右クリック →「リンクをコピー」）。' }));
+        panel.appendChild(el('p', { text: 'データ保存用のスプレッドシート（PoC 専用の空のもの）の共有リンク、または ID を入力してください。' }));
         panel.appendChild(
           el('form', {
             className: 'row',
@@ -464,7 +497,7 @@ body.is-busy .busy-indicator { display: block; }
         return panel;
       }
       panel.appendChild(el('p', { text: '保存先: ' + s.spreadsheetName }));
-      panel.appendChild(el('p', { text: '不足しているシート: ' + (s.missing.join('、') || 'なし') }));
+      panel.appendChild(el('p', { text: '不足しているシート・列: ' + (s.missing.join('、') || 'なし') }));
       panel.appendChild(el('p', { className: 'muted', text: '初期化は何度実行しても既存データを消しません。管理対象外のデータがあるスプレッドシートでは中止します。' }));
       panel.appendChild(
         el('button', {
@@ -480,37 +513,20 @@ body.is-busy .busy-indicator { display: block; }
       return panel;
     }
 
-    function renderHome() {
+    /** 大会作成フォーム（誰でも。作成コードが必要な設定なら入力欄を出す） */
+    function createForms() {
       var boot = state.boot;
       var wrap = el('div', { className: 'stack' });
-
-      var list = el('section', { className: 'panel' }, [el('h2', { text: '大会一覧' })]);
-      if (!boot.events.length) list.appendChild(el('p', { className: 'muted', text: 'まだ大会がありません。下のフォームから作成してください。' }));
-      boot.events.forEach(function (ev) {
-        list.appendChild(
-          el('article', { className: 'event-card' }, [
-            el('div', { className: 'event-card__main' }, [
-              el('h3', { text: ev.name }),
-              el('p', { className: 'muted', text: [ev.dateLabel, EVENT_STATUS_LABEL[ev.status] || ev.status, '選手 ' + ev.playerCount + ' 名', '確定 ' + ev.finalCount + ' / ' + ev.matchCount + ' 試合'].filter(Boolean).join('・') }),
-              el('p', null, [
-                el('span', { className: 'badge ' + (ev.isPublic ? 'badge--on' : ''), text: ev.isPublic ? '公開中' : '非公開' }),
-                ev.isFeatured ? el('span', { className: 'badge badge--on', text: '既定表示' }) : null,
-                ev.isSample ? el('span', { className: 'badge', text: 'サンプル' }) : null,
-              ]),
-            ]),
-            el('button', { className: 'btn', type: 'button', text: '開く', onClick: function () { openEvent(ev.id); } }),
-          ])
-        );
-      });
-      wrap.appendChild(list);
-
+      var needCode = boot.createCodeRequired && !boot.role.isPlatformAdmin;
       var name = el('input', { className: 'input', id: 'new-name', required: true, maxlength: 80 });
       var date = el('input', { className: 'input', id: 'new-date', maxlength: 40, placeholder: '例: 2026/11/03' });
+      var organizer = el('input', { className: 'input', id: 'new-organizer', maxlength: 40, placeholder: '例: 〇〇ダーツ部（任意・非公開）' });
       var bestOf = el('select', { className: 'input', id: 'new-bestof' }, BEST_OF_CHOICES.map(function (n) {
         return el('option', { value: String(n), text: 'Best of ' + n + ' Legs（先に ' + legsToWin(n) + ' Leg）', selected: n === 5 ? true : null });
       }));
       var provisional = el('input', { type: 'checkbox', id: 'new-provisional', checked: true });
       var groupCount = el('input', { className: 'input input--short', id: 'new-groups', type: 'number', min: 1, max: 16, value: '4', inputmode: 'numeric' });
+      var code = needCode ? el('input', { className: 'input', id: 'new-code', type: 'password', autocomplete: 'off', required: true }) : null;
       wrap.appendChild(
         el('section', { className: 'panel' }, [
           el('h2', { text: '大会を作成' }),
@@ -518,45 +534,94 @@ body.is-busy .busy-indicator { display: block; }
             className: 'form',
             onSubmit: function (e) {
               e.preventDefault();
-              mutate('createEvent', { name: name.value, dateLabel: date.value, bestOf: Number(bestOf.value), provisional: provisional.checked, groupCount: Number(groupCount.value) }, '大会を作成しました。').then(function (data) {
-                if (data && data.detail) state.tab = 'players';
-                render();
-              });
+              mutate('createEvent', {
+                name: name.value,
+                dateLabel: date.value,
+                organizerName: organizer.value,
+                bestOf: Number(bestOf.value),
+                provisional: provisional.checked,
+                groupCount: Number(groupCount.value),
+                createCode: code ? code.value : undefined,
+              }, '大会を作成しました。');
             },
           }, [
             field('大会名', name),
             field('開催日（表示用の文字列）', date),
+            field('主催者名（任意。管理者だけが見ます）', organizer),
             field('対戦形式', bestOf),
             el('label', { className: 'check' }, [provisional, ' 暫定ルールとして扱う（確定した大会ルールではない）']),
             field('ロビンのグループ数', groupCount),
-            el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '作成' }),
+            code ? field('作成コード（管理者から教えてもらったもの）', code) : null,
+            el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '作成して運営用 URL を発行' }),
           ]),
         ])
       );
-
       var publishSample = el('input', { type: 'checkbox', id: 'sample-publish' });
+      var sampleCode = needCode ? el('input', { className: 'input', id: 'sample-code', type: 'password', autocomplete: 'off' }) : null;
       wrap.appendChild(
         el('section', { className: 'panel' }, [
           el('h2', { text: '検証用サンプル' }),
           el('p', { className: 'muted', text: '16 名（サンプル選手01〜16）・4 人 × 4 グループのロビン、Best of 5 Legs（暫定）。確定・進行中・未開始の試合を含みます。' }),
           el('label', { className: 'check' }, [publishSample, ' 作成後すぐ閲覧画面に公開する']),
+          sampleCode ? field('作成コード', sampleCode) : null,
           el('button', {
             className: 'btn',
             type: 'button',
             'data-mut': true,
             text: 'サンプル大会を作成',
             onClick: function () {
-              mutate('createSampleEvent', { publish: publishSample.checked }, 'サンプル大会を作成しました。');
+              mutate('createSampleEvent', { publish: publishSample.checked, createCode: sampleCode ? sampleCode.value : undefined }, 'サンプル大会を作成しました。');
             },
           }),
         ])
       );
+      return wrap;
+    }
 
+    function renderCreate() {
+      var wrap = createForms();
+      wrap.insertBefore(
+        el('section', { className: 'panel' }, [
+          el('h2', { text: '大会を主催する' }),
+          el('p', { text: '大会を作成すると、その大会専用の「運営用 URL」が発行されます。運営（選手登録・組み合わせ・結果入力・公開）は、その URL から行います。ログインは不要です。' }),
+          el('p', { className: 'muted small', text: 'すでに大会を作成済みの場合は、発行された運営用 URL を開いてください。' }),
+        ]),
+        wrap.firstChild
+      );
+      return wrap;
+    }
+
+    function renderAdminHome() {
+      var boot = state.boot;
+      var wrap = el('div', { className: 'stack' });
+      var list = el('section', { className: 'panel' }, [el('h2', { text: 'すべての大会（管理者）' })]);
+      if (!boot.events.length) list.appendChild(el('p', { className: 'muted', text: 'まだ大会がありません。' }));
+      boot.events.forEach(function (ev) {
+        list.appendChild(
+          el('article', { className: 'event-card' }, [
+            el('div', { className: 'event-card__main' }, [
+              el('h3', { text: ev.name }),
+              el('p', { className: 'muted', text: [ev.dateLabel, EVENT_STATUS_LABEL[ev.status] || ev.status, ev.organizerName ? '主催: ' + ev.organizerName : '', '選手 ' + ev.playerCount + ' 名', '確定 ' + ev.finalCount + ' / ' + ev.matchCount + ' 試合'].filter(Boolean).join('・') }),
+              el('p', null, [
+                el('span', { className: 'badge ' + (ev.isPublic ? 'badge--on' : ''), text: ev.isPublic ? '公開中' : '非公開' }),
+                ev.isFeatured ? el('span', { className: 'badge badge--on', text: '既定表示' }) : null,
+                ev.isSample ? el('span', { className: 'badge', text: 'サンプル' }) : null,
+                ev.hasKey ? null : el('span', { className: 'badge', text: '運営用 URL 未発行' }),
+              ]),
+            ]),
+            el('button', { className: 'btn', type: 'button', text: '開く', onClick: function () { openEvent(ev.id); } }),
+          ])
+        );
+      });
+      wrap.appendChild(list);
+      Array.prototype.slice.call(createForms().childNodes).forEach(function (n) {
+        wrap.appendChild(n);
+      });
       var viewerUrl = el('input', { className: 'input', id: 'viewer-url', value: boot.viewerUrl, placeholder: 'https://<ユーザー名>.github.io/<リポジトリ名>/' });
       wrap.appendChild(
         el('section', { className: 'panel' }, [
           el('h2', { text: '閲覧者用 URL' }),
-          el('p', { className: 'muted', text: '閲覧者に配る閲覧ページ（GitHub Pages）の URL を登録してください。運営画面からリンクを開けるようになります（任意）。' }),
+          el('p', { className: 'muted', text: '閲覧ページ（GitHub Pages）の URL。各大会の「進行状況」に、大会ごとの閲覧用リンクとして表示されます。' }),
           el('form', {
             className: 'row',
             onSubmit: function (e) {
@@ -564,7 +629,7 @@ body.is-busy .busy-indicator { display: block; }
               mutate('setViewerUrl', { url: viewerUrl.value }, '保存しました。');
             },
           }, [el('label', { className: 'visually-hidden', for: 'viewer-url', text: '閲覧者用 URL' }), viewerUrl, el('button', { className: 'btn', type: 'submit', 'data-mut': true, text: '保存' })]),
-          el('p', { className: 'muted small', text: 'データ保存先: ' + boot.storage.spreadsheetName + '（ID: ' + boot.storage.spreadsheetId + '）。閲覧者用プロジェクトのスクリプト プロパティ SPREADSHEET_ID にも同じ ID を設定します。' }),
+          el('p', { className: 'muted small', text: 'データ保存先: ' + boot.storage.spreadsheetName + '（ID: ' + boot.storage.spreadsheetId + '）' }),
         ])
       );
       return wrap;
@@ -579,7 +644,7 @@ body.is-busy .busy-indicator { display: block; }
       var d = state.detail;
       wrap.appendChild(
         el('div', { className: 'event-head' }, [
-          el('button', { className: 'btn btn--ghost', type: 'button', text: '← 大会一覧', onClick: goHome }),
+          state.route.mode === 'admin' ? el('button', { className: 'btn btn--ghost', type: 'button', text: '← 大会一覧', onClick: goHome }) : null,
           el('h2', { className: 'event-head__title', text: d ? d.event.name : '読み込み中…' }),
           d ? el('span', { className: 'badge ' + (d.event.isPublic ? 'badge--on' : ''), text: d.event.isPublic ? '公開中' : '非公開' }) : null,
         ])
@@ -618,7 +683,10 @@ body.is-busy .busy-indicator { display: block; }
       var p = d.progress;
       var panel = el('section', { className: 'panel' }, [el('h3', { text: '進行状況' })]);
       var pct = p.total ? Math.round((p.final / p.total) * 100) : 0;
-      panel.appendChild(el('div', { className: 'meter', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': pct }, [el('div', { className: 'meter__bar', style: 'width:' + pct + '%' })]));
+      // CSP（style-src 'self'）では style 属性の文字列が無効になるため、幅は CSSOM で設定する
+      var bar = el('div', { className: 'meter__bar' });
+      bar.style.width = pct + '%';
+      panel.appendChild(el('div', { className: 'meter', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': pct }, [bar]));
       panel.appendChild(el('p', { text: '確定 ' + p.final + ' / ' + p.total + ' 試合（進行中 ' + p.live + '・未開始 ' + p.scheduled + (p.check ? '・要確認 ' + p.check : '') + '）' }));
       var table = el('table', { className: 'table' }, [
         el('thead', null, [el('tr', null, ['グループ', '選手', '確定', '進行中', '未開始'].map(function (h) { return el('th', { scope: 'col', text: h }); }))]),
@@ -872,7 +940,7 @@ body.is-busy .busy-indicator { display: block; }
           field('開催日（表示用）', date),
           field('状態', status),
           el('label', { className: 'check' }, [isPublic, ' 閲覧画面に公開する']),
-          el('label', { className: 'check' }, [featured, ' 閲覧画面の既定表示にする（URL に大会指定がないときに表示）']),
+          state.boot && state.boot.role.isPlatformAdmin ? el('label', { className: 'check' }, [featured, ' 閲覧画面の既定表示にする（URL に大会指定がないときに表示。管理者のみ）']) : null,
           field('運営メモ（非公開）', notes),
           el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '保存' }),
         ]),
@@ -898,7 +966,16 @@ body.is-busy .busy-indicator { display: block; }
           el('button', { className: 'btn', type: 'submit', 'data-mut': true, text: 'ルールを保存' }),
         ]),
       ]);
-      return el('div', { className: 'stack' }, [eventForm, ruleForm]);
+      var keyPanel = el('section', { className: 'panel' }, [
+        el('h3', { text: '運営用 URL の再発行' }),
+        el('p', { className: 'muted small', text: '運営用 URL が他人に知られた場合や紛失した場合に、新しい URL を発行します。古い URL はすぐに使えなくなります。' + (ev.adminKeyIssuedAt ? '（現在の URL の発行: ' + formatDateTime(ev.adminKeyIssuedAt) + '）' : '（未発行）') }),
+        el('div', { className: 'btn-row' }, [
+          confirmButton('再発行する', '本当に再発行', function () {
+            mutate('rotateKey', { eventId: ev.id, rev: ev.rev }, '運営用 URL を再発行しました。');
+          }),
+        ]),
+      ]);
+      return el('div', { className: 'stack' }, [eventForm, ruleForm, keyPanel]);
     }
 
     function renderHistory() {
@@ -918,20 +995,19 @@ body.is-busy .busy-indicator { display: block; }
     return { state: state };
   }
 
-  global.TPAdmin = { checkResult: checkResult, createApi: createApi, legsToWin: legsToWin };
+  global.TPAdmin = { checkResult: checkResult, createApi: createApi, legsToWin: legsToWin, parseHash: parseHash, organizerUrl: organizerUrl, createFetchRunner: createFetchRunner };
 
-  if (global.document && global.google && global.google.script) {
-    var runner = function (request, ok, fail) {
-      global.google.script.run.withSuccessHandler(ok).withFailureHandler(fail).adminCall(request);
-    };
+  if (global.document && global.TPOC_ADMIN_CONFIG) {
     var go = function () {
-      global.__tpocAdmin = startApp(global.document, runner);
+      var config = global.TPOC_ADMIN_CONFIG;
+      if (!ENDPOINT_PATTERN.test(String(config.endpoint || ''))) {
+        global.document.getElementById('app').textContent =
+          '設定エラー: admin/config.js の endpoint に運営用 Web アプリの URL（https://script.google.com/macros/s/…/exec）を設定してください。';
+        return;
+      }
+      global.__tpocAdmin = startApp(global.document, global, config);
     };
     if (global.document.readyState === 'loading') global.document.addEventListener('DOMContentLoaded', go);
     else go();
   }
 })(typeof window !== 'undefined' ? window : this);
-
-    </script>
-  </body>
-</html>

@@ -1,16 +1,16 @@
 /**
- * n02 Tournament PoC - 運営者用 Web アプリ（サーバー側）
+ * n02 Tournament PoC - 運営用 Web アプリ（サーバー側 API）
  *
  * このプロジェクトだけがスプレッドシートへ書き込む。閲覧者用 Web アプリは別プロジェクトで、
  * 読み取り専用スコープしか持たない（README「セキュリティ設計」参照）。
  *
- * google.script.run から呼べる関数は doGet と adminCall の 2 つだけにしてある。
- * それ以外のトップレベル関数はすべて名前の末尾に "_" を付けた内部関数。
- * adminCall は呼び出しのたびにサーバー側で運営者のメールアドレスを検証する。
+ * 運営画面は GitHub Pages に置き、この Web アプリには fetch（doPost）で JSON を送る。
+ * 公開されるトップレベル関数は doGet と doPost の 2 つだけ。それ以外は名前の末尾に "_" を付けた内部関数。
+ * doPost は呼び出しのたびに、大会ごとの運営用の鍵（または管理者の鍵）を検証する（02_auth.js）。
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.2.0',
+  APP_VERSION: '0.3.0',
   SCHEMA_VERSION: 1,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
@@ -30,6 +30,10 @@ var ADMIN_CONFIG = Object.freeze({
   SNAPSHOT_MAX_CHUNKS: 10,
   HISTORY_CELL_LIMIT: 20000,
   BEST_OF_MAX: 21,
+  // 誰でも主催できるため、悪用・誤操作で保存先が膨らまないよう上限を設ける（管理者は対象外）
+  MAX_EVENTS_TOTAL: 200,
+  MAX_CREATES_PER_HOUR: 10,
+  MAX_REQUEST_CHARS: 100000,
 });
 
 /** 試合状態（シートにはコード値で保存し、画面で日本語に変換する） */
@@ -85,6 +89,9 @@ var SCHEMA = Object.freeze({
       ['is_featured', 'bool'],
       ['rule_id', 'text'],
       ['is_sample', 'bool'],
+      ['organizer_name', 'text'], // 主催者名（任意・非公開。管理者が誰の大会か分かるように）
+      ['admin_key_hash', 'text'], // 運営用の鍵の SHA-256。空欄の大会は管理者だけが操作できる
+      ['admin_key_issued_at', 'text'],
       ['notes', 'text'],
       ['rev', 'int'],
       ['created_at', 'text'],

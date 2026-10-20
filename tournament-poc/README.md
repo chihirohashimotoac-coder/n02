@@ -15,75 +15,88 @@ n02 から外部リンクで使う「トーナメント・ロビン・リーグ�
 ## 1. 構成
 
 ```
-                ┌──────────────────────────────┐
- 運営者（本人）  │ 運営者用 Web アプリ（GAS #1）  │  実行: 自分 / アクセス: 自分のみ
- ─────────────▶ │  doGet / adminCall           │  スコープ: spreadsheets, userinfo.email
-                │  ・毎回サーバー側で運営者を検証 │
-                │  ・書き込みはロック + 版番号    │
-                └──────────────┬───────────────┘
-                               │ 読み書き（このプロジェクトだけが書く）
-                               ▼
-                ┌──────────────────────────────┐
-                │ スプレッドシート（非公開・保存専用） │
-                │ Events / Rules / Players / Stages │
-                │ Groups / Entries / Matches       │
-                │ History / PublicSnapshots        │
-                └──────────────┬───────────────┘
-                               │ PublicSnapshots だけを読む
-                               ▼
-                ┌──────────────────────────────┐
- 閲覧者（ログイン │ 閲覧者用 Web アプリ（GAS #2）  │  実行: 自分 / アクセス: 全員（匿名可）
- 不要・20〜50 人）│  doGet / getPublicSnapshot   │  スコープ: spreadsheets.readonly のみ
- ─────────────▶ │  ・CacheService で 20 秒共有   │
-                │  ・約 60 秒ごとに自動更新        │
-                └──────────────────────────────┘
+ 主催者（誰でも・ログイン不要）          閲覧者（ログイン不要・20〜50 人）
+   │ 運営用 URL（#e=大会ID&k=鍵）           │ 閲覧ページの URL（?event=大会ID）
+   ▼                                         ▼
+┌─────────────────────────────┐  ┌─────────────────────────────┐
+│ GitHub Pages（静的ページ）      │  │ GitHub Pages（静的ページ）      │
+│  /admin/  運営画面              │  │  /        閲覧ページ            │
+└──────────────┬──────────────┘  └──────────────┬──────────────┘
+               │ fetch POST（Cookie なし）              │ fetch GET ?format=json（Cookie なし）
+               ▼                                         ▼
+┌─────────────────────────────┐  ┌─────────────────────────────┐
+│ 運営用 Apps Script（API のみ）   │  │ 閲覧者用 Apps Script            │
+│  実行: 自分 / アクセス: 全員     │  │  実行: 自分 / アクセス: 全員     │
+│  doGet / doPost                │  │  doGet / getPublicSnapshot     │
+│  ・毎回、大会の鍵を検証          │  │  ・spreadsheets.readonly のみ   │
+│  ・ロック + 版番号で同時更新防止 │  │  ・CacheService で 20 秒共有    │
+│  スコープ: spreadsheets のみ    │  │                                │
+└──────────────┬──────────────┘  └──────────────┬──────────────┘
+               │ 読み書き（このプロジェクトだけが書く）    │ PublicSnapshots だけを読む
+               ▼                                         │
+┌──────────────────────────────────────────────┐   │
+│ スプレッドシート（あなたの Drive・非公開・保存専用）       │◀─┘
+│ Events / Rules / Players / Stages / Groups / Entries │
+│ Matches / History / PublicSnapshots                   │
+└──────────────────────────────────────────────┘
 ```
 
-閲覧者に配る URL は、GitHub Pages に置いた閲覧ページ（`dist/pages/`）です。このページは閲覧者用アプリの `?format=json` からデータだけを取得します。
-Apps Script の画面（`…/exec`）を直接配らないのは、**ブラウザで複数の Google アカウントにログインしていると、URL が `/macros/u/1/…` に書き換えられて開けない**ことが実環境で分かったためです（ページ側は Cookie を送らないので影響を受けません）。
+**主催者の確認方法（ログイン不要）**
 
-運営者が結果を保存すると、運営者用アプリが「公開してよい項目だけ」で組み立てた JSON を `PublicSnapshots` シートに書きます。
-閲覧者用アプリはその JSON だけを読み、キャッシュして配ります。選手のメモ・履歴・操作者のメールアドレスなどは、閲覧者用アプリからは読めない構造です。
+- 誰でも運営画面から大会を作れます。作ると、その大会専用の「運営用 URL」が 1 回だけ表示されます。
+  URL の `#` 以降に、推測できない長さの鍵（244 ビット相当の乱数）が入っています。
+- この URL を持っている人が、その大会の主催者です。他の大会は操作できません（サーバー側で毎回確認）。
+- シートには鍵そのものではなく、SHA-256 のハッシュだけを保存します。URL が漏れたら「再発行」で古い URL を無効にできます。
+- 管理者（あなた）は、スクリプト プロパティ `ADMIN_KEY` に設定した文字列で `/admin/#admin` から入り、
+  初期設定・全大会の管理・運営用 URL の再発行（紛失時）ができます。
+- スクリプト プロパティ `CREATE_CODE`（作成コード）を設定すると、そのコードを知っている人だけが大会を作れます。
+  未設定なら誰でも作れます（1 時間に 10 件までの上限あり）。
+
+Apps Script の画面（`…/exec`）は、ブラウザで複数の Google アカウントにログインしていると開けないことが実環境で分かったため、
+運営画面・閲覧ページとも GitHub Pages に置き、Apps Script とは Cookie を送らない fetch で通信します。
+
+運営者が結果を保存すると、運営用アプリが「公開してよい項目だけ」で組み立てた JSON を `PublicSnapshots` シートに書きます。
+閲覧者用アプリはその JSON だけを読み、キャッシュして配ります。選手のメモ・履歴・鍵のハッシュなどは、閲覧者用アプリからは読めない構造です。
 
 ## 2. ファイル
 
 | パス | 内容 |
 | --- | --- |
-| `dist/admin/Code.gs` `Index.html` `appsscript.json` | **運営者用プロジェクトに貼り付ける完成版**（3 ファイル） |
-| `dist/viewer/Code.gs` `Index.html` `appsscript.json` | **閲覧者用プロジェクトに貼り付ける完成版**（3 ファイル） |
-| `admin/src/server/*.js` | 運営者用のサーバー側ソース（設定・認可・保存・大会ロジック・公開・各操作・API） |
+| `dist/admin/Code.gs` `appsscript.json` | **運営用 Apps Script に貼り付ける完成版**（2 ファイル。画面は持たない） |
+| `dist/viewer/Code.gs` `Index.html` `appsscript.json` | **閲覧者用 Apps Script に貼り付ける完成版**（3 ファイル） |
+| `dist/pages/` | **GitHub Pages に置くファイル**。ルートが閲覧ページ、`admin/` が運営画面。各 `config.example.js` を `config.js` にして URL を設定 |
+| `admin/src/server/*.js` | 運営用のサーバー側ソース（設定・認証・保存・大会ロジック・公開・各操作・API） |
 | `admin/src/client/*` | 運営画面の HTML / CSS / JavaScript |
-| `viewer/src/server/00_viewer.js` | 閲覧者用のサーバー側ソース（読み取り・キャッシュ） |
+| `viewer/src/server/00_viewer.js` | 閲覧者用のサーバー側ソース（読み取り・キャッシュ・`?format=json`） |
 | `viewer/src/client/*` | 閲覧画面の HTML / CSS / JavaScript（自動更新・再試行） |
-| `dist/pages/` | **GitHub Pages に置く閲覧ページ**（`index.html` `viewer.css` `viewer.js` と、`config.js` の見本） |
-| `viewer/src/pages/` | 閲覧ページ用の設定見本・README |
 | `tools/build.mjs` | `src/` から `dist/` を生成（`--check` で一致確認） |
 | `tools/preview-server.mjs` | Google に接続せずにブラウザで動作確認するためのローカルサーバー |
-| `tools/loadtest.mjs` | 実際のデプロイ URL に N 人分の閲覧画面を開いて計測する負荷試験スクリプト |
+| `tools/loadtest.mjs` | 実際の閲覧ページに N 人分の画面を開いて計測する負荷試験スクリプト |
 | `tests/*.test.mjs` | 単体・結合テスト（Node.js 組み込みのテストランナー） |
 | `tests/gas-mock.mjs` | Apps Script のサービス（SpreadsheetApp・CacheService など）の模擬実装 |
 | `e2e/*.spec.mjs` | ブラウザでの画面テスト（Playwright、PC 1366×768 / スマートフォン 390×844） |
-| `docs/deploy.md` | **Google Apps Script への導入・公開手順** |
+| `docs/deploy.md` | **Google Apps Script・GitHub Pages への導入・公開手順** |
 | `docs/security.md` | セキュリティ設計と公開前チェックリスト |
-| `docs/test-plan.md` | テスト項目・結果・未検証項目 |
+| `docs/test-plan.md` | テスト項目・結果・実環境で判明したこと |
 | `docs/load-test.md` | **50 人同時閲覧の性能検証手順** |
 
 `dist/` は生成物です。修正は `admin/src`・`viewer/src` に行い、`node tools/build.mjs` で作り直してください。
 
 ## 3. 機能（Phase 1）
 
-### 運営者用 Web 画面
+### 運営画面（GitHub Pages の `/admin/`）
 
 | 操作 | 内容 |
 | --- | --- |
-| 初期セットアップ | 保存先スプレッドシートの指定（共有リンクを貼るだけ。開く必要なし）・シートの初期化（何度実行しても既存データを消さない） |
-| 大会の作成・編集 | 大会名・開催日（表示用文字列）・状態（準備中 / 開催中 / 終了）・公開 / 非公開・閲覧画面の既定表示・運営メモ（非公開） |
+| 大会の作成（誰でも） | 大会名・開催日・主催者名（任意・非公開）・対戦形式・グループ数。作成コードが設定されていれば入力。作成後に運営用 URL を 1 回だけ表示 |
+| 大会の編集 | 大会名・開催日・状態（準備中 / 開催中 / 終了）・公開 / 非公開・運営メモ（非公開）・運営用 URL の再発行 |
 | ルール | Best of N Legs（1〜21 の奇数）、暫定ルールの表示。結果入力後は Best of を変更不可 |
 | 選手 | 一括登録（1 行 1 名）・名前変更・削除（対戦カードに入っている選手は削除不可） |
 | ロビングループ | グループ数・名前、登録順の自動割当、手動割当、グループ内総当たりの対戦カード作成・削除（結果入力後は削除不可） |
 | 試合結果 | 取得 Leg 数の入力、「進行中として保存」「確定」「未開始に戻す」、確定済みの「訂正」 |
-| 進行状況 | 全体・グループ別の確定 / 進行中 / 未開始の数、公開状態、閲覧画面へのリンク、変更履歴 |
+| 進行状況 | 全体・グループ別の確定 / 進行中 / 未開始の数、公開状態、この大会の閲覧ページへのリンク、変更履歴 |
 | サンプル | 16 名・4 人 × 4 グループ・Best of 5（暫定）の検証用大会をボタン 1 つで作成 |
+| 管理者（`#admin`） | 保存先の設定・初期化、全大会の一覧と管理、閲覧者用 URL、閲覧ページの既定表示の大会、運営用 URL の再発行 |
 
 ### 閲覧者用 Web 画面（ログイン不要）
 
@@ -113,7 +126,7 @@ Apps Script の画面（`…/exec`）を直接配らないのは、**ブラウ�
 
 | シート | 主な列 | 後続フェーズへの備え |
 | --- | --- | --- |
-| Events | event_id, name, date_label, status, is_public, is_featured, rule_id, is_sample, notes | 複数大会を並行管理可能 |
+| Events | event_id, name, date_label, status, is_public, is_featured, rule_id, is_sample, organizer_name, admin_key_hash, admin_key_issued_at, notes | 複数大会を並行管理可能。主催者ごとの運営用の鍵（ハッシュ） |
 | Rules | rule_id, event_id, name, format, best_of, is_provisional | format に将来 Sets 制などを追加 |
 | Players | player_id, event_id, display_name, external_ref, notes | external_ref で n02 の選手と対応付け |
 | Stages | stage_id, event_id, name, type, order, rule_id, parent_stage_id, config_json | type: round_robin / single_elimination / league。parent_stage_id でロビン → A・B トーナメントを接続 |
@@ -127,14 +140,15 @@ Apps Script の画面（`…/exec`）を直接配らないのは、**ブラウ�
 
 ## 5. 安全性の要点（詳細は [docs/security.md](docs/security.md)）
 
-- 運営者用と閲覧者用を**別プロジェクト**に分離。閲覧者用のコードには書き込み処理が存在せず、権限も `spreadsheets.readonly` のみ。
-  読み込みには高度なサービス「Google Sheets API」の `values.get` を使います（`SpreadsheetApp.openById` は読むだけでも編集を含むスコープを要求することが、実環境で確認できたため）。
-- `google.script.run` から呼べる関数は各プロジェクト 2 つだけ（運営者用: `doGet` `adminCall`、閲覧者用: `doGet` `getPublicSnapshot`）。
-- 運営者用は Google 側で「自分のみ」に制限したうえで、**`adminCall` の呼び出しごとにサーバー側でメールアドレスを検証**（取得できなければ拒否）。
+- 運営用と閲覧者用を**別プロジェクト**に分離。閲覧者用のコードには書き込み処理が存在せず、権限も `spreadsheets.readonly` のみ
+  （読み込みは Sheets API の `values.get`。`SpreadsheetApp.openById` は読むだけでも編集を含むスコープを要求することが実環境で分かったため）。
+- 外部から呼べる関数は各プロジェクト 2 つだけ（運営用: `doGet` `doPost`、閲覧者用: `doGet` `getPublicSnapshot`）。
+- 運営用は匿名でも届くが、**操作のたびにサーバー側で大会の鍵（または管理者の鍵）を検証**し、その大会以外は操作させない。
+  鍵はハッシュで保存し、比較は途中で打ち切らない方法で行う。運営用アプリの権限はスプレッドシートのみ（外部通信・メール・Drive 操作なし）。
 - 書き込みはスクリプトロックで直列化し、版番号（rev）が古ければ拒否（同時更新による上書きを防止）。`requestId` で二重送信を無視。
 - 入力はサーバー側で型・範囲・長さ・参照先を検証。先頭が `= + - @` の文字列は数式として解釈されうるため拒否。
-- 画面はデータを `textContent` で表示（HTML として解釈しない）。
-- ソースコードにスプレッドシート ID・メールアドレス・認証情報を含めない（ID はスクリプト プロパティに保存）。
+- 画面はデータを `textContent` で表示（HTML として解釈しない）。GitHub Pages のページは CSP で通信先とスクリプトを限定。
+- ソースコードにスプレッドシート ID・鍵・メールアドレスを含めない（すべてスクリプト プロパティ）。
 
 ## 6. 開発・テスト
 
@@ -150,15 +164,17 @@ npm run preview             # http://127.0.0.1:4180/ でローカル確認（Goo
 ```
 
 ローカル確認用サーバーは、`dist/` のコードを模擬 Apps Script 上で動かします。
-`/admin` が運営画面、`/viewer` が閲覧画面、`/admin?as=anonymous` は権限のないアクセスの再現です。
+画面テストでは、GitHub Pages のページ（`/pages/`・`/pages/admin/`）から Apps Script への通信をローカルの模擬環境に振り替えます。
 
 ## 7. 今回実装していないもの（後続フェーズ）
 
 本格的なトーナメント自動生成、ロビン順位による A・B トーナメントへの振り分け、順位決定方法、リーグの自動スケジュール生成、
-n02 との試合結果の自動同期、Firebase 連携、大会の削除（Phase 1 は「非公開・終了」で代替）、棄権・不戦勝の扱い、複数管理者の運用（構造のみ用意）。
+n02 との試合結果の自動同期、Firebase 連携、大会の削除（Phase 1 は「非公開・終了」で代替）、棄権・不戦勝の扱い、共同主催者（運営用 URL を共有すれば複数人で運営は可能）。
 
 ## 8. 既知の制約
 
 - スプレッドシートにはトランザクションがありません。1 つの操作が複数シートに書く途中で Google 側のエラーが起きると、途中まで書かれた状態が残る可能性があります（入力検証はすべて書き込み前に行っています）。
 - Apps Script の Web アプリには、個人アカウントの場合「このアプリケーションは Google ではなく、別のユーザーによって作成されたものです」という帯が表示されます。
+- 主催者の確認は「運営用 URL を持っているか」だけです。URL が漏れると他人も運営できます（再発行で無効化可能）。Google ログインのような本人確認ではありません。
+- すべての処理があなたの Google アカウントの Apps Script の割り当て（同時実行 30 など）を共有します。主催者 1〜3 人・同時開催 1〜2 大会を想定した構成です。
 - 閲覧画面への反映は、閲覧側キャッシュ（20 秒）+ 取得間隔（50〜70 秒）により、保存から**最大 90 秒程度**かかる設計です（実環境では未計測）。

@@ -281,6 +281,8 @@ function buildEventView_(bundle, includePrivate) {
     view.event.isPublic = bundle.event.is_public;
     view.event.isFeatured = bundle.event.is_featured;
     view.event.isSample = bundle.event.is_sample;
+    view.event.organizerName = bundle.event.organizer_name;
+    view.event.adminKeyIssuedAt = bundle.event.admin_key_issued_at;
     view.event.notes = bundle.event.notes;
     if (view.rule) {
       view.rule.id = rule.rule_id;

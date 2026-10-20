@@ -1,7 +1,7 @@
-// 運営者用 API（adminCall）の結合テスト。スプレッドシートは gas-mock の模擬実装。
+// 運営用 API（doPost）の結合テスト。スプレッドシートは gas-mock の模擬実装。認証は既定で管理者の鍵。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setupPair, createStore, loadProject, SPREADSHEET_ID } from './gas-mock.mjs';
+import { setupPair, createStore, loadProject, SPREADSHEET_ID, ADMIN_KEY } from './gas-mock.mjs';
 
 function ready() {
   const p = setupPair();
@@ -26,9 +26,10 @@ const firstMatch = (detail) => detail.groups[0].matches[0];
 test('保存先の設定: 未設定の状態から Web 画面で ID（共有リンク）を登録できる', () => {
   const store = createStore();
   store.add();
-  const admin = loadProject('admin', { store });
-  const call = (action, payload, requestId = 'setup-request-0000001') => admin.run('adminCall', { action, payload, requestId });
-  let boot = admin.run('adminCall', { action: 'bootstrap' });
+  const admin = loadProject('admin', { store, properties: { ADMIN_KEY } });
+  const auth = { adminKey: ADMIN_KEY };
+  const call = (action, payload, requestId = 'setup-request-0000001') => admin.post({ action, payload, requestId, auth });
+  let boot = admin.post({ action: 'bootstrap', auth });
   assert.equal(boot.data.storage.configured, false);
   const res = call('configureStorage', { spreadsheetId: `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/edit?usp=sharing` });
   assert.equal(res.ok, true, JSON.stringify(res));
@@ -37,8 +38,8 @@ test('保存先の設定: 未設定の状態から Web 画面で ID（共有リ�
   const again = call('configureStorage', { spreadsheetId: SPREADSHEET_ID }, 'setup-request-0000002');
   assert.equal(again.error.code, 'ALREADY_CONFIGURED');
   // 開けない ID は保存しない
-  const admin2 = loadProject('admin', { store });
-  const bad = admin2.run('adminCall', { action: 'configureStorage', payload: { spreadsheetId: '1ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ' }, requestId: 'setup-request-0000003' });
+  const admin2 = loadProject('admin', { store, properties: { ADMIN_KEY } });
+  const bad = admin2.post({ action: 'configureStorage', payload: { spreadsheetId: '1ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ' }, requestId: 'setup-request-0000003', auth });
   assert.equal(bad.error.code, 'STORAGE_UNAVAILABLE');
   assert.equal(admin2.properties.getProperty('SPREADSHEET_ID'), null);
 });
@@ -245,13 +246,16 @@ test('二重送信: 同じ requestId の書き込みは 1 回しか反映され�
   assert.deepEqual(second.data, { duplicate: true });
   assert.equal(p.ok('eventDetail', { eventId }).players.length, 1);
   // requestId のない書き込みは受け付けない
-  const res = p.admin.run('adminCall', { action: 'addPlayers', payload: { eventId, names: ['c'] } });
+  const res = p.admin.post({ action: 'addPlayers', payload: { eventId, names: ['c'] }, auth: { adminKey: ADMIN_KEY } });
   assert.equal(res.error.code, 'BAD_REQUEST');
 });
 
 test('不正なリクエスト: 不明な操作・ID 形式違い・存在しない ID', () => {
   const p = ready();
-  assert.equal(p.admin.run('adminCall', null).error.code, 'BAD_REQUEST');
+  assert.equal(p.admin.post('null').error.code, 'BAD_REQUEST');
+  assert.equal(p.admin.post('{broken').error.code, 'BAD_REQUEST');
+  assert.equal(p.admin.post('[]').error.code, 'BAD_REQUEST');
+  assert.equal(p.admin.post('x'.repeat(100001)).error.code, 'BAD_REQUEST');
   assert.equal(p.call('dropAllSheets').error.code, 'BAD_REQUEST');
   assert.equal(p.call('constructor').error.code, 'BAD_REQUEST');
   assert.equal(p.call('eventDetail', { eventId: "EVT-1' OR 1=1" }).error.code, 'BAD_REQUEST');
@@ -334,7 +338,7 @@ test('履歴: 書き込み操作ごとに History へ記録される（操作者
   const rows = p.store.get().getSheetByName('History').records();
   const last = rows[rows.length - 1];
   assert.equal(last.action, 'match.result');
-  assert.equal(last.actor, 'owner@example.com');
+  assert.equal(last.actor, 'admin');
   assert.equal(JSON.parse(last.before_json).status, 'scheduled');
   assert.equal(JSON.parse(last.after_json).player1_legs, 3);
   assert.ok(rows.every((r) => /^HIS-/.test(r.history_id)));
