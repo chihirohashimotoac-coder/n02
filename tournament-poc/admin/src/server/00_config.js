@@ -10,7 +10,7 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.1.1',
+  APP_VERSION: '0.2.0',
   SCHEMA_VERSION: 1,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,

@@ -552,11 +552,11 @@ body.is-busy .busy-indicator { display: block; }
         ])
       );
 
-      var viewerUrl = el('input', { className: 'input', id: 'viewer-url', value: boot.viewerUrl, placeholder: 'https://script.google.com/macros/s/…/exec' });
+      var viewerUrl = el('input', { className: 'input', id: 'viewer-url', value: boot.viewerUrl, placeholder: 'https://<ユーザー名>.github.io/<リポジトリ名>/' });
       wrap.appendChild(
         el('section', { className: 'panel' }, [
           el('h2', { text: '閲覧者用 URL' }),
-          el('p', { className: 'muted', text: '閲覧者用 Web アプリをデプロイしたら URL を登録してください。運営画面からリンクを開けるようになります（任意）。' }),
+          el('p', { className: 'muted', text: '閲覧者に配る閲覧ページ（GitHub Pages）の URL を登録してください。運営画面からリンクを開けるようになります（任意）。' }),
           el('form', {
             className: 'row',
             onSubmit: function (e) {

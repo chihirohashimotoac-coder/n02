@@ -24,8 +24,10 @@ const executablePath = process.env.CHROMIUM_PATH || (existsSync('/opt/pw-browser
 
 // --allow-local はローカル確認用サーバー（tools/preview-server.mjs）でスクリプト自体を試すときだけ使う
 const allowLocal = process.argv.includes('--allow-local') && /^http:\/\/127\.0\.0\.1:\d+\/viewer$/.test(url || '');
-if (!allowLocal && (!url || !/^https:\/\/script\.google\.com\/.+\/exec$/.test(url))) {
-  console.error('usage: node tools/loadtest.mjs --url https://script.google.com/macros/s/…/exec [--clients 50] [--minutes 10] [--ramp 60] [--interval 60]');
+// 閲覧者に配る URL（GitHub Pages の閲覧ページ）か、閲覧者用 Web アプリの …/exec
+const isPages = /^https:\/\/[a-z0-9-]+\.github\.io\/[A-Za-z0-9._-]+\/?$/.test(url || '');
+if (!allowLocal && !isPages && (!url || !/^https:\/\/script\.google\.com\/.+\/exec$/.test(url))) {
+  console.error('usage: node tools/loadtest.mjs --url https://<ユーザー名>.github.io/<リポジトリ名>/ (または …/exec) [--clients 50] [--minutes 10] [--ramp 60] [--interval 60]');
   process.exit(2);
 }
 

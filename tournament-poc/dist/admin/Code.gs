@@ -14,7 +14,7 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.1.1',
+  APP_VERSION: '0.2.0',
   SCHEMA_VERSION: 1,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
@@ -1294,8 +1294,10 @@ function actionInitializeStorage_(ctx) {
 
 function actionSetViewerUrl_(ctx, payload) {
   var url = typeof payload.url === 'string' ? payload.url.trim() : '';
-  if (url && !/^https:\/\/script\.google\.com\/(a\/macros\/[A-Za-z0-9.-]+\/)?macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) {
-    throw appError_('VALIDATION', '閲覧者用 Web アプリの URL（https://script.google.com/macros/s/…/exec）を入力してください。');
+  var gas = /^https:\/\/script\.google\.com\/(a\/macros\/[A-Za-z0-9.-]+\/)?macros\/s\/[A-Za-z0-9_-]+\/exec$/;
+  var pages = /^https:\/\/[a-z0-9-]+\.github\.io\/[A-Za-z0-9._-]+\/?$/;
+  if (url && !gas.test(url) && !pages.test(url)) {
+    throw appError_('VALIDATION', '閲覧ページの URL（https://<ユーザー名>.github.io/<リポジトリ名>/ または https://script.google.com/macros/s/…/exec）を入力してください。');
   }
   var props = PropertiesService.getScriptProperties();
   if (url) props.setProperty('VIEWER_URL', url);

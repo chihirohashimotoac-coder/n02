@@ -62,6 +62,9 @@ node tournament-poc/tools/loadtest.mjs --url "<閲覧者用 URL>" --clients 50 -
 node tournament-poc/tools/loadtest.mjs --url "<閲覧者用 URL>" --clients 50 --minutes 10 --ramp 60 --interval 15 --out loadtest-x4.json
 ```
 
+`<閲覧者用 URL>` には、閲覧者に配る GitHub Pages の URL（例: `https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/`）を指定します。
+各画面は閲覧ページから閲覧者用 Web アプリの `?format=json` を読みます（Apps Script の画面 `…/exec` を直接指定することもできます）。
+
 本試験（段階 3）の実行中に、運営画面で **2〜3 分おきに 1 試合ずつ結果を確定**してください（反映時間の計測用）。
 
 ### 出力の見方

@@ -371,3 +371,13 @@ test('シートを直接書き換えて不整合が生じても、公開デー�
   assert.equal(match.winnerId, null);
   assert.equal(match.p1.legs, null);
 });
+
+test('閲覧者用 URL: GitHub Pages と Apps Script の URL だけを登録できる', () => {
+  const p = ready();
+  assert.equal(p.ok('setViewerUrl', { url: 'https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/' }).viewerUrl, 'https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/');
+  assert.equal(p.ok('setViewerUrl', { url: 'https://script.google.com/macros/s/AKfycbABC_-123/exec' }).viewerUrl, 'https://script.google.com/macros/s/AKfycbABC_-123/exec');
+  for (const bad of ['http://example.github.io/x/', 'https://evil.example.com/', 'javascript:alert(1)', 'https://a.github.io/x/?q=<script>']) {
+    assert.equal(p.call('setViewerUrl', { url: bad }).error.code, 'VALIDATION', bad);
+  }
+  assert.equal(p.ok('setViewerUrl', { url: '' }).viewerUrl, '');
+});
