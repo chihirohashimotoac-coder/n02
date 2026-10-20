@@ -86,6 +86,17 @@ describe('useDialogFocus guardKeys', () => {
     expect(behind).not.toHaveBeenCalled();
   });
 
+  it('wraps Tab at the edges but leaves Ctrl+Tab to the browser', () => {
+    setup(true);
+    const last = screen.getByText('last');
+    last.focus();
+    expect(fireEvent.keyDown(last, { key: 'Tab', ctrlKey: true })).toBe(true);
+    expect(document.activeElement).toBe(last);
+    expect(fireEvent.keyDown(last, { key: 'Tab' })).toBe(false);
+    expect(document.activeElement).toBe(screen.getByText('first'));
+    expect(behind).not.toHaveBeenCalled();
+  });
+
   it('leaves dialogs that did not opt in exactly as before', () => {
     const { onClose, onKeyDown, button } = setup(false);
     fireEvent.keyDown(button, { key: '1', ctrlKey: true });

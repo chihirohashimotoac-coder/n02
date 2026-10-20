@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import { isInertKeystroke } from './keyboardPolicy';
+import { hasCommandModifier, isInertKeystroke } from './keyboardPolicy';
 
 /**
  * Everything inside a dialog that can hold focus, in document order. `:not([disabled])` matters:
@@ -124,6 +124,8 @@ export function useDialogFocus({ cardRef, onClose, onKeyDown, returnFocusTo, gua
       }
       if (event.key === 'Tab') {
         if (guardKeys && !inOwnField) event.stopPropagation();
+        // Ctrl/Meta/Alt+Tab is the browser's or the OS's, not a focus move inside the dialog.
+        if (guardKeys && hasCommandModifier(event)) return;
         const items = focusables();
         // 0 focusables: nothing to cycle between, so Tab must not be allowed to leave for the
         // screen behind. 1 focusable: both branches below land back on that same element.
