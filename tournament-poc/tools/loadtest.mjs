@@ -1,11 +1,12 @@
 // 閲覧者用 Web アプリ（実際のデプロイ URL）に、ヘッドレスブラウザで N 人分の閲覧画面を開いて計測する。
 // 手順と判定基準は docs/load-test.md を参照。Google の本番環境に負荷をかけるため、実行は運営者の判断で行うこと。
 //
-//   node tournament-poc/tools/loadtest.mjs --url https://script.google.com/macros/s/XXXX/exec \
+//   node tournament-poc/tools/loadtest.mjs --url 'https://<ユーザー名>.github.io/<リポジトリ名>/?event=EVT-XXXX' \
 //        --clients 50 --minutes 10 --ramp 60 [--interval 60] [--out result.json]
+//   （閲覧者用 Web アプリの …/exec を直接指定することもできる）
 //
 // 前提: リポジトリ直下で `npm ci`（@playwright/test を使う）。ブラウザが無い場合は `npx playwright install chromium`。
-import { writeFileSync, existsSync } from 'node:fs';
+import { writeFileSync, appendFileSync, existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 
 function arg(name, def) {
@@ -22,16 +23,23 @@ const interval = arg('interval', '');
 const out = arg('out', `loadtest-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
 const executablePath = process.env.CHROMIUM_PATH || (existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 
+// 大会の指定（?event=EVT-…）は省略可。省略すると閲覧ページの既定の大会を開く
+const EVENT_QUERY = '(\\?event=EVT-[A-Z0-9]+)?';
 // --allow-local はローカル確認用サーバー（tools/preview-server.mjs）でスクリプト自体を試すときだけ使う
-const allowLocal = process.argv.includes('--allow-local') && /^http:\/\/127\.0\.0\.1:\d+\/viewer$/.test(url || '');
+const allowLocal =
+  process.argv.includes('--allow-local') && new RegExp(`^http://127\\.0\\.0\\.1:\\d+/(viewer|pages/index\\.html${EVENT_QUERY})$`).test(url || '');
+// ローカルの Pages 版は、Apps Script への通信をブラウザ側で模擬サーバーの /viewer-json に振り替える（e2e と同じ）
+const localPages = allowLocal && url.includes('/pages/');
 // 閲覧者に配る URL（GitHub Pages の閲覧ページ）か、閲覧者用 Web アプリの …/exec
-const isPages = /^https:\/\/[a-z0-9-]+\.github\.io\/[A-Za-z0-9._-]+\/?$/.test(url || '');
+const isPages = new RegExp(`^https://[a-z0-9-]+\\.github\\.io/[A-Za-z0-9._-]+/${EVENT_QUERY}$`).test(url || '');
 if (!allowLocal && !isPages && (!url || !/^https:\/\/script\.google\.com\/.+\/exec$/.test(url))) {
-  console.error('usage: node tools/loadtest.mjs --url https://<ユーザー名>.github.io/<リポジトリ名>/ (または …/exec) [--clients 50] [--minutes 10] [--ramp 60] [--interval 60]');
+  console.error("usage: node tools/loadtest.mjs --url 'https://<ユーザー名>.github.io/<リポジトリ名>/?event=EVT-XXXX' (または …/exec) [--clients 50] [--minutes 10] [--ramp 60] [--interval 60]");
   process.exit(2);
 }
 
-const target = interval ? `${url}?interval=${encodeURIComponent(interval)}` : url;
+const targetUrl = new URL(url);
+if (interval) targetUrl.searchParams.set('interval', interval);
+const target = targetUrl.href;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Apps Script の Web アプリは入れ子の iframe の中で動くので、計測値を持つフレームを探す */
@@ -65,6 +73,12 @@ console.log(`target=${target} clients=${clients} minutes=${minutes} ramp=${rampS
 
 for (let i = 0; i < clients; i++) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  if (localPages) {
+    await context.route('https://script.google.com/**', async (route) => {
+      const r = await fetch(`${targetUrl.origin}/viewer-json${new URL(route.request().url()).search}`);
+      await route.fulfill({ status: r.status, contentType: r.headers.get('content-type') || 'application/json', body: await r.text(), headers: { 'access-control-allow-origin': '*' } });
+    });
+  }
   const page = await context.newPage();
   const t0 = Date.now();
   page
@@ -123,5 +137,41 @@ const summary = {
   versions: spread,
 };
 writeFileSync(out, JSON.stringify({ summary, results }, null, 2));
+
+// GitHub Actions で動かしたときは、判定基準（docs/load-test.md の 1.）との比較を実行結果の画面に出す
+if (process.env.GITHUB_STEP_SUMMARY) {
+  const jst = (iso) => new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  const mark = (ok) => (ok === null ? '—' : ok ? '合格' : '**不合格**');
+  const rows = [
+    ['開けた画面 / 計測できた画面', `${pages.length} / ${measured.length}（${clients} 人中）`, mark(pages.length === clients && measured.length === clients)],
+    ['取得の成功率（99% 以上）', summary.successRate === null ? '—' : `${(summary.successRate * 100).toFixed(2)}%（${success} / ${success + failure} 回）`, mark(summary.successRate === null ? null : summary.successRate >= 0.99)],
+    ['応答時間 p95（5 秒以内）', summary.latencyMs.p95 === null ? '—' : `${summary.latencyMs.p95} ms（p50 ${summary.latencyMs.p50} ms・最大 ${summary.latencyMs.max} ms）`, mark(summary.latencyMs.p95 === null ? null : summary.latencyMs.p95 <= 5000)],
+    ['失敗の内訳', Object.keys(errors).length ? Object.entries(errors).map(([k, v]) => `${k} ${v} 回`).join('、') : 'なし', '—'],
+    ['予備キャッシュを返した回数', String(summary.stale), '—'],
+    ['画面を開く時間 p50 / p95', `${summary.pageLoadMs.p50} / ${summary.pageLoadMs.p95} ms`, '—'],
+  ];
+  const md = [
+    `## 負荷テストの結果（${clients} 人・${minutes} 分）`,
+    '',
+    `対象: ${target}`,
+    '',
+    '| 項目 | 結果 | 判定 |',
+    '| --- | --- | --- |',
+    ...rows.map((r) => `| ${r.join(' | ')} |`),
+    '',
+    '### 公開データの版ごとの反映（運営画面で確定した時刻と比べて、反映までの秒数を求める）',
+    '',
+    '| 最初に表示された時刻（日本時間） | 全画面に行き渡るまで | 表示した画面数 |',
+    '| --- | --- | --- |',
+    ...Object.values(spread).sort((a, b) => a.firstSeen.localeCompare(b.firstSeen)).map((v) => `| ${jst(v.firstSeen)} | ${v.spreadSec} 秒 | ${v.clients} |`),
+    '',
+    errors.NO_PUBLIC_EVENT ? '**NO_PUBLIC_EVENT: 指定した大会が公開されていません。運営画面の「大会設定」で「閲覧画面に公開する」を確認してください。**\n' : '',
+    'NETWORK（Google 側のエラー・通信失敗）が多いときは、閲覧者用 Apps Script の「実行数」で、同時実行数などの上限に関するエラーが出ていないか確認してください。',
+    '',
+    '詳しい数値は、この画面下の「Artifacts」の loadtest-result（JSON）にあります。',
+    '',
+  ].join('\n');
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+}
 console.log(JSON.stringify(summary, null, 2));
 console.log(`saved: ${out}`);

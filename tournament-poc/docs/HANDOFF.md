@@ -11,7 +11,7 @@
 | リポジトリ | 役割 | ブランチ | 備考 |
 | --- | --- | --- | --- |
 | **chihirohashimotoac-coder/n02** | **ソースの正本**（`tournament-poc/` 配下だけを触る） | `claude/confident-carson-4jh0g5`（最新。`claude/bold-albattani-5vsk78` から派生し、v0.4.1 の実環境確認の記録を追加） | 未マージ。PR は未作成（ユーザーの指示があるまで作らない） |
-| chihirohashimotoac-coder/n02-tournament-viewer | GitHub Pages の公開先（`dist/pages/` のコピー置き場） | `main` | `config.js`・`admin/config.js` に Web アプリの URL。ここは**手で編集しない**で `dist/pages/` からコピーする |
+| chihirohashimotoac-coder/n02-tournament-viewer | GitHub Pages の公開先（`dist/pages/` のコピー置き場） | `main` | `config.js`・`admin/config.js` に Web アプリの URL。ここは**手で編集しない**で `dist/pages/` からコピーする。負荷テスト用に `.github/workflows/loadtest.yml`（← `tournament-poc/tools/pages-loadtest.yml`）と `tools/loadtest.mjs`（← `tournament-poc/tools/loadtest.mjs`）もコピーしてある |
 
 新しいセッションでは **n02 を選択**し、Pages を更新するときだけ `add_repo` で n02-tournament-viewer を追加する。
 
@@ -101,7 +101,7 @@ Drive コネクタでできること・できないこと（確認済み）:
 ## 7. 未検証・残タスク
 
 実環境で未検証（[test-plan.md](test-plan.md) の確認項目）:
-- R-14 50 人同時閲覧（[load-test.md](load-test.md)。`tools/loadtest.mjs` あり）
+- R-14 50 人同時閲覧（[load-test.md](load-test.md)。ユーザーの選択で GitHub Actions で実行する（4-1.）。公開先リポジトリに `.github/workflows/loadtest.yml`・`tools/loadtest.mjs` を置いた）
 - 2 大会の同時進行
 - R-06（置き換え後: 別の大会の ID に差し替えた運営用 URL では操作できない）、R-09〜R-13
 - R-15・R-16（v0.4.0 の形式機能はユーザーが「全て問題なく出来ました」と報告済み。項目ごとの結果は未記録）

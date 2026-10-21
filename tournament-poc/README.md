@@ -74,6 +74,7 @@ Apps Script の画面（`…/exec`）は、ブラウザで複数の Google ア�
 | `tools/build.mjs` | `src/` から `dist/` を生成（`--check` で一致確認） |
 | `tools/preview-server.mjs` | Google に接続せずにブラウザで動作確認するためのローカルサーバー |
 | `tools/loadtest.mjs` | 実際の閲覧ページに N 人分の画面を開いて計測する負荷試験スクリプト |
+| `tools/pages-loadtest.yml` | 上を GitHub Actions で手動実行する workflow（公開先リポジトリの `.github/workflows/loadtest.yml` にコピーして使う） |
 | `tests/*.test.mjs` | 単体・結合テスト（Node.js 組み込みのテストランナー） |
 | `tests/gas-mock.mjs` | Apps Script のサービス（SpreadsheetApp・CacheService など）の模擬実装 |
 | `e2e/*.spec.mjs` | ブラウザでの画面テスト（Playwright、PC 1366×768 / スマートフォン 390×844） |

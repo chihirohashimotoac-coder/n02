@@ -1,7 +1,8 @@
 # 50 人同時閲覧の性能検証手順
 
 > **状態: 未検証。** 本作業では Google の実環境に接続できないため、実際の Apps Script での負荷試験は実施していません。
-> 実施済みなのは、(1) 模擬環境での計算上の試算、(2) 負荷試験スクリプトがローカル確認用サーバーに対して動くことの確認、の 2 点だけです。
+> 実施済みなのは、(1) 模擬環境での計算上の試算、(2) 負荷試験スクリプトがローカル確認用サーバーに対して動くことの確認（Apps Script 版の画面と、GitHub Pages 版の閲覧ページ `?event=` 指定の両方）、の 2 点だけです。
+> PC を用意しなくてよいように、GitHub Actions から実行する方法（[4-1.](#4-1-試験-a-を-github-actions-で実行する推奨)）を用意しました。
 
 ## 1. 目標と判定基準
 
@@ -62,10 +63,24 @@ node tournament-poc/tools/loadtest.mjs --url "<閲覧者用 URL>" --clients 50 -
 node tournament-poc/tools/loadtest.mjs --url "<閲覧者用 URL>" --clients 50 --minutes 10 --ramp 60 --interval 15 --out loadtest-x4.json
 ```
 
-`<閲覧者用 URL>` には、閲覧者に配る GitHub Pages の URL（例: `https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/`）を指定します。
+`<閲覧者用 URL>` には、閲覧者に配る GitHub Pages の URL（例: `https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/?event=EVT-…`）を指定します。`?event=` を省くと既定の大会（管理者が既定表示にした大会）を開きます。
 各画面は閲覧ページから閲覧者用 Web アプリの `?format=json` を読みます（Apps Script の画面 `…/exec` を直接指定することもできます）。
 
 本試験（段階 3）の実行中に、運営画面で **2〜3 分おきに 1 試合ずつ結果を確定**してください（反映時間の計測用）。
+
+### 4-1. 試験 A を GitHub Actions で実行する（推奨）
+
+公開先リポジトリ（n02-tournament-viewer）に、手動で実行する負荷テストを置いています（`.github/workflows/loadtest.yml` と `tools/loadtest.mjs`。
+元はこのリポジトリの [`tools/pages-loadtest.yml`](../tools/pages-loadtest.yml) と [`tools/loadtest.mjs`](../tools/loadtest.mjs)）。
+公開リポジトリの標準ランナーは料金がかかりません（[About billing for GitHub Actions](https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions)）。
+ランナーは GitHub のサーバー上の Linux（Chromium）で、通信元は GitHub のデータセンターです（店内の Wi-Fi やスマートフォン回線の条件は含みません）。
+
+1. GitHub で n02-tournament-viewer を開き、「Actions」→ 左の「負荷テスト（閲覧ページ）」→「Run workflow」。
+2. 入力欄: 大会 ID（`EVT-…`。公開中の検証用の大会）、画面の数、時間（分）、開き終えるまでの秒数、取得間隔（秒。空なら 60）。上の段階 1〜5 の数値をそのまま入れる。
+3. 緑の「Run workflow」を押す。実行中に、運営画面で 2〜3 分おきに 1 試合ずつ結果を確定し、その時刻を控える。
+4. 終わったら実行結果の画面を開く。判定（成功率・p95）と、公開データの版ごとの「最初に表示された時刻」が表で出る。
+   控えた確定時刻との差が反映時間。詳しい数値は画面下の「Artifacts」の `loadtest-result`（JSON）。
+5. 同じ時間帯に、閲覧者用 Apps Script の「実行数」でエラーを確認する（[6.](#6-サーバー側の確認)）。
 
 ### 出力の見方
 
