@@ -60,7 +60,7 @@
 | --- | --- |
 | ソース（n02 ブランチ） | v0.5.0 をコミット・push 済み（v0.4.3 は `5a8dbc8`、v0.4.1 は `c7d1fd6`） |
 | v0.5.0 の反映 | **完了・動作確認済み**（2026-10-21）。OAuth クライアント ID `99512252323-um86…apps.googleusercontent.com`（秘密ではない）。運営用 Apps Script はビルドと完全一致を Drive で確認、ユーザーが `GOOGLE_CLIENT_ID` 設定・承認し直し・新バージョンでデプロイ・初期化を実施。Pages の運営画面は `c538cba`。ユーザーが Google ログイン → 大会作成 → 管理パスワードでスタッフとして開く、まで「全て完了」と報告（R-19〜R-22 すべて合格） |
-| GitHub Pages | v0.5.0 の運営画面を push 済み（`c538cba`）。閲覧ページは v0.4.3（`fd90803`）。v0.4.2 は `e1ee333`（`viewer.css`・`viewer.js` のみ差し替え、pages build and deployment は成功）。Pages 側の `README.md` には `admin/` の行が手で足されており `dist/pages/README.md` と 1 行違う（上書きしていない） |
+| GitHub Pages | v0.5.1 を push 済み（`bf7e070`。閲覧ページ `viewer.js`・運営画面 `admin.js`/`admin.css`・`tools/loadtest.mjs`。pages build and deployment 成功）。実環境での自動更新の動き（休止・停止の表示）は未確認。v0.5.0 の運営画面は `c538cba`、閲覧ページ v0.4.3 は `fd90803`。v0.4.2 は `e1ee333`（`viewer.css`・`viewer.js` のみ差し替え、pages build and deployment は成功）。Pages 側の `README.md` には `admin/` の行が手で足されており `dist/pages/README.md` と 1 行違う（上書きしていない） |
 | 運営用 Apps Script のコード | ユーザーが v0.4.1 を貼り付け済み。Drive コネクタで読み出し、**ビルドと完全一致**を確認 |
 | 運営用のデプロイ（新バージョン） | **動作確認済み**（2026-10-21）。ユーザーが「まとめて確定」で「2 試合の結果を確定しました。」と表示されたと報告 → v0.4.1 の `saveMatchResults` が実環境で動いている。閲覧ページにも反映された（R-17 合格） |
 | 閲覧者用 Apps Script | 変更不要（v0.2.0 のまま）。v0.4.2 で `dist/viewer/Index.html` の CSS も変わるが、Apps Script 版の画面は QR を出さないので貼り替え不要 |
