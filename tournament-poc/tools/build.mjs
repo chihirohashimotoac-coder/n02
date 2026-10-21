@@ -103,6 +103,38 @@ function toStaticPage(templatePath, css, js, connect, opts = {}) {
  * - 運営ページ（admin/）: 運営用 Web アプリへ fetch（POST）で操作を送る
  * どちらもインラインのスクリプトを持たないので、CSP で script-src 'self' に絞れる。
  */
+/**
+ * ポータル「トーナメント・リーグ」（events/）。閲覧ページと運営画面の設定（../config.js・../admin/config.js）をそのまま読む。
+ * 一覧は閲覧者用 Web アプリ（GET ?format=list）、ログインと作成した大会は運営用 Web アプリ（POST）。
+ * Google のログインボタンを置くので、CSP と Referrer は運営画面と同じ扱い。
+ */
+function portalPage(connect) {
+  const gsi = ' https://accounts.google.com/gsi/';
+  const csp = [
+    "default-src 'none'",
+    "script-src 'self' https://accounts.google.com/gsi/client",
+    "style-src 'self' https://accounts.google.com/gsi/style",
+    "font-src 'self'",
+    "img-src 'self' data:",
+    `connect-src ${connect}${gsi}`,
+    `frame-src${gsi}`,
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join('; ');
+  const html = read('portal/src/client/index.html')
+    .replace(
+      '<!--@@HEAD@@-->',
+      `<meta http-equiv="Content-Security-Policy" content="${csp}" />\n    <meta name="referrer" content="strict-origin" />`
+    )
+    .replace(
+      '<!--@@SCRIPTS@@-->',
+      '<script src="https://accounts.google.com/gsi/client" async></script>\n' +
+        '    <script src="../config.js"></script>\n    <script src="../admin/config.js"></script>\n    <script src="portal.js"></script>'
+    );
+  if (html.includes('@@')) throw new Error('portal template not converted');
+  return html;
+}
+
 function buildPages() {
   const connect = 'https://script.google.com https://script.googleusercontent.com';
   const header = '/* このファイルは tools/build.mjs が生成したものです。直接編集しないでください。 */\n';
@@ -119,6 +151,11 @@ function buildPages() {
     'dist/pages/admin/admin.css': header + read('admin/src/client/admin.css'),
     'dist/pages/admin/admin.js': header + read('admin/src/client/admin.js'),
     'dist/pages/admin/config.example.js': read('admin/src/pages/config.example.js'),
+    'dist/pages/events/index.html': portalPage(connect),
+    'dist/pages/events/portal.css': header + read('portal/src/client/portal.css'),
+    'dist/pages/events/portal.js': header + read('portal/src/client/portal.js'),
+    'dist/pages/events/archivo.woff2': readFileSync(join(root, 'vendor/archivo/n02-archivo-subset.woff2')),
+    'dist/pages/events/OFL-Archivo.txt': read('vendor/archivo/OFL.txt'),
   };
 }
 
@@ -127,7 +164,8 @@ let stale = [];
 for (const [path, content] of Object.entries(outputs)) {
   const full = join(root, path);
   if (check) {
-    if (!existsSync(full) || readFileSync(full, 'utf8') !== content) stale.push(path);
+    const same = Buffer.isBuffer(content) ? existsSync(full) && readFileSync(full).equals(content) : existsSync(full) && readFileSync(full, 'utf8') === content;
+    if (!same) stale.push(path);
   } else {
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, content);

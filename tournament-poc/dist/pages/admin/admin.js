@@ -233,11 +233,13 @@
    *   #e=EVT-…  … その大会の運営画面（作った本人の Google ログイン、または管理パスワード）
    *   #admin    … 管理者
    *   なし      … 主催者のホーム（Google でログインして、自分の大会の一覧・新しい大会の作成）
+   *   #new      … 主催者のホームを開き、大会の作成欄へ移る（ポータル「トーナメント・リーグ」の作成ボタンから）
    * v0.4 までの運営用 URL（#e=…&k=…）の鍵の部分は使わない。
    */
   function parseHash(hash) {
     var h = String(hash || '').replace(/^#/, '');
     if (h === 'admin') return { mode: 'admin' };
+    if (h === 'new') return { mode: 'home', create: true };
     var out = {};
     h.split('&').forEach(function (pair) {
       var i = pair.indexOf('=');
@@ -687,6 +689,16 @@
       // 描き直しで入力中の欄のフォーカスが外れないよう、id のある要素は描き直し後に戻す
       var active = doc.activeElement && doc.activeElement.id && root.contains(doc.activeElement) ? doc.activeElement.id : '';
       renderInner();
+      // #new: 作成欄を 1 回だけ見せる（ログイン後の最初の表示で）
+      if (state.route.create && !state.createShown && state.boot && state.boot.role.kind === 'google' && !state.eventId) {
+        var nameInput = doc.getElementById('new-name');
+        if (nameInput) {
+          state.createShown = true;
+          if (nameInput.scrollIntoView) nameInput.scrollIntoView({ block: 'center' });
+          nameInput.focus();
+          active = '';
+        }
+      }
       if (active) {
         var again = doc.getElementById(active);
         if (again && !again.disabled) again.focus();

@@ -104,9 +104,14 @@ const server = http.createServer(async (req, res) => {
         'admin/index.html': 'text/html; charset=utf-8',
         'admin/admin.css': 'text/css; charset=utf-8',
         'admin/admin.js': 'text/javascript; charset=utf-8',
+        'events/index.html': 'text/html; charset=utf-8',
+        'events/portal.css': 'text/css; charset=utf-8',
+        'events/portal.js': 'text/javascript; charset=utf-8',
+        'events/archivo.woff2': 'font/woff2',
       };
       if (!types[name]) return send(res, 404, 'text/plain', 'not found');
-      return send(res, 200, types[name], readFileSync(join(ROOT, 'dist', 'pages', name), 'utf8'));
+      const file = join(ROOT, 'dist', 'pages', name);
+      return send(res, 200, types[name], types[name] === 'font/woff2' ? readFileSync(file) : readFileSync(file, 'utf8'));
     }
     // 運営用 Web アプリの doPost と同じ処理（本文は fetch で送られた JSON 文字列のまま渡す）
     if (req.method === 'POST' && url.pathname === '/admin-post') {

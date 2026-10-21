@@ -452,7 +452,7 @@ test('閲覧者用の doGet は書き込み関数を呼ぶコードを含まな�
 });
 
 test('画面のスクリプトはデータを innerHTML で埋め込まない（XSS 対策）', () => {
-  for (const file of ['admin/src/client/admin.js', 'viewer/src/client/viewer.js']) {
+  for (const file of ['admin/src/client/admin.js', 'viewer/src/client/viewer.js', 'portal/src/client/portal.js']) {
     const code = read(file);
     assert.ok(!/\.innerHTML\s*=|insertAdjacentHTML|document\.write|\beval\(|new Function/.test(code), file);
   }
@@ -468,4 +468,24 @@ test('GitHub Pages 用の閲覧ページ: インラインのスクリプトな�
   assert.match(csp, /connect-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com(;|$)/);
   assert.match(read('dist/pages/viewer.js'), /credentials: 'omit'/);
   assert.equal(read('dist/pages/viewer.js').includes(read('viewer/src/client/viewer.js')), true, '閲覧画面と同じスクリプト');
+});
+
+test('ポータル（events/）: インラインのスクリプトなし・CSP で通信先を Apps Script と Google のログインに限定・Cookie を送らない', () => {
+  const html = read('dist/pages/events/index.html');
+  assert.doesNotMatch(html, /<script>(?!<\/script>)|<script(?![^>]*src=)[^>]*>/, 'インラインのスクリプトがある');
+  assert.doesNotMatch(html, /<style>|style="/);
+  const csp = html.match(/Content-Security-Policy" content="([^"]+)"/)[1];
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /script-src 'self' https:\/\/accounts\.google\.com\/gsi\/client(;|$)/);
+  assert.match(csp, /connect-src https:\/\/script\.google\.com https:\/\/script\.googleusercontent\.com https:\/\/accounts\.google\.com\/gsi\/(;|$)/);
+  assert.match(csp, /form-action 'none'/);
+  assert.match(html, /<meta name="referrer" content="strict-origin" \/>/);
+  // 設定は既存の閲覧ページ・運営画面のものを読む（秘密の情報は持たない）
+  assert.match(html, /<script src="\.\.\/config\.js"><\/script>/);
+  assert.match(html, /<script src="\.\.\/admin\/config\.js"><\/script>/);
+  const js = read('dist/pages/events/portal.js');
+  assert.equal((js.match(/credentials: 'omit'/g) || []).length, 2, 'すべての通信で Cookie を送らない');
+  // セッションを URL に載せない（運営画面へは大会 ID だけを渡す）
+  assert.doesNotMatch(js, /[?&#](session|token|password|key)=/i);
+  assert.match(js, /'\.\.\/admin\/#e=' \+ encodeURIComponent\(id\)/);
 });

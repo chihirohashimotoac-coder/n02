@@ -225,6 +225,8 @@ body.is-busy .busy-indicator { display: block; }
 /* ログイン（v0.5） */
 .topbar__who { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .topbar__logout { color: inherit; border-color: currentColor; background: transparent; }
+.topbar__portal { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.topbar__portal:hover { opacity: 1; }
 .gsi { display: grid; gap: 8px; margin: 8px 0 4px; }
 .gsi-button { min-height: 44px; }
 .notice { padding: 8px 12px; border-radius: 8px; background: var(--warn-bg, #fff4d6); color: var(--warn-ink, #5c4300); }
