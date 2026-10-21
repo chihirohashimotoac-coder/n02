@@ -49,6 +49,30 @@ function adminActions_() {
     setEntrants: { fn: actionSetEntrants_, scope: 'event', mutating: true },
     generateBracket: { fn: actionGenerateBracket_, scope: 'event', mutating: true },
     clearBracket: { fn: actionClearBracket_, scope: 'event', mutating: true },
+    // v0.8
+    previewAdvancement: { fn: actionPreviewAdvancement_, scope: 'event', mutating: false },
+    previewBracket: { fn: actionPreviewBracket_, scope: 'event', mutating: false },
+    drawNextRound: { fn: actionDrawNextRound_, scope: 'event', mutating: true },
+    generateSwissRound: { fn: actionGenerateSwissRound_, scope: 'event', mutating: true },
+    deleteSwissRound: { fn: actionDeleteSwissRound_, scope: 'event', mutating: true },
+    setNightParticipants: { fn: actionSetNightParticipants_, scope: 'event', mutating: true },
+    generateNight: { fn: actionGenerateNight_, scope: 'event', mutating: true },
+    clearNight: { fn: actionClearNight_, scope: 'event', mutating: true },
+    cancelNight: { fn: actionCancelNight_, scope: 'event', mutating: true },
+    updateNight: { fn: actionUpdateNight_, scope: 'event', mutating: true },
+    importPlayers: { fn: actionImportPlayers_, scope: 'event', mutating: true },
+    previewWithdraw: { fn: actionPreviewWithdraw_, scope: 'event', mutating: false },
+    withdrawPlayer: { fn: actionWithdrawPlayer_, scope: 'event', mutating: true },
+    reinstatePlayer: { fn: actionReinstatePlayer_, scope: 'event', mutating: true },
+    setSchedule: { fn: actionSetSchedule_, scope: 'event', mutating: true },
+    postponeMatch: { fn: actionPostponeMatch_, scope: 'event', mutating: true },
+    previewWeeklySchedule: { fn: actionPreviewWeeklySchedule_, scope: 'event', mutating: false },
+    applyWeeklySchedule: { fn: actionApplyWeeklySchedule_, scope: 'event', mutating: true },
+    updateEventSettings: { fn: actionUpdateEventSettings_, scope: 'event', mutating: true },
+    duplicateEvent: { fn: actionDuplicateEvent_, scope: 'event', mutating: true },
+    addCollaborator: { fn: actionAddCollaborator_, scope: 'event', mutating: true },
+    removeCollaborator: { fn: actionRemoveCollaborator_, scope: 'event', mutating: true },
+    restoreEvent: { fn: actionRestoreEvent_, scope: 'create', mutating: true },
   };
 }
 
@@ -156,6 +180,11 @@ function runQuery_(user, spec, payload, reuse) {
 }
 
 var REQUEST_ID_PATTERN_ = /^[A-Za-z0-9-]{16,64}$/;
+var NO_COMPLETION_CHECK_ = [
+  'updateEvent', 'updateEventSettings', 'setStaffPassword', 'setOwner', 'addCollaborator', 'removeCollaborator', 'republish', 'renameGroup',
+  'updatePlayer', 'setSchedule', 'postponeMatch', 'applyWeeklySchedule', 'updateNight', 'createEvent', 'createSampleEvent', 'duplicateEvent',
+  'restoreEvent', 'importPlayers', 'addPlayers', 'deleteEvent', 'reinstatePlayer',
+];
 var WRITE_JOURNAL_KEY_ = 'WRITE_JOURNAL';
 
 /**
@@ -213,6 +242,8 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
         ctx.user = user;
       }
       if (spec.scope === 'event') authorizeEventPayload_(ctx, payload);
+      // 自動終了（F05）の判定は、試合・組み合わせ・段階が変わりうる操作の後だけ（大会設定の保存などでは判定しない）
+      ctx.touchedResults = NO_COMPLETION_CHECK_.indexOf(action) === -1;
       result = spec.fn(ctx, payload) || {};
       var eventIds = [];
       if (result.eventId) eventIds.push(result.eventId);

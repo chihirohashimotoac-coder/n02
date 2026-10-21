@@ -46,12 +46,13 @@ function swissPairRound_(players, opts) {
     });
     for (var i = 0; i < cand.length; i++) {
       var b = cand[i];
-      if (!allowRematch && a.opponents[b.id]) continue;
+      // 調べた候補の数（再戦で飛ばした候補も数える）が予算を超えたら打ち切る
       if (++steps > budget) {
         var err = new Error('TIMEOUT');
         err.swissTimeout = true;
         throw err;
       }
+      if (!allowRematch && a.opponents[b.id]) continue;
       var rest2 = others.filter(function (x) {
         return x !== b;
       });

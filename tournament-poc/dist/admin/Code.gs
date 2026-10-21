@@ -1001,13 +1001,49 @@ function assertCanCreate_(user) {
   throw appError_('AUTH_REQUIRED', '大会を作るには、Google でログインしてください。');
 }
 
-/** その大会を運営できるか（管理者・作った本人・その大会の管理パスワードでログインした人） */
-function canManageEvent_(user, event) {
-  if (!user || !event) return false;
-  if (user.isPlatformAdmin) return true;
-  if (user.kind === 'google') return !!event.owner_email && event.owner_email === user.email;
-  if (user.kind === 'staff') return user.eventId === event.event_id;
-  return false;
+/**
+ * 大会ごとの共同主催者（v0.8）のメールアドレス。ctx ごとに 1 回だけ作る。
+ * 毎回シートから読むので、解除するとその人の古いセッションでもすぐに操作できなくなる。
+ */
+function collaboratorIndex_(ctx) {
+  if (!ctx) return {};
+  if (ctx._collab) return ctx._collab;
+  var index = {};
+  ctx.table('Collaborators').rows.forEach(function (r) {
+    var email = normalizeEmail_(r.email);
+    if (!email || !isValidId_(r.event_id)) return;
+    if (!index[r.event_id]) index[r.event_id] = [];
+    if (index[r.event_id].indexOf(email) === -1) index[r.event_id].push(email);
+  });
+  ctx._collab = index;
+  return index;
+}
+
+/**
+ * その大会での役割。admin = 管理者 / owner = 作った本人 / editor = 共同主催者 / staff = 管理パスワード / '' = 権限なし
+ */
+function eventRole_(user, event, ctx) {
+  if (!user || !event) return '';
+  if (user.isPlatformAdmin) return 'admin';
+  if (user.kind === 'google') {
+    if (event.owner_email && event.owner_email === user.email) return 'owner';
+    var list = collaboratorIndex_(ctx)[event.event_id] || [];
+    return list.indexOf(user.email) !== -1 ? 'editor' : '';
+  }
+  if (user.kind === 'staff') return user.eventId === event.event_id ? 'staff' : '';
+  return '';
+}
+
+/** その大会を運営できるか（管理者・作った本人・共同主催者・その大会の管理パスワードでログインした人） */
+function canManageEvent_(user, event, ctx) {
+  return eventRole_(user, event, ctx) !== '';
+}
+
+/** 大会の削除・管理パスワード・共同主催者の管理は、作った本人と管理者だけ */
+function assertOwnerRole_(ctx, eventId, what) {
+  var event = ctx.table('Events').byKey[eventId];
+  var role = eventRole_(ctx.user, event, ctx);
+  if (role !== 'owner' && role !== 'admin') throw appError_('FORBIDDEN', what + 'は、大会を作った本人（Google ログイン）か管理者だけが行えます。');
 }
 
 /**
@@ -1031,7 +1067,7 @@ function authorizeEventPayload_(ctx, payload) {
   }
   var user = ctx.user;
   var events = ctx.table('Events');
-  if (!canManageEvent_(user, events.duplicates[eventId] ? null : events.byKey[eventId])) {
+  if (!canManageEvent_(user, events.duplicates[eventId] ? null : events.byKey[eventId], ctx)) {
     // 他の大会の存在を知らせないよう「見つからない」と同じ扱いにする
     throw appError_('NOT_FOUND', '大会が見つからないか、この大会を管理する権限がありません。');
   }
@@ -2713,12 +2749,13 @@ function swissPairRound_(players, opts) {
     });
     for (var i = 0; i < cand.length; i++) {
       var b = cand[i];
-      if (!allowRematch && a.opponents[b.id]) continue;
+      // 調べた候補の数（再戦で飛ばした候補も数える）が予算を超えたら打ち切る
       if (++steps > budget) {
         var err = new Error('TIMEOUT');
         err.swissTimeout = true;
         throw err;
       }
+      if (!allowRematch && a.opponents[b.id]) continue;
       var rest2 = others.filter(function (x) {
         return x !== b;
       });
@@ -3612,6 +3649,197 @@ function eventCompletionFromStages_(stages) {
   return { complete: stages.length > 0 && reasons.length === 0, reasons: reasons };
 }
 
+// ---- 04f_draw.js ----
+/* 抽選・組分け（v0.8。スプレッドシートに依存しない純粋な関数。乱数だけは Utilities を使う）
+ *
+ * 守る条件の優先順位（高い順）: ①人数の均衡（組の人数差は 1 以下。必ず守る）②シードの分散 ③レーティングの分散 ④所属の分散
+ * 下位の条件は上位の条件を崩さない範囲でだけ整える（同じ強さの帯の中での入れ替えだけを行う）。満たせなかったものは報告する。
+ * 所属が空欄の選手は「所属なし」として扱い、1 つの所属としてはまとめない。
+ * レーティング（Rt）が未入力の選手は 0 とは扱わず、Rt のある選手を配った後に抽選で配る。
+ */
+
+/** 0 以上 n 未満の整数の乱数（Utilities.getUuid の乱数を使う。偏りが出ないよう棄却法） */
+function randomInt_(n) {
+  if (n <= 1) return 0;
+  var limit = Math.floor(0x100000000 / n) * n;
+  for (var i = 0; i < 20; i++) {
+    var hex = Utilities.getUuid().replace(/-/g, '').slice(0, 8);
+    var v = parseInt(hex, 16);
+    if (v < limit) return v % n;
+  }
+  return Math.floor(Math.random() * n);
+}
+
+function shuffle_(list) {
+  var a = list.slice();
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = randomInt_(i + 1);
+    var t = a[i];
+    a[i] = a[j];
+    a[j] = t;
+  }
+  return a;
+}
+
+/** レーティングの文字列を数にする（未入力は null。0 とは区別する） */
+function parseRating_(value) {
+  if (value === null || value === undefined) return null;
+  var t = String(value).normalize('NFKC').trim();
+  if (!t) return null;
+  if (!/^\d{1,3}(\.\d{1,2})?$/.test(t)) return NaN;
+  return Number(t);
+}
+
+/** 組ごとの「同じ所属どうしの組み合わせ」の数（所属なしは数えない） */
+function affiliationClashes_(groupsOfPlayers) {
+  var total = 0;
+  var detail = [];
+  groupsOfPlayers.forEach(function (members, gi) {
+    var count = {};
+    members.forEach(function (p) {
+      var a = p.affiliation ? String(p.affiliation).trim() : '';
+      if (!a) return;
+      count[a] = (count[a] || 0) + 1;
+    });
+    Object.keys(count).forEach(function (a) {
+      if (count[a] > 1) {
+        total += (count[a] * (count[a] - 1)) / 2;
+        detail.push({ group: gi, affiliation: a, players: count[a] });
+      }
+    });
+  });
+  return { total: total, detail: detail };
+}
+
+/**
+ * 選手を組に配る。
+ * players: [{ id, affiliation, rating, seed, order }]（order は登録順）
+ * groupCount: 組の数
+ * opts: { method: 'registration' | 'random' | 'balanced', useSeeds, useRating, spreadAffiliation }
+ * 戻り値: { groups: [[id…]], report: { method, sizes, seeds, rated, unrated, clashesBefore, clashes, swaps, notes } }
+ */
+function assignGroups_(players, groupCount, opts) {
+  var o = opts || {};
+  var method = o.method === 'random' || o.method === 'balanced' ? o.method : 'registration';
+  var G = Math.max(1, groupCount);
+  var sizes = splitEven_(players.length, G);
+  var notes = [];
+  var ordered;
+  var tierOf = {};
+  if (method === 'registration') {
+    ordered = players.slice().sort(function (a, b) {
+      return a.order - b.order;
+    });
+    ordered.forEach(function (p, i) {
+      tierOf[p.id] = 'all';
+    });
+  } else if (method === 'random') {
+    ordered = shuffle_(players);
+    ordered.forEach(function (p) {
+      tierOf[p.id] = 'all';
+    });
+  } else {
+    var seeded = o.useSeeds
+      ? players
+          .filter(function (p) {
+            return p.seed;
+          })
+          .sort(function (a, b) {
+            return a.seed - b.seed;
+          })
+      : [];
+    var rest = players.filter(function (p) {
+      return seeded.indexOf(p) === -1;
+    });
+    var rated = o.useRating
+      ? rest
+          .filter(function (p) {
+            return typeof p.ratingValue === 'number' && !isNaN(p.ratingValue);
+          })
+          .sort(function (a, b) {
+            return b.ratingValue - a.ratingValue;
+          })
+      : [];
+    var unrated = shuffle_(
+      rest.filter(function (p) {
+        return rated.indexOf(p) === -1;
+      })
+    );
+    ordered = seeded.concat(rated).concat(unrated);
+    // 同じ強さの帯 = 組の数ごとの区切り（シード → Rt の高い順 → 未入力は抽選）。所属の入れ替えはこの帯の中だけ
+    ordered.forEach(function (p, i) {
+      var band = Math.floor(i / G);
+      tierOf[p.id] = (seeded.indexOf(p) !== -1 ? 's' : rated.indexOf(p) !== -1 ? 'r' : 'u') + (seeded.indexOf(p) !== -1 || rated.indexOf(p) !== -1 ? band : '');
+    });
+    if (o.useSeeds) notes.push('シード ' + seeded.length + ' 人を、別々の組に（上位から蛇行の順で）配りました。');
+    if (o.useRating) notes.push('Rt のある ' + rated.length + ' 人を高い順に蛇行の順で配り、Rt が未入力の ' + unrated.length + ' 人は抽選で配りました（未入力を 0 とは扱っていません）。');
+  }
+  // 配る: 登録順・抽選は A, B, C, A, B, C…（従来どおり）、組分けは蛇行（A, B, C, C, B, A…）
+  var groups = [];
+  for (var g = 0; g < G; g++) groups.push([]);
+  var snake = method === 'balanced';
+  ordered.forEach(function (p, i) {
+    var lap = Math.floor(i / G);
+    var pos = i % G;
+    var target = snake && lap % 2 === 1 ? G - 1 - pos : pos;
+    // 人数の均衡を最優先: 満員の組は飛ばす
+    var guard = 0;
+    while (groups[target].length >= sizes[target] && guard++ < G) target = (target + 1) % G;
+    groups[target].push(p);
+  });
+  var before = affiliationClashes_(groups);
+  var swaps = 0;
+  if (o.spreadAffiliation && before.total > 0) {
+    for (var pass = 0; pass < 20; pass++) {
+      var improved = false;
+      for (var a = 0; a < G; a++) {
+        for (var b = a + 1; b < G; b++) {
+          for (var i1 = 0; i1 < groups[a].length; i1++) {
+            for (var j1 = 0; j1 < groups[b].length; j1++) {
+              var x = groups[a][i1];
+              var y = groups[b][j1];
+              if (tierOf[x.id] !== tierOf[y.id]) continue;
+              var cur = affiliationClashes_(groups).total;
+              groups[a][i1] = y;
+              groups[b][j1] = x;
+              if (affiliationClashes_(groups).total < cur) {
+                swaps++;
+                improved = true;
+              } else {
+                groups[a][i1] = x;
+                groups[b][j1] = y;
+              }
+            }
+          }
+        }
+      }
+      if (!improved) break;
+    }
+  }
+  var after = affiliationClashes_(groups);
+  if (o.spreadAffiliation) {
+    notes.push(
+      after.total
+        ? '同じ所属の選手が同じ組に残っています（' +
+            after.detail
+              .map(function (d) {
+                return d.affiliation + ' ' + d.players + ' 人';
+              })
+              .join('・') +
+            '）。人数の均衡' + (method === 'balanced' ? '・シード・Rt の分散' : '') + 'を優先したため、これ以上は分けられませんでした。'
+        : '同じ所属の選手が同じ組にならないように配りました。'
+    );
+  }
+  return {
+    groups: groups.map(function (list) {
+      return list.map(function (p) {
+        return p.id;
+      });
+    }),
+    report: { method: method, sizes: sizes, clashesBefore: before.total, clashes: after.total, swaps: swaps, notes: notes },
+  };
+}
+
 // ---- 05_publish.js ----
 /* 閲覧者向け公開データ（PublicSnapshots シート）の生成 */
 
@@ -3744,7 +3972,7 @@ function actionBootstrap_(ctx) {
     var matches = c.table('Matches').rows;
     var players = c.table('Players').rows;
     events = c.table('Events').rows.filter(function (e) {
-      return canManageEvent_(user, e);
+      return canManageEvent_(user, e, c);
     }).map(function (e) {
       var ms = matches.filter(function (m) {
         return m.event_id === e.event_id;
@@ -3768,6 +3996,7 @@ function actionBootstrap_(ctx) {
         organizerName: user.isPlatformAdmin ? e.organizer_name : undefined,
         ownerEmail: user.isPlatformAdmin ? e.owner_email : undefined,
         staffPasswordSet: user.kind === 'staff' ? undefined : !!e.staff_pass_hash,
+        role: eventRole_(user, e, c),
       };
     });
   }
@@ -3801,7 +4030,7 @@ function actionMyEvents_(ctx) {
   var events = ctx.table('Events');
   var mine = events.rows
     .filter(function (e) {
-      return !events.duplicates[e.event_id] && user.kind === 'google' && canManageEvent_(user, e);
+      return !events.duplicates[e.event_id] && user.kind === 'google' && canManageEvent_(user, e, ctx);
     })
     .sort(function (a, b) {
       return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
@@ -3811,6 +4040,7 @@ function actionMyEvents_(ctx) {
     if (String(e.updated_at || '') > s.updatedAt) s.updatedAt = String(e.updated_at || '');
     s.isPublic = !!e.is_public;
     s.isSample = !!e.is_sample;
+    s.role = eventRole_(user, e, ctx);
     return s;
   });
   return { email: user.email, events: list, truncated: mine.length > list.length };
@@ -3825,9 +4055,22 @@ function actionEventDetail_(ctx, payload) {
 function eventDetail_(ctx, eventId) {
   var bundle = collectEvent_(ctx, eventId);
   var view = buildEventView_(bundle, true);
-  // 主催者の Google アカウントは、本人と管理者にだけ見せる（店舗スタッフには出さない）
-  if (!ctx.user || ctx.user.kind === 'staff') delete view.event.ownerEmail;
-  view.event.canChangePassword = !!ctx.user && ctx.user.kind !== 'staff';
+  var role = eventRole_(ctx.user, bundle.event, ctx);
+  // 主催者の Google アカウントは、本人と管理者にだけ見せる（店舗スタッフ・共同主催者には出さない）
+  if (role !== 'owner' && role !== 'admin') delete view.event.ownerEmail;
+  view.event.role = role;
+  view.event.canChangePassword = role === 'owner' || role === 'admin';
+  view.event.canManageCollaborators = role === 'owner' || role === 'admin';
+  if (view.event.canManageCollaborators) {
+    view.collaborators = ctx.table('Collaborators').rows
+      .filter(function (r) {
+        return r.event_id === eventId;
+      })
+      .map(function (r) {
+        return { id: r.collab_id, email: r.email, role: r.role || 'editor', addedAt: r.created_at, rev: r.rev || 0 };
+      });
+  }
+  view.snapshotBudget = snapshotBudget_(bundle);
   view.publication = publicationStatus_(ctx, eventId);
   view.history = ctx
     .table('History')
@@ -4317,8 +4560,8 @@ function actionLogout_(ctx, payload) {
 
 /** 管理パスワードの設定・変更・解除（大会を作った本人と管理者だけ。変えると古いパスワードのセッションは切れる） */
 function actionSetStaffPassword_(ctx, payload) {
-  assertNotStaff_(ctx, '管理パスワードの変更');
   var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '管理パスワードの変更');
   var events = ctx.table('Events');
   var event = findRecord_(events, eventId, '大会');
   assertRev_(event, requireRev_(payload.rev), '大会');
@@ -4470,24 +4713,37 @@ function actionAddPlayers_(ctx, payload) {
   var records = cleaned.map(function (name) {
     var id = newId_('PLY', taken);
     taken[id] = true;
-    return { player_id: id, event_id: eventId, display_name: name, external_ref: '', notes: '', rev: 1, created_at: ctx.now, updated_at: ctx.now };
+    return { player_id: id, event_id: eventId, display_name: name, external_ref: '', notes: '', affiliation: '', rating: '', seed: null, meta_json: '', rev: 1, created_at: ctx.now, updated_at: ctx.now };
   });
   appendRecords_(players, records);
   recordHistory_(ctx, 'player.add', 'Player', '', eventId, null, records.map(plain_));
   return { eventId: eventId, added: records.length };
 }
 
+/** 選手の名前と、v0.8 の所属・Rt・シード・非公開メモ（送られた項目だけ変える） */
 function actionUpdatePlayer_(ctx, payload) {
   var players = ctx.table('Players');
   var player = findRecord_(players, requireId_(payload.playerId, '選手'), '選手');
   assertRev_(player, requireRev_(payload.rev), '選手');
-  var name = cleanText_(payload.name, '選手名', ADMIN_CONFIG.MAX_PLAYER_NAME_LENGTH);
-  var dup = players.rows.some(function (p) {
-    return p.event_id === player.event_id && p.player_id !== player.player_id && p.display_name === name;
-  });
-  if (dup) throw appError_('VALIDATION', '選手名「' + name + '」は既に登録されています。');
   var before = plain_(player);
-  player.display_name = name;
+  if (payload.name !== undefined) {
+    var name = cleanText_(payload.name, '選手名', ADMIN_CONFIG.MAX_PLAYER_NAME_LENGTH);
+    var dup = players.rows.some(function (p) {
+      return p.event_id === player.event_id && p.player_id !== player.player_id && p.display_name === name;
+    });
+    if (dup) throw appError_('VALIDATION', '選手名「' + name + '」は既に登録されています。');
+    player.display_name = name;
+  }
+  if (payload.affiliation !== undefined) player.affiliation = parseAffiliation_(payload.affiliation);
+  if (payload.rating !== undefined) player.rating = parseRatingInput_(payload.rating);
+  if (payload.seed !== undefined) {
+    var seed = parseSeedInput_(payload.seed);
+    if (seed && players.rows.some(function (p) { return p.event_id === player.event_id && p.player_id !== player.player_id && p.seed === seed; })) {
+      throw appError_('VALIDATION', 'シード ' + seed + ' は他の選手に付いています。');
+    }
+    player.seed = seed;
+  }
+  if (payload.notes !== undefined) player.notes = cleanText_(payload.notes, 'メモ', ADMIN_CONFIG.MAX_NOTE_LENGTH, { allowEmpty: true });
   player.rev = (player.rev || 0) + 1;
   player.updated_at = ctx.now;
   updateRecord_(players, player);
@@ -4521,6 +4777,18 @@ function actionDeletePlayer_(ctx, payload) {
 
 /* ---------- 段階（形式）の編集 ---------- */
 
+function stageKindMatches_(st, kind) {
+  if (!kind) return true;
+  if (kind === 'group') return isGroupStage_(st);
+  if (kind === 'robin') return isRoundRobinStage_(st);
+  if (kind === 'elimination') return isEliminationStage_(st);
+  if (kind === 'knockout') return st.type === STAGE_TYPE.SINGLE_ELIMINATION || st.type === STAGE_TYPE.DOUBLE_ELIMINATION;
+  if (kind === 'assign' || kind === 'rankable') return isGroupStage_(st) || st.type === STAGE_TYPE.SERIES;
+  if (kind === 'swiss') return st.type === STAGE_TYPE.SWISS;
+  if (kind === 'series') return st.type === STAGE_TYPE.SERIES;
+  return true;
+}
+
 /** payload.stageId の段階を返す（省略時は最初の段階。kind で種類を限定できる） */
 function resolveStage_(bundle, payload, kind) {
   var stage;
@@ -4530,12 +4798,14 @@ function resolveStage_(bundle, payload, kind) {
     if (!stage) throw appError_('NOT_FOUND', '段階が見つかりません。');
   } else {
     stage = bundle.stages.filter(function (st) {
-      return kind === 'group' ? isGroupStage_(st) : kind === 'elimination' ? isEliminationStage_(st) : true;
+      return stageKindMatches_(st, kind);
     })[0];
     if (!stage) throw appError_('NOT_FOUND', '対象の段階がありません。');
   }
-  if (kind === 'group' && !isGroupStage_(stage)) throw appError_('BAD_REQUEST', 'この操作はロビン・リーグの段階でのみ使えます。');
-  if (kind === 'elimination' && !isEliminationStage_(stage)) throw appError_('BAD_REQUEST', 'この操作はトーナメントの段階でのみ使えます。');
+  if (!stageKindMatches_(stage, kind)) {
+    var what = { group: 'ロビン・リーグ・スイス式', robin: 'ロビン・リーグ', elimination: 'トーナメント', knockout: 'トーナメント・ダブルエリミネーション', assign: 'ロビン・リーグ・スイス式・シリーズ', rankable: 'ロビン・リーグ・スイス式・シリーズ', swiss: 'スイス式', series: 'ポイントシリーズ' }[kind];
+    throw appError_('BAD_REQUEST', 'この操作は' + what + 'の段階でのみ使えます。');
+  }
   return stage;
 }
 
@@ -4545,11 +4815,34 @@ function stageMatchesOf_(bundle, stage) {
   });
 }
 
-function saveStage_(ctx, stage, cfg) {
-  stage.config_json = JSON.stringify(cfg);
+/**
+ * 段階の設定を保存する。stageConfig_ が補った既定値は保存しない（v0.7 の段階に v0.8 の項目を書き足さないため、
+ * 送られた cfg のうち、元の config_json にあった項目と、変更した項目だけを書く）
+ */
+function saveStage_(ctx, stage, cfg, changedKeys) {
+  var raw = safeJson_(stage.config_json, {});
+  var keys = changedKeys || Object.keys(cfg);
+  var defaults = stageConfig_({ type: stage.type, config_json: '' });
+  keys.forEach(function (k) {
+    if (Object.prototype.hasOwnProperty.call(raw, k) || JSON.stringify(cfg[k]) !== JSON.stringify(defaults[k]) || changedKeys) raw[k] = cfg[k];
+  });
+  saveStageRaw_(ctx, stage, raw);
+}
+
+function saveStageRaw_(ctx, stage, raw) {
+  stage.config_json = JSON.stringify(raw);
   stage.rev = (stage.rev || 0) + 1;
   stage.updated_at = ctx.now;
   updateRecord_(ctx.table('Stages'), stage);
+}
+
+/** 段階を追加したときの既定の設定（v0.7 からある種類は従来どおり） */
+function defaultStageConfig_(type, nights) {
+  if (type === STAGE_TYPE.SINGLE_ELIMINATION) return { thirdPlace: false };
+  if (type === STAGE_TYPE.DOUBLE_ELIMINATION) return { grandFinal: 'reset' };
+  if (type === STAGE_TYPE.SWISS) return { rounds: 5, points: { win: 2, draw: 1, loss: 0 }, tiebreakers: DEFAULT_SWISS_TIEBREAKERS_.slice() };
+  if (type === STAGE_TYPE.SERIES) return { nights: nights, nightPoints: [5, 3, 2, 0], tiebreakers: DEFAULT_SERIES_TIEBREAKERS_.slice() };
+  return { cycles: 1, tiebreakers: DEFAULT_TIEBREAKERS_.slice() };
 }
 
 function actionAddStage_(ctx, payload) {
@@ -4560,27 +4853,32 @@ function actionAddStage_(ctx, payload) {
   if (!STAGE_TYPE_LABEL[type]) throw appError_('VALIDATION', '段階の種類が不正です。');
   var name = cleanText_(payload.name || STAGE_TYPE_LABEL[type], '段階の名前', ADMIN_CONFIG.MAX_LABEL_LENGTH);
   var baseRule = bundle.rule ? ruleSpecOf_(bundle.rule) : { format: 'legs', bestOf: 5, setBestOf: null, provisional: true };
+  // 勝ち抜き戦では引き分けありの固定 Leg 数は使えないので、その場合は Best of 5 Legs で作る（あとで変えられる）
+  var bracketType = type === STAGE_TYPE.SINGLE_ELIMINATION || type === STAGE_TYPE.DOUBLE_ELIMINATION || type === STAGE_TYPE.SERIES;
+  if (bracketType && baseRule.format === 'fixed') baseRule = { format: 'legs', bestOf: 5, setBestOf: null, provisional: baseRule.provisional };
   var rule = newRuleRecord_(ctx, eventId, baseRule, Object.assign({}, ctx.table('Rules').byKey));
   var order = bundle.stages.reduce(function (mx, st) {
     return Math.max(mx, st.order || 0);
   }, 0) + 1;
-  var config = type === STAGE_TYPE.SINGLE_ELIMINATION ? { thirdPlace: false } : { cycles: 1, tiebreakers: DEFAULT_TIEBREAKERS_.slice() };
+  var nights = type === STAGE_TYPE.SERIES ? parseSmallInt_(payload.nights, '節の数', 1, ADMIN_CONFIG.MAX_SERIES_NIGHTS, 8) : 0;
+  var config = defaultStageConfig_(type, nights);
   var stage = newStageRecord_(ctx, eventId, { name: name, type: type, order: order, ruleId: rule.rule_id, config: config }, Object.assign({}, ctx.table('Stages').byKey));
   appendRecords_(ctx.table('Rules'), [rule]);
   appendRecords_(ctx.table('Stages'), [stage]);
-  if (isGroupStage_(stage)) {
-    appendRecords_(ctx.table('Groups'), newGroupRecords_(ctx, eventId, stage.stage_id, 1, Object.assign({}, ctx.table('Groups').byKey), 0, type === STAGE_TYPE.LEAGUE));
+  if (type !== STAGE_TYPE.SINGLE_ELIMINATION && type !== STAGE_TYPE.DOUBLE_ELIMINATION) {
+    var count = type === STAGE_TYPE.SERIES ? nights : 1;
+    appendRecords_(ctx.table('Groups'), newGroupRecords_(ctx, eventId, stage.stage_id, count, Object.assign({}, ctx.table('Groups').byKey), 0, type, count));
   }
-  ctx.invalidate();
   recordHistory_(ctx, 'stage.add', 'Stage', stage.stage_id, eventId, null, plain_(stage));
   return { eventId: eventId, stageId: stage.stage_id };
 }
 
-function parseTiebreakers_(value) {
-  if (!Array.isArray(value) || value.length > 6) throw appError_('VALIDATION', '順位の決め方の指定が不正です。');
+function parseTiebreakers_(value, type) {
+  var allowed = TIEBREAKERS_FOR_[type] || Object.keys(TIEBREAKERS);
+  if (!Array.isArray(value) || value.length > 8) throw appError_('VALIDATION', '順位の決め方の指定が不正です。');
   var seen = {};
   value.forEach(function (k) {
-    if (!Object.prototype.hasOwnProperty.call(TIEBREAKERS, k) || seen[k]) throw appError_('VALIDATION', '順位の決め方の指定が不正です。');
+    if (!Object.prototype.hasOwnProperty.call(TIEBREAKERS, k) || seen[k] || allowed.indexOf(k) === -1) throw appError_('VALIDATION', '順位の決め方の指定が不正です。');
     seen[k] = true;
   });
   return value.slice();
@@ -4600,6 +4898,7 @@ function parseRoundMap_(value, parseValue) {
   return out;
 }
 
+/** 進出ルール。v0.8 から進出先にロビン（2 次ロビン）・スイス式・ダブルエリミ・シリーズも選べる */
 function parseAdvancement_(value, bundle, stage) {
   if (!Array.isArray(value) || value.length > 8) throw appError_('VALIDATION', '進出ルールの指定が不正です。');
   var rules = value.map(function (r) {
@@ -4609,7 +4908,6 @@ function parseAdvancement_(value, bundle, stage) {
     var target = r && isValidId_(r.targetStageId) ? bundle.stageById[r.targetStageId] : null;
     if (!target || target.stage_id === stage.stage_id) throw appError_('VALIDATION', '進出先の段階を選んでください。');
     if (!(target.order > stage.order)) throw appError_('VALIDATION', '進出先には、この段階より後の段階を選んでください。');
-    if (target.type === STAGE_TYPE.ROUND_ROBIN) throw appError_('VALIDATION', '進出先はトーナメントかリーグにしてください。');
     return { fromRank: from, toRank: to, targetStageId: target.stage_id };
   });
   rules.forEach(function (a, i) {
@@ -4620,9 +4918,32 @@ function parseAdvancement_(value, bundle, stage) {
   return rules;
 }
 
+/** 手動の加減点（F14）。[{ playerId, points, reason }]。理由は必須。記録した時刻・操作者を残す */
+function parseAdjustments_(value, bundle, stage, before, ctx) {
+  if (!Array.isArray(value) || value.length > 64) throw appError_('VALIDATION', '加減点の指定が不正です。');
+  var members = {};
+  bundle.entries.forEach(function (e) {
+    if (e.stage_id === stage.stage_id) members[e.player_id] = true;
+  });
+  return value.map(function (a, i) {
+    var pid = a && isValidId_(a.playerId) && members[a.playerId] ? a.playerId : '';
+    if (!pid) throw appError_('VALIDATION', '加減点（' + (i + 1) + '件目）の選手がこの段階にいません。');
+    var pts = typeof a.points === 'number' ? a.points : typeof a.points === 'string' && /^[+-]?\d{1,3}$/.test(a.points.trim()) ? Number(a.points.trim()) : NaN;
+    if (!(pts >= -999 && pts <= 999) || Math.floor(pts) !== pts || pts === 0) throw appError_('VALIDATION', '加減点（' + (i + 1) + '件目）は 0 以外の整数で指定してください。');
+    var reason = cleanText_(a.reason, '加減点（' + (i + 1) + '件目）の理由', ADMIN_CONFIG.MAX_NOTE_LENGTH);
+    var same = (before || []).filter(function (b) {
+      return b.playerId === pid && b.points === pts && b.reason === reason;
+    })[0];
+    return { playerId: pid, points: pts, reason: reason, at: same ? same.at : ctx.now, by: same ? same.by : ctx.user ? ctx.user.label : '' };
+  });
+}
+
 /**
  * 段階の設定を変える。payload の項目は省略可能（送られた項目だけ変更）。
- * { stageId, rev, name?, rule?, cycles?, tiebreakers?, advancement?, roundLabels?, thirdPlace?, roundBestOf? }
+ * 共通: { stageId, rev, name?, rule?, tiebreakers?, advancement?, points?, adjustments?, walkoverLegs? }
+ * ロビン・リーグ: cycles?, roundLabels?, distribution?（進出先になったときの配り方）
+ * トーナメント: thirdPlace?, roundBestOf?, drawMode?, fixedRounds?, avoidSameGroup?, maxEntrants?
+ * ダブルエリミ: grandFinal?  スイス式: rounds?, firstRound?, byePoints?  シリーズ: nights?, nightPoints?, nightDraw?
  */
 function actionUpdateStage_(ctx, payload) {
   var stages = ctx.table('Stages');
@@ -4634,6 +4955,13 @@ function actionUpdateStage_(ctx, payload) {
   var matches = stageMatchesOf_(bundle, stage);
   var started = matches.some(matchStarted_);
   var before = plain_(stage);
+  var changed = [];
+  var set = function (key, value) {
+    cfg[key] = value;
+    changed.push(key);
+  };
+  var type = stage.type;
+  var bracket = isBracketStage_(stage);
 
   if (payload.name !== undefined) stage.name = cleanText_(payload.name, '段階の名前', ADMIN_CONFIG.MAX_LABEL_LENGTH);
 
@@ -4641,37 +4969,84 @@ function actionUpdateStage_(ctx, payload) {
     var rules = ctx.table('Rules');
     var rule = findRecord_(rules, stage.rule_id, 'ルール');
     var spec = parseRuleInput_(payload.rule);
+    if (spec.format === 'fixed' && bracket) throw appError_('VALIDATION', '固定 Leg 数（引き分けあり）は勝ち抜き戦の段階では使えません（決着がつかないため）。');
     assertRuleChangeAllowed_(bundle, rule, spec);
     applyRule_(rule, spec, ctx.now);
     rule.rev = (rule.rev || 0) + 1;
     updateRecord_(rules, rule);
   }
 
-  if (isGroupStage_(stage)) {
+  if (payload.tiebreakers !== undefined && (isGroupStage_(stage) || type === STAGE_TYPE.SERIES)) {
+    if (cfg.advanced) throw appError_('LOCKED', '進出確定後は順位の決め方を変更できません。');
+    set('tiebreakers', parseTiebreakers_(payload.tiebreakers, type));
+  }
+  if (payload.advancement !== undefined && (isGroupStage_(stage) || type === STAGE_TYPE.SERIES)) {
+    if (cfg.advanced) throw appError_('LOCKED', '進出確定後は進出ルールを変更できません。先に「進出を取り消す」を行ってください。');
+    set('advancement', parseAdvancement_(payload.advancement, bundle, stage));
+  }
+  if (payload.points !== undefined && isGroupStage_(stage)) {
+    if (cfg.advanced) throw appError_('LOCKED', '進出確定後は勝ち点を変更できません。');
+    if (payload.points === null) {
+      if (type === STAGE_TYPE.SWISS) throw appError_('VALIDATION', 'スイス式は勝ち点で組み合わせを決めるため、勝ち点なしにはできません。');
+      set('points', null);
+    } else {
+      set('points', parsePoints_(payload.points, null));
+    }
+  }
+  if (payload.adjustments !== undefined && isGroupStage_(stage)) {
+    if (cfg.advanced) throw appError_('LOCKED', '進出確定後は加減点を変更できません。');
+    if (!cfg.points && payload.adjustments.length) throw appError_('VALIDATION', '加減点は勝ち点を使う段階でだけ設定できます。先に勝ち点を設定してください。');
+    set('adjustments', parseAdjustments_(payload.adjustments, bundle, stage, cfg.adjustments, ctx));
+  }
+  if (payload.walkoverLegs !== undefined && (isGroupStage_(stage) || type === STAGE_TYPE.SERIES)) {
+    if (payload.walkoverLegs !== 'exclude' && payload.walkoverLegs !== 'award') throw appError_('VALIDATION', '不戦勝の Leg 数の扱いが不正です。');
+    set('walkoverLegs', payload.walkoverLegs);
+  }
+
+  if (isRoundRobinStage_(stage)) {
     if (payload.cycles !== undefined) {
       var cycles = payload.cycles === 2 ? 2 : payload.cycles === 1 ? 1 : null;
       if (!cycles) throw appError_('VALIDATION', '総当たりの回数は 1 回か 2 回です。');
       if (cycles !== cfg.cycles && matches.length) throw appError_('LOCKED', '対戦カード作成後は総当たりの回数を変更できません。先に対戦カードを削除してください。');
-      cfg.cycles = cycles;
+      set('cycles', cycles);
     }
-    if (payload.tiebreakers !== undefined) {
-      if (cfg.advanced) throw appError_('LOCKED', '進出確定後は順位の決め方を変更できません。');
-      cfg.tiebreakers = parseTiebreakers_(payload.tiebreakers);
+    if (payload.distribution !== undefined) {
+      if (payload.distribution !== 'snake' && payload.distribution !== 'rank') throw appError_('VALIDATION', '進出者の配り方が不正です。');
+      set('distribution', payload.distribution);
     }
-    if (payload.advancement !== undefined) {
-      if (cfg.advanced) throw appError_('LOCKED', '進出確定後は進出ルールを変更できません。先に「進出を取り消す」を行ってください。');
-      cfg.advancement = parseAdvancement_(payload.advancement, bundle, stage);
-    }
-    if (payload.roundLabels !== undefined) {
-      cfg.roundLabels = parseRoundMap_(payload.roundLabels, function (v) {
+  }
+  if (isGroupStage_(stage) && payload.roundLabels !== undefined) {
+    set(
+      'roundLabels',
+      parseRoundMap_(payload.roundLabels, function (v) {
         return cleanText_(v, 'ラウンドの表示名', MAX_ROUND_LABEL_LENGTH_);
-      });
+      })
+    );
+  }
+  if (type === STAGE_TYPE.SWISS) {
+    var generated = matches.reduce(function (mx, m) {
+      return Math.max(mx, m.round || 0);
+    }, 0);
+    if (payload.rounds !== undefined) {
+      var rounds = parseSmallInt_(payload.rounds, '回戦数', 1, ADMIN_CONFIG.MAX_SWISS_ROUNDS, cfg.rounds);
+      if (rounds < generated) throw appError_('LOCKED', 'すでに ' + generated + ' 回戦まで組んでいるため、回戦数をそれより少なくできません。');
+      set('rounds', rounds);
     }
-  } else if (isEliminationStage_(stage)) {
+    if (payload.firstRound !== undefined) {
+      if (payload.firstRound !== 'seed' && payload.firstRound !== 'random') throw appError_('VALIDATION', '1 回戦の組み方が不正です。');
+      if (generated) throw appError_('LOCKED', '1 回戦を組んだ後は変更できません。');
+      set('firstRound', payload.firstRound);
+    }
+    if (payload.byePoints !== undefined) {
+      if (generated) throw appError_('LOCKED', '組み合わせを作った後は、不戦（Bye）の点を変更できません。');
+      set('byePoints', parseSmallInt_(payload.byePoints, '不戦（Bye）の点', 0, 99, cfg.byePoints));
+    }
+  }
+  if (isEliminationStage_(stage)) {
     if (payload.thirdPlace !== undefined) {
       var third = requireBool_(payload.thirdPlace, '3 位決定戦');
       if (third !== cfg.thirdPlace && matches.length) throw appError_('LOCKED', 'トーナメント表の作成後は 3 位決定戦の有無を変更できません。先にトーナメント表を削除してください。');
-      cfg.thirdPlace = third;
+      set('thirdPlace', third);
     }
     if (payload.roundBestOf !== undefined) {
       var map = parseRoundMap_(payload.roundBestOf, function (v) {
@@ -4683,13 +5058,77 @@ function actionUpdateStage_(ctx, payload) {
           throw appError_('LOCKED', m.round + ' 回戦（' + (m.label || '') + '）は結果が入力されているため、Best of を変更できません。');
         }
       });
-      cfg.roundBestOf = map;
+      set('roundBestOf', map);
+    }
+    var structural = ['drawMode', 'fixedRounds', 'avoidSameGroup'].filter(function (k) {
+      return payload[k] !== undefined;
+    });
+    if (structural.length && matches.length) {
+      var same = structural.every(function (k) {
+        return payload[k] === cfg[k];
+      });
+      if (!same) throw appError_('LOCKED', 'トーナメント表の作成後は、表の作り方（固定 / 回戦ごとの抽選・同組の初戦回避）を変更できません。先にトーナメント表を削除してください。');
+    }
+    if (payload.drawMode !== undefined) {
+      if (payload.drawMode !== 'fixed' && payload.drawMode !== 'redraw') throw appError_('VALIDATION', '表の作り方が不正です。');
+      set('drawMode', payload.drawMode);
+    }
+    if (payload.fixedRounds !== undefined) set('fixedRounds', parseSmallInt_(payload.fixedRounds, '固定の表で行う回戦数', 0, 6, 0));
+    if (payload.avoidSameGroup !== undefined) set('avoidSameGroup', requireBool_(payload.avoidSameGroup, '同じ組の初戦の回避'));
+    if (payload.maxEntrants !== undefined) {
+      var max = parseSmallInt_(payload.maxEntrants, '決勝の枠数', 0, ADMIN_CONFIG.MAX_ELIMINATION_ENTRANTS, 0);
+      var current = bundle.entries.filter(function (e) {
+        return e.stage_id === stage.stage_id;
+      }).length;
+      if (max && current > max) throw appError_('VALIDATION', 'すでに ' + current + ' 人が出場者に入っているため、枠数を ' + max + ' にはできません。');
+      set('maxEntrants', max);
     }
   }
-  saveStage_(ctx, stage, cfg);
-  ctx.invalidate();
+  if (type === STAGE_TYPE.DOUBLE_ELIMINATION && payload.grandFinal !== undefined) {
+    if (payload.grandFinal !== 'reset' && payload.grandFinal !== 'single') throw appError_('VALIDATION', 'グランドファイナルの方式が不正です。');
+    if (payload.grandFinal !== cfg.grandFinal && matches.length) throw appError_('LOCKED', '表の作成後はグランドファイナルの方式を変更できません。先に表を削除してください。');
+    set('grandFinal', payload.grandFinal);
+  }
+  if (type === STAGE_TYPE.SERIES) {
+    if (payload.nightPoints !== undefined) set('nightPoints', parseNightPoints_(payload.nightPoints, cfg.nightPoints));
+    if (payload.nightDraw !== undefined) {
+      if (['random', 'standing', 'seed'].indexOf(payload.nightDraw) === -1) throw appError_('VALIDATION', '節の組み合わせの決め方が不正です。');
+      set('nightDraw', payload.nightDraw);
+    }
+    if (payload.nights !== undefined) {
+      var nights = parseSmallInt_(payload.nights, '節の数', 1, ADMIN_CONFIG.MAX_SERIES_NIGHTS, cfg.nights);
+      resizeSeriesNights_(ctx, bundle, stage, nights);
+      set('nights', nights);
+    }
+  }
+  saveStage_(ctx, stage, cfg, changed);
   recordHistory_(ctx, 'stage.update', 'Stage', stage.stage_id, stage.event_id, before, plain_(stage));
   return { eventId: stage.event_id, stageId: stage.stage_id, started: started };
+}
+
+/** シリーズの節の数を変える。減らすときは、後ろの節のうち組み合わせも参加者もない節だけを消す */
+function resizeSeriesNights_(ctx, bundle, stage, count) {
+  var nights = bundle.groups
+    .filter(function (g) {
+      return g.stage_id === stage.stage_id;
+    })
+    .sort(byOrder_);
+  if (count > nights.length) {
+    appendRecords_(ctx.table('Groups'), newGroupRecords_(ctx, stage.event_id, stage.stage_id, count - nights.length, Object.assign({}, ctx.table('Groups').byKey), nights.length, STAGE_TYPE.SERIES, count));
+  } else if (count < nights.length) {
+    var removed = nights.slice(count);
+    removed.forEach(function (g) {
+      var used = bundle.matches.some(function (m) {
+        return m.group_id === g.group_id;
+      }) || bundle.entries.some(function (e) {
+        return e.group_id === g.group_id;
+      });
+      if (used) throw appError_('LOCKED', '「' + g.name + '」には組み合わせか参加者があるため、節の数を減らせません。');
+    });
+    deleteRecords_(ctx.table('Groups'), removed.map(function (g) {
+      return ctx.table('Groups').byKey[g.group_id];
+    }));
+  }
 }
 
 function actionDeleteStage_(ctx, payload) {
@@ -4743,21 +5182,30 @@ function assertNotAdvanced_(stage) {
   if (stageConfig_(stage).advanced) throw appError_('LOCKED', '進出確定後はこの段階を変更できません。先に「進出を取り消す」を行ってください。');
 }
 
+/** グループ数（ロビン）・ディビジョン数（リーグ、v0.8）を変える。対戦カード作成前だけ */
 function actionSetGroupCount_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   var bundle = collectEvent_(ctx, eventId);
-  var stage = resolveStage_(bundle, payload, 'group');
-  if (stage.type === STAGE_TYPE.LEAGUE) throw appError_('BAD_REQUEST', 'リーグのグループは 1 つです。');
+  var stage = resolveStage_(bundle, payload, 'robin');
   var count = parseGroupCount_(payload.count);
   if (stageMatchesOf_(bundle, stage).length) {
-    throw appError_('LOCKED', '対戦カード作成後はグループ数を変更できません。先に対戦カードを削除してください。');
+    throw appError_('LOCKED', '対戦カード作成後は' + (stage.type === STAGE_TYPE.LEAGUE ? 'ディビジョン数' : 'グループ数') + 'を変更できません。先に対戦カードを削除してください。');
   }
+  assertNotAdvanced_(stage);
   var groups = ctx.table('Groups');
   var current = bundle.groups.filter(function (g) {
     return g.stage_id === stage.stage_id;
   });
   if (count > current.length) {
-    appendRecords_(groups, newGroupRecords_(ctx, eventId, stage.stage_id, count - current.length, Object.assign({}, groups.byKey), current.length, false));
+    appendRecords_(groups, newGroupRecords_(ctx, eventId, stage.stage_id, count - current.length, Object.assign({}, groups.byKey), current.length, stage.type, count));
+    // リーグを 1 → 複数ディビジョンにしたとき、既定の名前「リーグ」を「ディビジョン1」にそろえる
+    if (stage.type === STAGE_TYPE.LEAGUE && current.length === 1 && current[0].name === 'リーグ') {
+      var g0 = groups.byKey[current[0].group_id];
+      g0.name = 'ディビジョン1';
+      g0.rev = (g0.rev || 0) + 1;
+      g0.updated_at = ctx.now;
+      updateRecord_(groups, g0);
+    }
   } else if (count < current.length) {
     var removed = current.slice(count);
     var removedIds = {};
@@ -4772,7 +5220,6 @@ function actionSetGroupCount_(ctx, payload) {
       return groups.byKey[g.group_id];
     }));
   }
-  ctx.invalidate();
   recordHistory_(ctx, 'group.count', 'Stage', stage.stage_id, eventId, { count: current.length }, { count: count });
   return { eventId: eventId };
 }
@@ -4802,6 +5249,8 @@ function newEntry_(ctx, stage, groupId, playerId, seed, taken, sourceLabel) {
     seed: seed,
     manual_order: null,
     source_label: sourceLabel || '',
+    start_round: null,
+    meta_json: '',
     rev: 1,
     created_at: ctx.now,
     updated_at: ctx.now,
@@ -4857,43 +5306,104 @@ function actionAssignPlayer_(ctx, payload) {
   return { eventId: eventId };
 }
 
-/** 登録順に A, B, C, D, A, B… と配る（リーグは全員を 1 グループへ） */
-function assignAllRoundRobin_(ctx, bundle, stage) {
+/** 棄権・失格した選手（meta_json.withdrawn）。以後の組み合わせ・節の参加から外す */
+function isWithdrawn_(player) {
+  return !!(player && playerMeta_(player).withdrawn);
+}
+
+/**
+ * 選手を段階のグループに配る（v0.8: 登録順・抽選・組分け〈シード・Rt・所属〉）。
+ * 既存の割り当てを消して作り直す。スイス式は 1 グループに全員、シリーズは参加者名簿（グループなし）に全員。
+ */
+function assignAllRoundRobin_(ctx, bundle, stage, opts) {
   var entries = ctx.table('Entries');
   deleteRecords_(entries, entries.rows.filter(function (e) {
     return e.stage_id === stage.stage_id;
   }));
-  ctx.invalidate('Entries');
   var groups = bundle.groups.filter(function (g) {
     return g.stage_id === stage.stage_id;
   });
-  var players = bundle.players.slice().sort(function (a, b) {
-    return a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0;
+  var players = bundle.players.filter(function (p) {
+    return !isWithdrawn_(p);
   });
   var taken = Object.assign({}, ctx.table('Entries').byKey);
-  var seeds = {};
-  var records = players.map(function (p, i) {
-    var g = groups[i % groups.length];
-    seeds[g.group_id] = (seeds[g.group_id] || 0) + 1;
-    return newEntry_(ctx, stage, g.group_id, p.player_id, seeds[g.group_id], taken);
-  });
+  var records = [];
+  var report = null;
+  if (stage.type === STAGE_TYPE.SERIES) {
+    players
+      .slice()
+      .sort(function (a, b) {
+        return (a.seed || 999) - (b.seed || 999) || (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0);
+      })
+      .forEach(function (p, i) {
+        records.push(newEntry_(ctx, stage, '', p.player_id, i + 1, taken));
+      });
+  } else {
+    var input = players
+      .slice()
+      .sort(function (a, b) {
+        return a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0;
+      })
+      .map(function (p, i) {
+        return { id: p.player_id, affiliation: p.affiliation || '', rating: p.rating, ratingValue: parseRating_(p.rating), seed: p.seed || null, order: i };
+      });
+    var result = assignGroups_(input, groups.length, opts || {});
+    report = result.report;
+    result.groups.forEach(function (ids, gi) {
+      ids.forEach(function (pid, k) {
+        records.push(newEntry_(ctx, stage, groups[gi].group_id, pid, k + 1, taken));
+      });
+    });
+  }
   appendRecords_(ctx.table('Entries'), records);
-  ctx.invalidate();
-  return records;
+  return { records: records, report: report };
 }
 
+/**
+ * 自動割り当て（F01・F16・F17）。method = registration（登録順）/ random（抽選）/ balanced（組分け）
+ * 対戦カードを作る前だけ。やり直す（再抽選）ときは、画面で確認してから confirmRedraw: true を送る。
+ * 抽選の結果は Entries に保存するので、画面を読み直しても変わらない。
+ */
 function actionAutoAssign_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   var bundle = collectEvent_(ctx, eventId);
-  var stage = resolveStage_(bundle, payload, 'group');
+  var stage = resolveStage_(bundle, payload, 'assign');
   if (stageMatchesOf_(bundle, stage).length) {
     throw appError_('LOCKED', '対戦カード作成後は自動割り当てできません。先に対戦カードを削除してください。');
   }
-  if (!bundle.groups.some(function (g) { return g.stage_id === stage.stage_id; })) throw appError_('VALIDATION', 'グループがありません。');
+  assertNotAdvanced_(stage);
+  if (stage.type !== STAGE_TYPE.SERIES && !bundle.groups.some(function (g) { return g.stage_id === stage.stage_id; })) throw appError_('VALIDATION', 'グループがありません。');
   if (!bundle.players.length) throw appError_('VALIDATION', '選手が登録されていません。');
-  var records = assignAllRoundRobin_(ctx, bundle, stage);
-  recordHistory_(ctx, 'entry.autoAssign', 'Stage', stage.stage_id, eventId, null, { assigned: records.length });
-  return { eventId: eventId };
+  var method = payload.method === 'random' || payload.method === 'balanced' ? payload.method : 'registration';
+  var already = bundle.entries.some(function (e) {
+    return e.stage_id === stage.stage_id;
+  });
+  if (already && method !== 'registration' && payload.confirmRedraw !== true) {
+    throw appError_('CONFIRM_REQUIRED', 'すでに割り当てがあります。抽選し直すと今の割り当ては置き換わります。よろしければ「抽選し直す」を押してください。');
+  }
+  var opts = {
+    method: method,
+    useSeeds: payload.useSeeds === true,
+    useRating: payload.useRating === true,
+    spreadAffiliation: payload.spreadAffiliation === true,
+  };
+  var res = assignAllRoundRobin_(ctx, bundle, stage, opts);
+  var cfg = stageConfig_(stage);
+  var stageRec = ctx.table('Stages').byKey[stage.stage_id];
+  var raw = safeJson_(stageRec.config_json, {});
+  raw.lastDraw = { method: method, at: ctx.now, by: ctx.user ? ctx.user.label : '', options: opts, report: res.report };
+  saveStageRaw_(ctx, stageRec, raw);
+  recordHistory_(ctx, method === 'registration' ? 'entry.autoAssign' : 'entry.draw', 'Stage', stage.stage_id, eventId, null, {
+    assigned: res.records.length,
+    method: method,
+    options: opts,
+    report: res.report,
+    groups: res.records.map(function (e) {
+      return [e.player_id, e.group_id];
+    }),
+  });
+  void cfg;
+  return { eventId: eventId, report: res.report, assigned: res.records.length };
 }
 
 function blankMatch_(ctx, stage, groupId, id) {
@@ -4923,6 +5433,11 @@ function blankMatch_(ctx, stage, groupId, id) {
     created_at: ctx.now,
     updated_at: ctx.now,
     confirmed_at: '',
+    result_type: '',
+    result_note: '',
+    schedule_json: '',
+    bracket_side: '',
+    meta_json: '',
   };
 }
 
@@ -4963,6 +5478,11 @@ function actionGenerateMatches_(ctx, payload) {
       return g.stage_id === stage.stage_id;
     });
   }
+  var targetStage = targets.length ? bundle.stageById[targets[0].stage_id] : null;
+  if (targetStage && targetStage.type === STAGE_TYPE.SWISS) {
+    throw appError_('BAD_REQUEST', 'スイス式は 1 回戦ずつ組みます。「次の回戦を組む」を使ってください。');
+  }
+  if (targetStage && !isRoundRobinStage_(targetStage)) throw appError_('BAD_REQUEST', 'この操作はロビン・リーグの段階でのみ使えます。');
   var matchesTable = ctx.table('Matches');
   var taken = Object.assign({}, matchesTable.byKey);
   var created = [];
@@ -5006,18 +5526,36 @@ function actionClearMatches_(ctx, payload) {
   return { eventId: eventId, removed: targets.length };
 }
 
-/** 同順位の選手の順番を主催者が決める（playerIds の並び順。空配列で解除） */
+/**
+ * 同順位の選手の順番を主催者が決める（playerIds の並び順。空配列で解除）。
+ * groupId を指定するとそのグループ、シリーズ（段階全体の累計順位）は groupId を省いて stageId を指定する。
+ */
 function actionSetManualOrder_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
-  var gid = requireId_(payload.groupId, 'グループ');
-  var group = findRecord_(ctx.table('Groups'), gid, 'グループ');
-  if (group.event_id !== eventId) throw appError_('NOT_FOUND', 'グループが見つかりません。');
-  assertNotAdvanced_(findRecord_(ctx.table('Stages'), group.stage_id, '段階'));
-  if (!Array.isArray(payload.playerIds) || payload.playerIds.length > 64) throw appError_('BAD_REQUEST', '選手の指定が不正です。');
   var entries = ctx.table('Entries');
-  var members = entries.rows.filter(function (e) {
-    return e.group_id === gid;
-  });
+  var members;
+  var stage;
+  var scope;
+  if (payload.groupId) {
+    var gid = requireId_(payload.groupId, 'グループ');
+    var group = findRecord_(ctx.table('Groups'), gid, 'グループ');
+    if (group.event_id !== eventId) throw appError_('NOT_FOUND', 'グループが見つかりません。');
+    stage = findRecord_(ctx.table('Stages'), group.stage_id, '段階');
+    if (stage.type === STAGE_TYPE.SERIES) throw appError_('BAD_REQUEST', 'シリーズの順位は段階全体で決めます（節ごとには決めません）。');
+    members = entries.rows.filter(function (e) {
+      return e.group_id === gid;
+    });
+    scope = gid;
+  } else {
+    stage = findRecord_(ctx.table('Stages'), requireId_(payload.stageId, '段階'), '段階');
+    if (stage.event_id !== eventId || stage.type !== STAGE_TYPE.SERIES) throw appError_('BAD_REQUEST', 'グループを指定してください。');
+    members = entries.rows.filter(function (e) {
+      return e.stage_id === stage.stage_id && !e.group_id;
+    });
+    scope = stage.stage_id;
+  }
+  assertNotAdvanced_(stage);
+  if (!Array.isArray(payload.playerIds) || payload.playerIds.length > ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT) throw appError_('BAD_REQUEST', '選手の指定が不正です。');
   var byPlayer = {};
   members.forEach(function (e) {
     byPlayer[e.player_id] = e;
@@ -5037,37 +5575,62 @@ function actionSetManualOrder_(ctx, payload) {
       updateRecord_(entries, e);
     }
   });
-  ctx.invalidate();
-  recordHistory_(ctx, 'entry.manualOrder', 'Group', gid, eventId, null, { order: payload.playerIds });
+  recordHistory_(ctx, 'entry.manualOrder', 'Group', scope, eventId, null, { order: payload.playerIds });
   return { eventId: eventId };
 }
 
-/* ---------- 進出（ロビン・リーグ → 次の段階） ---------- */
+/* ---------- 進出（ロビン・リーグ・スイス式・シリーズ → 次の段階） ---------- */
 
-function actionConfirmAdvancement_(ctx, payload) {
-  var eventId = requireId_(payload.eventId, '大会');
-  var bundle = collectEvent_(ctx, eventId);
-  var stage = resolveStage_(bundle, payload, 'group');
-  var cfg = stageConfig_(stage);
-  if (cfg.advanced) throw appError_('LOCKED', 'この段階の進出は確定済みです。');
-  if (!cfg.advancement.length) throw appError_('VALIDATION', '進出ルールが設定されていません。「形式」タブで設定してください。');
-  var matches = stageMatchesOf_(bundle, stage);
-  if (!matches.length || matches.some(function (m) { return m.status !== MATCH_STATUS.FINAL; })) {
-    throw appError_('LOCKED', 'すべての試合が確定してから進出を確定してください。');
+/** 進出元の順位（グループごと）。シリーズは段階全体で 1 つ */
+function sourceRankings_(stageView) {
+  if (stageView.type === STAGE_TYPE.SERIES) {
+    return [{ groupId: '', name: stageView.name, index: 0, standings: stageView.standings || [] }];
   }
+  return (stageView.groups || []).map(function (g, gi) {
+    return { groupId: g.id, name: g.name, index: gi, standings: g.standings };
+  });
+}
+
+/**
+ * 進出の計画（確定・プレビューで共通）。書き込みはしない。
+ * - 同順位が進出の境目をまたいでいたら止める（主催者が手動で順位を決める。名前順などで勝手に決めない）
+ * - 進出先がトーナメント・ダブルエリミ: 直接出場の選手（あらかじめ登録）を残し、その後に「順位 → グループ」の順でシード
+ *   直接出場と進出者の重複、決勝の枠数の超過は止める
+ * - 進出先がロビン・リーグ: 進出者を各グループへ配る（順位の帯ごとに蛇行。同じ進出元のグループの選手を同じ組にしない）
+ * - 進出先がスイス式・シリーズ: 全員を 1 つの組（参加者名簿）へ
+ * 戻り値: { targets: [{ stage, rows: [{ playerId, groupId, seed, label, sourceGroupId, sourceRank, direct }], report }] }
+ */
+function planAdvancement_(bundle, stage) {
+  var cfg = stageConfig_(stage);
+  if (!cfg.advancement.length) throw appError_('VALIDATION', '進出ルールが設定されていません。「形式」タブで設定してください。');
   var view = buildEventView_(bundle, true).stages.filter(function (st) {
     return st.id === stage.stage_id;
   })[0];
+  var matches = stageMatchesOf_(bundle, stage);
+  if (stage.type === STAGE_TYPE.SERIES) {
+    if (!view.complete) throw appError_('LOCKED', 'すべての節が終わってから（または中止にしてから）進出を確定してください。' + (view.completion ? view.completion.reason : ''));
+  } else {
+    var real = matches.filter(function (m) {
+      return m.result_type !== RESULT_TYPE.BYE;
+    });
+    if (!real.length || real.some(function (m) { return m.status !== MATCH_STATUS.FINAL; })) {
+      throw appError_('LOCKED', 'すべての試合が確定してから進出を確定してください。');
+    }
+    if (stage.type === STAGE_TYPE.SWISS && !view.complete) throw appError_('LOCKED', '予定の回戦がすべて終わってから進出を確定してください。' + view.completion.reason);
+  }
   if (view.progress.check) throw appError_('LOCKED', '「要確認」の試合があります。先に結果を直してください。');
-
-  // 進出先ごとに、順位 → グループの順で並べる
+  var rankings = sourceRankings_(view);
   var byTarget = {};
+  var order = [];
   cfg.advancement.forEach(function (rule) {
     var target = bundle.stageById[rule.targetStageId];
     if (!target) throw appError_('DATA_CONFLICT', '進出先の段階が見つかりません。');
     if (stageMatchesOf_(bundle, target).length) throw appError_('LOCKED', '進出先「' + target.name + '」には対戦カードがあります。先に削除してください。');
-    if (!byTarget[target.stage_id]) byTarget[target.stage_id] = [];
-    view.groups.forEach(function (g, gi) {
+    if (!byTarget[target.stage_id]) {
+      byTarget[target.stage_id] = [];
+      order.push(target.stage_id);
+    }
+    rankings.forEach(function (g) {
       // 同順位の塊が進出の境目をまたいでいたら、手動で順位を決めてもらう
       g.standings.forEach(function (row) {
         if (!row.tied) return;
@@ -5083,50 +5646,174 @@ function actionConfirmAdvancement_(ctx, payload) {
       });
       g.standings.forEach(function (row) {
         if (row.rank >= rule.fromRank && row.rank <= rule.toRank) {
-          byTarget[target.stage_id].push({ playerId: row.playerId, rank: row.rank, groupIndex: gi, label: g.name + ' ' + row.rank + '位' });
+          var label = stage.type === STAGE_TYPE.SERIES ? stage.name + ' ' + row.rank + '位' : (rankings.length > 1 || stage.type !== STAGE_TYPE.SWISS ? g.name + ' ' : '') + row.rank + '位';
+          byTarget[target.stage_id].push({ playerId: row.playerId, rank: row.rank, groupIndex: g.index, sourceGroupId: g.groupId, label: label });
         }
       });
     });
   });
-
-  var entries = ctx.table('Entries');
-  var taken = Object.assign({}, entries.byKey);
-  var added = [];
-  Object.keys(byTarget).forEach(function (targetId) {
+  var targets = order.map(function (targetId) {
     var target = bundle.stageById[targetId];
-    deleteRecords_(entries, entries.rows.filter(function (e) {
-      return e.stage_id === targetId;
-    }));
+    var tcfg = stageConfig_(target);
     var list = byTarget[targetId].sort(function (a, b) {
       return a.rank - b.rank || a.groupIndex - b.groupIndex;
     });
-    var groupId = '';
-    if (target.type === STAGE_TYPE.LEAGUE) {
-      var g = bundle.groups.filter(function (x) {
-        return x.stage_id === targetId;
+    var rows = [];
+    var report = { notes: [] };
+    if (target.type === STAGE_TYPE.SINGLE_ELIMINATION || target.type === STAGE_TYPE.DOUBLE_ELIMINATION) {
+      var direct = bundle.entries
+        .filter(function (e) {
+          return e.stage_id === targetId && entryMeta_(e).direct === true;
+        })
+        .sort(function (a, b) {
+          return (a.seed || 0) - (b.seed || 0);
+        });
+      var directIds = {};
+      direct.forEach(function (e) {
+        directIds[e.player_id] = true;
+      });
+      list.forEach(function (r) {
+        if (directIds[r.playerId]) {
+          var p = bundle.players.filter(function (x) {
+            return x.player_id === r.playerId;
+          })[0];
+          throw appError_('VALIDATION', (p ? p.display_name : '選手') + ' は「' + target.name + '」の直接出場者に登録されていて、進出者と重複しています。どちらかを外してください。');
+        }
+      });
+      direct.forEach(function (e, i) {
+        rows.push({ playerId: e.player_id, groupId: '', seed: i + 1, label: e.source_label || '直接出場', direct: true, startRound: e.start_round || 1 });
+      });
+      list.forEach(function (r) {
+        rows.push({ playerId: r.playerId, groupId: '', seed: rows.length + 1, label: r.label, sourceGroupId: r.sourceGroupId, sourceRank: r.rank });
+      });
+      if (tcfg.maxEntrants && rows.length > tcfg.maxEntrants) {
+        throw appError_('VALIDATION', '「' + target.name + '」の枠は ' + tcfg.maxEntrants + ' 人ですが、直接出場 ' + direct.length + ' 人 + 進出 ' + list.length + ' 人 = ' + rows.length + ' 人になります。進出ルールか枠数を見直してください。');
+      }
+      if (direct.length) report.notes.push('直接出場 ' + direct.length + ' 人を上位シードに置き、続けて進出者を「順位 → グループ」の順に並べます。');
+    } else if (isRoundRobinStage_(target)) {
+      var groups = bundle.groups
+        .filter(function (g) {
+          return g.stage_id === targetId;
+        })
+        .sort(byOrder_);
+      if (!groups.length) throw appError_('VALIDATION', '進出先「' + target.name + '」にグループがありません。');
+      var res = assignGroups_(
+        list.map(function (r, i) {
+          return { id: r.playerId, affiliation: r.sourceGroupId, seed: i + 1, order: i };
+        }),
+        groups.length,
+        tcfg.distribution === 'rank' ? { method: 'registration' } : { method: 'balanced', useSeeds: true, spreadAffiliation: true }
+      );
+      var info = {};
+      list.forEach(function (r) {
+        info[r.playerId] = r;
+      });
+      res.groups.forEach(function (ids, gi) {
+        if (ids.length < 2) throw appError_('VALIDATION', '進出先「' + target.name + '」の' + groups[gi].name + 'が ' + ids.length + ' 人になります（総当たりには 2 人以上必要）。グループ数か進出人数を見直してください。');
+        ids.forEach(function (pid, k) {
+          rows.push({ playerId: pid, groupId: groups[gi].group_id, seed: k + 1, label: info[pid].label, sourceGroupId: info[pid].sourceGroupId, sourceRank: info[pid].rank });
+        });
+      });
+      report.notes.push('進出者を順位の帯ごとに蛇行の順で配り、同じ進出元のグループの選手がなるべく同じ組にならないようにしました。前の段階の成績は持ち越しません。');
+      if (res.report.clashes) report.notes.push('同じ進出元のグループの選手が同じ組になった組み合わせが ' + res.report.clashes + ' 組あります（人数の均衡と順位の帯を優先しました）。');
+    } else {
+      var g1 = bundle.groups.filter(function (g) {
+        return g.stage_id === targetId;
       })[0];
-      groupId = g ? g.group_id : '';
+      list.forEach(function (r) {
+        rows.push({ playerId: r.playerId, groupId: target.type === STAGE_TYPE.SERIES ? '' : g1 ? g1.group_id : '', seed: rows.length + 1, label: r.label, sourceGroupId: r.sourceGroupId, sourceRank: r.rank });
+      });
     }
-    list.forEach(function (row, i) {
-      var e = newEntry_(ctx, target, groupId, row.playerId, i + 1, taken, row.label);
+    return { stage: target, rows: rows, report: report };
+  });
+  return { targets: targets };
+}
+
+/** 進出の確認（プレビュー）: 誰がどこへ、どのシード・組に入るか。書き込みはしない */
+function actionPreviewAdvancement_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = resolveStage_(bundle, payload, 'rankable');
+  var nameOf = {};
+  bundle.players.forEach(function (p) {
+    nameOf[p.player_id] = p.display_name;
+  });
+  var groupName = {};
+  bundle.groups.forEach(function (g) {
+    groupName[g.group_id] = g.name;
+  });
+  try {
+    var plan = planAdvancement_(bundle, stage);
+    return {
+      ok: true,
+      targets: plan.targets.map(function (t) {
+        return {
+          stageId: t.stage.stage_id,
+          name: t.stage.name,
+          type: t.stage.type,
+          notes: t.report.notes,
+          rows: t.rows.map(function (r) {
+            return { playerId: r.playerId, name: nameOf[r.playerId] || '', seed: r.seed, label: r.label, group: r.groupId ? groupName[r.groupId] || '' : '', direct: !!r.direct };
+          }),
+        };
+      }),
+    };
+  } catch (e) {
+    if (!e.appCode) throw e;
+    return { ok: false, code: e.appCode, message: e.publicMessage };
+  }
+}
+
+function actionConfirmAdvancement_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = resolveStage_(bundle, payload, 'rankable');
+  var cfg = stageConfig_(stage);
+  if (cfg.advanced) throw appError_('LOCKED', 'この段階の進出は確定済みです。');
+  var plan = planAdvancement_(bundle, stage);
+  var entries = ctx.table('Entries');
+  var taken = Object.assign({}, entries.byKey);
+  var added = [];
+  plan.targets.forEach(function (t) {
+    // 直接出場の選手は残し、それ以外（前回の進出者・手で入れた選手）を入れ替える
+    deleteRecords_(entries, entries.rows.filter(function (e) {
+      return e.stage_id === t.stage.stage_id && !(entryMeta_(e).direct === true && isBracketStage_(t.stage));
+    }));
+    t.rows.forEach(function (r) {
+      if (r.direct) {
+        var keep = entries.rows.filter(function (e) {
+          return e.stage_id === t.stage.stage_id && e.player_id === r.playerId;
+        })[0];
+        if (keep && keep.seed !== r.seed) {
+          keep.seed = r.seed;
+          keep.rev = (keep.rev || 0) + 1;
+          keep.updated_at = ctx.now;
+          updateRecord_(entries, keep);
+        }
+        return;
+      }
+      var e = newEntry_(ctx, t.stage, r.groupId, r.playerId, r.seed, taken, r.label);
+      e.meta_json = JSON.stringify({ sourceGroupId: r.sourceGroupId || '', sourceRank: r.sourceRank || null, fromStageId: stage.stage_id });
       added.push(e);
     });
-    ctx.invalidate('Entries');
-    entries = ctx.table('Entries');
   });
-  appendRecords_(ctx.table('Entries'), added);
+  appendRecords_(entries, added);
   cfg.advanced = true;
   cfg.advancedAt = ctx.now;
-  saveStage_(ctx, ctx.table('Stages').byKey[stage.stage_id], cfg);
-  ctx.invalidate();
-  recordHistory_(ctx, 'stage.advance', 'Stage', stage.stage_id, eventId, null, { advanced: added.length });
+  saveStage_(ctx, ctx.table('Stages').byKey[stage.stage_id], cfg, ['advanced', 'advancedAt']);
+  recordHistory_(ctx, 'stage.advance', 'Stage', stage.stage_id, eventId, null, {
+    advanced: added.length,
+    targets: plan.targets.map(function (t) {
+      return { stageId: t.stage.stage_id, rows: t.rows.map(function (r) { return [r.playerId, r.seed, r.groupId, r.label]; }) };
+    }),
+  });
   return { eventId: eventId, advanced: added.length };
 }
 
 function actionUndoAdvancement_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   var bundle = collectEvent_(ctx, eventId);
-  var stage = resolveStage_(bundle, payload, 'group');
+  var stage = resolveStage_(bundle, payload, 'rankable');
   var cfg = stageConfig_(stage);
   if (!cfg.advanced) return { eventId: eventId };
   var targets = {};
@@ -5136,91 +5823,237 @@ function actionUndoAdvancement_(ctx, payload) {
   var targetMatches = bundle.matches.filter(function (m) {
     return targets[m.stage_id];
   });
-  if (targetMatches.some(matchStarted_)) {
+  if (targetMatches.some(function (m) { return matchStarted_(m) && m.result_type !== RESULT_TYPE.BYE; })) {
     throw appError_('LOCKED', '進出先の段階で結果が入力されているため取り消せません。先に進出先の結果を「未開始」に戻してください。');
   }
   deleteRecords_(ctx.table('Matches'), ctx.table('Matches').rows.filter(function (m) {
     return targets[m.stage_id];
   }));
-  ctx.invalidate();
+  // 直接出場の選手（進出とは別に登録したもの）は残す
   deleteRecords_(ctx.table('Entries'), ctx.table('Entries').rows.filter(function (e) {
-    return targets[e.stage_id];
+    return targets[e.stage_id] && entryMeta_(e).direct !== true;
   }));
-  ctx.invalidate();
   cfg.advanced = false;
   cfg.advancedAt = '';
-  saveStage_(ctx, ctx.table('Stages').byKey[stage.stage_id], cfg);
-  ctx.invalidate();
+  saveStage_(ctx, ctx.table('Stages').byKey[stage.stage_id], cfg, ['advanced', 'advancedAt']);
   recordHistory_(ctx, 'stage.undoAdvance', 'Stage', stage.stage_id, eventId, null, { removedMatches: targetMatches.length });
   return { eventId: eventId };
 }
 
-/* ---------- トーナメント ---------- */
+/* ---------- トーナメント・ダブルエリミネーション ---------- */
 
-/** 出場者とシード順を決める（playerIds の並び = シード 1, 2, 3…）。トーナメント表の作成前のみ */
+/**
+ * 出場者とシード順を決める（並び = シード 1, 2, 3…）。表の作成前のみ。
+ * payload.playerIds（従来）か payload.entrants = [{ playerId, startRound?, direct? }]（v0.8: 途中回戦から出場するシード・直接出場）
+ */
 function actionSetEntrants_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   var bundle = collectEvent_(ctx, eventId);
-  var stage = resolveStage_(bundle, payload, 'elimination');
+  var stage = resolveStage_(bundle, payload, 'knockout');
   if (stageMatchesOf_(bundle, stage).length) throw appError_('LOCKED', 'トーナメント表の作成後は出場者を変更できません。先にトーナメント表を削除してください。');
-  if (!Array.isArray(payload.playerIds) || payload.playerIds.length > ADMIN_CONFIG.MAX_ELIMINATION_ENTRANTS) {
+  var cfg = stageConfig_(stage);
+  var list = Array.isArray(payload.entrants)
+    ? payload.entrants
+    : Array.isArray(payload.playerIds)
+      ? payload.playerIds.map(function (pid) {
+          return { playerId: pid };
+        })
+      : null;
+  if (!list || list.length > ADMIN_CONFIG.MAX_ELIMINATION_ENTRANTS) {
     throw appError_('VALIDATION', '出場者は ' + ADMIN_CONFIG.MAX_ELIMINATION_ENTRANTS + ' 名までです。');
   }
+  if (cfg.maxEntrants && list.length > cfg.maxEntrants) throw appError_('VALIDATION', 'この段階の枠は ' + cfg.maxEntrants + ' 人です（' + list.length + ' 人が指定されました）。');
   var playerIds = {};
   bundle.players.forEach(function (p) {
     playerIds[p.player_id] = true;
   });
+  // 直接出場は、前の段階（この段階へ進出させる段階）の参加者とは重ならないようにする
+  var feederMembers = {};
+  bundle.stages.forEach(function (st) {
+    if (!stageConfig_(st).advancement.some(function (r) { return r.targetStageId === stage.stage_id; })) return;
+    bundle.entries.forEach(function (e) {
+      if (e.stage_id === st.stage_id) feederMembers[e.player_id] = st.name;
+    });
+  });
   var seen = {};
-  payload.playerIds.forEach(function (pid) {
+  var parsed = list.map(function (x) {
+    var pid = x && x.playerId;
     if (!isValidId_(pid) || !playerIds[pid] || seen[pid]) throw appError_('BAD_REQUEST', '出場者の指定が不正です。');
     seen[pid] = true;
+    var startRound = x.startRound === undefined || x.startRound === null || x.startRound === '' ? 1 : parseSmallInt_(x.startRound, '出場する回戦', 1, 8, 1);
+    if (startRound > 1 && stage.type === STAGE_TYPE.DOUBLE_ELIMINATION) throw appError_('VALIDATION', 'ダブルエリミネーションでは途中の回戦から出場するシードは指定できません。');
+    var direct = x.direct === true;
+    if (direct && feederMembers[pid]) {
+      var p = bundle.players.filter(function (y) {
+        return y.player_id === pid;
+      })[0];
+      throw appError_('VALIDATION', (p ? p.display_name : '選手') + ' は「' + feederMembers[pid] + '」の参加者なので、直接出場にはできません（進出で入ります）。');
+    }
+    return { playerId: pid, startRound: startRound, direct: direct };
   });
   var entries = ctx.table('Entries');
   var current = entries.rows.filter(function (e) {
     return e.stage_id === stage.stage_id;
   });
-  var labels = {};
+  var prev = {};
   current.forEach(function (e) {
-    labels[e.player_id] = e.source_label;
+    prev[e.player_id] = e;
   });
   deleteRecords_(entries, current);
-  ctx.invalidate('Entries');
   var taken = Object.assign({}, ctx.table('Entries').byKey);
-  var records = payload.playerIds.map(function (pid, i) {
-    return newEntry_(ctx, stage, '', pid, i + 1, taken, labels[pid] || '');
+  var records = parsed.map(function (x, i) {
+    var old = prev[x.playerId];
+    var meta = old ? entryMeta_(old) : {};
+    if (x.direct) meta.direct = true;
+    else delete meta.direct;
+    var label = x.direct ? '直接出場' : old && old.source_label !== '直接出場' ? old.source_label : '';
+    var e = newEntry_(ctx, stage, '', x.playerId, i + 1, taken, label);
+    e.start_round = x.startRound > 1 ? x.startRound : null;
+    e.meta_json = Object.keys(meta).length ? JSON.stringify(meta) : '';
+    return e;
   });
   appendRecords_(ctx.table('Entries'), records);
-  ctx.invalidate();
-  recordHistory_(ctx, 'entry.seed', 'Stage', stage.stage_id, eventId, null, { entrants: payload.playerIds });
+  recordHistory_(ctx, 'entry.seed', 'Stage', stage.stage_id, eventId, null, { entrants: parsed });
   return { eventId: eventId };
 }
 
-function actionGenerateBracket_(ctx, payload) {
-  var eventId = requireId_(payload.eventId, '大会');
-  var bundle = collectEvent_(ctx, eventId);
-  var stage = resolveStage_(bundle, payload, 'elimination');
-  if (stageMatchesOf_(bundle, stage).length) throw appError_('LOCKED', 'トーナメント表は作成済みです。');
-  var entrants = bundle.entries
+/**
+ * トーナメント表の計画（作成・プレビューで共通。書き込みはしない）。
+ * 戻り値: { matches: 試合の元データ, order: シードを付け直した並び（同組の初戦回避の結果）, conflicts, problems, notes, drawn }
+ */
+function bracketPlanFor_(bundle, stage) {
+  var cfg = stageConfig_(stage);
+  var rule = stageRule_(bundle, stage);
+  var problems = [];
+  var notes = [];
+  if (rule && rule.format === RULE_FORMAT.FIXED_LEGS) problems.push('この段階のルールが固定 Leg 数（引き分けあり）です。勝ち抜き戦では使えないので、「形式」タブで Leg 制かセット制にしてください。');
+  var nameOf = {};
+  bundle.players.forEach(function (p) {
+    nameOf[p.player_id] = p.display_name;
+  });
+  var list = bundle.entries
     .filter(function (e) {
       return e.stage_id === stage.stage_id;
     })
     .sort(function (a, b) {
       return (a.seed || 0) - (b.seed || 0);
     })
-    .map(function (e) {
-      return e.player_id;
+    .map(function (e, i) {
+      var meta = entryMeta_(e);
+      return { id: e.player_id, seed: i + 1, startRound: e.start_round || 1, label: nameOf[e.player_id] || '', group: meta.sourceGroupId || '', tier: meta.sourceRank || (meta.direct ? 0 : null) };
     });
-  if (entrants.length < 2) throw appError_('VALIDATION', '出場者が 2 名以上必要です。');
-  var plan = planBracket_(entrants, stageConfig_(stage).thirdPlace);
-  var matchesTable = ctx.table('Matches');
-  var taken = Object.assign({}, matchesTable.byKey);
+  if (list.length < 2) problems.push('出場者が 2 名以上必要です。');
+  var withdrawn = bundle.players.filter(function (p) {
+    return isWithdrawn_(p) && list.some(function (x) { return x.id === p.player_id; });
+  });
+  if (withdrawn.length) notes.push('棄権・失格した選手が出場者にいます（' + withdrawn.map(function (p) { return p.display_name; }).join('、') + '）。表を作ると、その選手の試合は不戦勝として扱います。');
+  var out = { matches: [], order: list.map(function (x) { return x.id; }), conflicts: [], problems: problems, notes: notes, drawn: false, list: list };
+  if (problems.length) return out;
+  if (stage.type === STAGE_TYPE.DOUBLE_ELIMINATION) {
+    var de = planDoubleElimination_(list, { grandFinal: cfg.grandFinal });
+    out.matches = de.matches;
+    out.problems = out.problems.concat(de.problems);
+    notes.push('勝者側 ' + de.winnerRounds + ' 回戦・敗者側 ' + de.loserRounds + ' 回戦・グランドファイナル' + (cfg.grandFinal === 'reset' ? '（敗者側の選手が勝てばリセットの決勝をもう 1 試合）' : '（1 試合のみ。勝者側の優勝者もここで負けると 1 敗で敗退します）') + '。');
+    return out;
+  }
+  if (cfg.drawMode === 'redraw') {
+    var sched = redrawSchedule_(list, cfg.fixedRounds);
+    out.problems = out.problems.concat(sched.problems);
+    out.schedule = sched.rounds;
+    if (out.problems.length) return out;
+    var first = list.filter(function (x) {
+      return x.startRound <= 1 || x.startRound <= cfg.fixedRounds;
+    });
+    if (cfg.fixedRounds > 0) {
+      var fixed = planSingleElimination_(first, { lastRound: cfg.fixedRounds });
+      out.matches = fixed.matches;
+      notes.push('1〜' + cfg.fixedRounds + ' 回戦は固定の表で行い、' + (cfg.fixedRounds + 1) + ' 回戦からは前の回戦が終わるたびに主催者が抽選します。');
+    } else {
+      out.drawn = true;
+      var pool = shuffle_(first.map(function (x) { return x.id; }));
+      for (var i = 0; i < pool.length; i += 2) {
+        out.matches.push({ key: '1-' + i / 2, round: 1, order: i / 2 + 1, label: redrawRoundLabel_(pool.length, 1), p1: pool[i], p2: pool[i + 1], nextKey: '', nextSlot: null, loserNextKey: '', loserNextSlot: null, meta: { draw: true } });
+      }
+      notes.push('1 回戦から、回戦ごとに抽選します（次の回戦は前の回戦がすべて確定した後に主催者が抽選）。');
+    }
+    return out;
+  }
+  // 固定の表: 同じ予選グループの選手が 1 回戦で当たらないように（同じ順位の帯の中だけで入れ替える）
+  var ordered = list;
+  if (cfg.avoidSameGroup && list.some(function (x) { return x.group; })) {
+    var avoided = avoidSameGroupFirstRound_(list, function (x) {
+      return x.tier === null || x.tier === undefined ? 'n' : String(x.tier);
+    });
+    ordered = avoided.order;
+    out.conflicts = avoided.conflicts;
+    if (avoided.swaps) notes.push('同じ予選グループの選手が 1 回戦で当たらないよう、同じ順位の選手どうしのシードを ' + avoided.swaps + ' 回入れ替えました。');
+    if (avoided.conflicts.length) {
+      notes.push(
+        '次の組み合わせは同じ予選グループどうしのまま残りました（シードの順位の帯を保つと避けられません）: ' +
+          avoided.conflicts
+            .map(function (c) {
+              return (nameOf[c[0]] || '?') + ' vs ' + (nameOf[c[1]] || '?');
+            })
+            .join('、') +
+          '。必要なら「出場者とシード」で手で並べ替えてください。'
+      );
+    }
+  }
+  var seeded = ordered.map(function (x, i) {
+    return { id: x.id, seed: i + 1, startRound: x.startRound, label: x.label };
+  });
+  var plan = planSingleElimination_(seeded, { thirdPlace: cfg.thirdPlace });
+  out.problems = out.problems.concat(plan.problems);
+  out.matches = plan.matches;
+  out.order = ordered.map(function (x) {
+    return x.id;
+  });
+  var late = seeded.filter(function (x) {
+    return x.startRound > 1;
+  });
+  if (late.length) notes.push(late.length + ' 人のシードは途中の回戦から出場します（不戦勝ではなく「シード（n 回戦から）」として表示します）。');
+  return out;
+}
+
+function actionPreviewBracket_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = resolveStage_(bundle, payload, 'knockout');
+  var plan = bracketPlanFor_(bundle, stage);
+  var nameOf = {};
+  bundle.players.forEach(function (p) {
+    nameOf[p.player_id] = p.display_name;
+  });
+  var firstRound = plan.matches
+    .filter(function (m) {
+      return m.round === 1 && (!m.side || m.side === 'W') && m.p1 && m.p2;
+    })
+    .map(function (m) {
+      return { p1: nameOf[m.p1] || '', p2: nameOf[m.p2] || '' };
+    });
+  return {
+    ok: !plan.problems.length,
+    problems: plan.problems,
+    notes: plan.notes,
+    matchCount: plan.matches.length,
+    firstRound: plan.drawn ? [] : firstRound,
+    drawnAtCreate: plan.drawn,
+    schedule: plan.schedule || null,
+    seeds: plan.order.map(function (pid, i) {
+      return { seed: i + 1, name: nameOf[pid] || '' };
+    }),
+  };
+}
+
+function bracketRecords_(ctx, stage, plan, extraMeta) {
+  var taken = Object.assign({}, ctx.table('Matches').byKey);
   var idOf = {};
   plan.forEach(function (p) {
     idOf[p.key] = newId_('MAT', taken);
     taken[idOf[p.key]] = true;
   });
-  var records = plan.map(function (p) {
-    var m = blankMatch_(ctx, stage, '', idOf[p.key]);
+  return plan.map(function (p) {
+    var m = blankMatch_(ctx, stage, p.groupId || '', idOf[p.key]);
     m.round = p.round;
     m.order = p.order;
     m.label = p.label;
@@ -5228,27 +6061,163 @@ function actionGenerateBracket_(ctx, payload) {
     m.player2_id = p.p2;
     m.next_match_id = p.nextKey && idOf[p.nextKey] ? idOf[p.nextKey] : '';
     m.next_match_slot = m.next_match_id ? p.nextSlot : null;
-    m.loser_next_match_id = p.loserNextKey ? idOf[p.loserNextKey] : '';
+    m.loser_next_match_id = p.loserNextKey && idOf[p.loserNextKey] ? idOf[p.loserNextKey] : '';
     m.loser_next_match_slot = m.loser_next_match_id ? p.loserNextSlot : null;
+    m.bracket_side = p.side || '';
+    var meta = Object.assign({}, p.meta || {}, extraMeta || {});
+    m.meta_json = Object.keys(meta).length ? JSON.stringify(meta) : '';
     return m;
   });
+}
+
+function actionGenerateBracket_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = resolveStage_(bundle, payload, 'knockout');
+  if (stageMatchesOf_(bundle, stage).length) throw appError_('LOCKED', 'トーナメント表は作成済みです。');
+  var plan = bracketPlanFor_(bundle, stage);
+  if (plan.problems.length) throw appError_('VALIDATION', plan.problems.join(' / '));
+  // 同組の初戦回避でシードを付け直したときは、出場者のシードも合わせる（閲覧ページのシード番号と表の位置を一致させる）
+  var entries = ctx.table('Entries');
+  plan.order.forEach(function (pid, i) {
+    var e = entries.rows.filter(function (x) {
+      return x.stage_id === stage.stage_id && x.player_id === pid;
+    })[0];
+    if (e && e.seed !== i + 1) {
+      e.seed = i + 1;
+      e.rev = (e.rev || 0) + 1;
+      e.updated_at = ctx.now;
+      updateRecord_(entries, e);
+    }
+  });
+  var records = bracketRecords_(ctx, stage, plan.matches, plan.drawn ? { drawnAt: ctx.now, drawnBy: ctx.user ? ctx.user.label : '' } : null);
+  appendRecords_(ctx.table('Matches'), records);
+  autoForfeitWithdrawn_(ctx, eventId, stage.stage_id);
+  recordHistory_(ctx, plan.drawn ? 'bracket.draw' : 'bracket.generate', 'Stage', stage.stage_id, eventId, null, {
+    entrants: plan.order.length,
+    matches: records.length,
+    conflicts: plan.conflicts,
+    notes: plan.notes,
+    pairs: records.map(function (m) {
+      return [m.round, m.player1_id, m.player2_id];
+    }),
+  });
+  return { eventId: eventId, created: records.length, notes: plan.notes };
+}
+
+/**
+ * 回戦ごとの抽選（v0.8、UK Open などの採用例を参考にした汎用の設定）。
+ * 前の回戦がすべて確定した後に主催者が押す。勝ち残った選手と、この回戦から出場するシードを抽選で組む。
+ * 抽選の結果は保存するので、画面を読み直しても変わらない。やり直しは、その回戦の試合がどれも始まっていないときだけ
+ * （redo: true。前の抽選の内容は履歴に残す）。
+ */
+function actionDrawNextRound_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = resolveStage_(bundle, payload, 'elimination');
+  var cfg = stageConfig_(stage);
+  if (cfg.drawMode !== 'redraw') throw appError_('BAD_REQUEST', 'この段階は固定の表です（回戦ごとの抽選ではありません）。');
+  var matchesTable = ctx.table('Matches');
+  var matches = stageMatchesOf_(bundle, stage);
+  if (!matches.length) throw appError_('LOCKED', '先に「トーナメント表を作成」を押してください。');
+  var latest = matches.reduce(function (mx, m) {
+    return Math.max(mx, m.round || 0);
+  }, 0);
+  var before = null;
+  if (payload.redo === true) {
+    var redoList = matches.filter(function (m) {
+      return m.round === latest;
+    });
+    if (latest <= cfg.fixedRounds) throw appError_('LOCKED', '固定の表の回戦は抽選のやり直しができません。');
+    if (redoList.some(matchStarted_)) throw appError_('LOCKED', latest + ' 回戦はすでに始まっている試合があるため、抽選をやり直せません。');
+    before = redoList.map(function (m) {
+      return [m.player1_id, m.player2_id];
+    });
+    deleteRecords_(matchesTable, redoList);
+    matches = matches.filter(function (m) {
+      return redoList.indexOf(m) === -1;
+    });
+    latest = latest - 1;
+    if (latest === 0) {
+      // 1 回戦の抽選のやり直し
+      var plan1 = bracketPlanFor_(bundle, stage);
+      var rec1 = bracketRecords_(ctx, stage, plan1.matches, { drawnAt: ctx.now, drawnBy: ctx.user ? ctx.user.label : '' });
+      appendRecords_(matchesTable, rec1);
+      recordHistory_(ctx, 'bracket.redraw', 'Stage', stage.stage_id, eventId, { round: 1, pairs: before }, { round: 1, pairs: rec1.map(function (m) { return [m.player1_id, m.player2_id]; }) });
+      return { eventId: eventId, round: 1, created: rec1.length };
+    }
+  }
+  var last = matches.filter(function (m) {
+    return m.round === latest && m.label !== '3位決定戦';
+  });
+  if (last.some(function (m) { return m.status !== MATCH_STATUS.FINAL || !m.winner_id; })) {
+    throw appError_('LOCKED', latest + ' 回戦の結果がすべて確定してから、次の回戦を抽選してください。');
+  }
+  if (last.length === 1 && last[0].label === '決勝') throw appError_('LOCKED', '決勝まで終わっています。');
+  var entrants = bundle.entries.filter(function (e) {
+    return e.stage_id === stage.stage_id;
+  });
+  var pool = last.map(function (m) {
+    return m.winner_id;
+  });
+  // 固定の表の最後の回戦で、不戦（Bye）のまま勝ち残った選手
+  if (latest === cfg.fixedRounds && cfg.fixedRounds > 0) {
+    var listFixed = entrants
+      .filter(function (e) {
+        return !(e.start_round > cfg.fixedRounds);
+      })
+      .sort(function (a, b) {
+        return (a.seed || 0) - (b.seed || 0);
+      })
+      .map(function (e, i) {
+        return { id: e.player_id, seed: i + 1, startRound: e.start_round || 1, label: '' };
+      });
+    var fixedPlan = planSingleElimination_(listFixed, { lastRound: cfg.fixedRounds });
+    Object.keys(fixedPlan.passes).forEach(function (key) {
+      if (key.indexOf(cfg.fixedRounds + '-') === 0 && fixedPlan.passes[key].t === 'p') pool.push(fixedPlan.passes[key].id);
+    });
+  }
+  var nextRound = latest + 1;
+  entrants.forEach(function (e) {
+    if (e.start_round === nextRound) pool.push(e.player_id);
+  });
+  if (pool.length < 2) throw appError_('LOCKED', '次の回戦に進む選手がいません。');
+  if (pool.length % 2 === 1) throw appError_('VALIDATION', nextRound + ' 回戦に進む選手が ' + pool.length + ' 人（奇数）です。途中から出場するシードの人数を見直してください。');
+  var drawn = shuffle_(pool);
+  var label = redrawRoundLabel_(drawn.length, nextRound);
+  var plan = [];
+  for (var i = 0; i < drawn.length; i += 2) {
+    plan.push({ key: 'r' + i, round: nextRound, order: i / 2 + 1, label: label, p1: drawn[i], p2: drawn[i + 1], meta: { draw: true } });
+  }
+  // 決勝の抽選のとき、3 位決定戦は準決勝の敗者どうし
+  if (drawn.length === 2 && cfg.thirdPlace && last.length === 2) {
+    var losers = last.map(function (m) {
+      return m.winner_id === m.player1_id ? m.player2_id : m.player1_id;
+    });
+    plan.push({ key: 'third', round: nextRound, order: 2, label: '3位決定戦', p1: losers[0], p2: losers[1], meta: { draw: true } });
+  }
+  var records = bracketRecords_(ctx, stage, plan, { drawnAt: ctx.now, drawnBy: ctx.user ? ctx.user.label : '', pool: drawn.length });
   appendRecords_(matchesTable, records);
-  ctx.invalidate();
-  recordHistory_(ctx, 'bracket.generate', 'Stage', stage.stage_id, eventId, null, { entrants: entrants.length, matches: records.length });
-  return { eventId: eventId, created: records.length };
+  autoForfeitWithdrawn_(ctx, eventId, stage.stage_id);
+  recordHistory_(ctx, before ? 'bracket.redraw' : 'bracket.draw', 'Stage', stage.stage_id, eventId, before ? { round: nextRound, pairs: before } : null, {
+    round: nextRound,
+    pairs: records.map(function (m) {
+      return [m.player1_id, m.player2_id];
+    }),
+  });
+  return { eventId: eventId, round: nextRound, created: records.length };
 }
 
 function actionClearBracket_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   var bundle = collectEvent_(ctx, eventId);
-  var stage = resolveStage_(bundle, payload, 'elimination');
+  var stage = resolveStage_(bundle, payload, 'knockout');
   var matches = stageMatchesOf_(bundle, stage);
   if (matches.some(matchStarted_)) throw appError_('LOCKED', '結果が入力された試合があるため削除できません。結果を「未開始」に戻してから実行してください。');
   var table = ctx.table('Matches');
   deleteRecords_(table, table.rows.filter(function (m) {
     return m.stage_id === stage.stage_id;
   }));
-  ctx.invalidate();
   recordHistory_(ctx, 'bracket.clear', 'Stage', stage.stage_id, eventId, { removed: matches.length }, null);
   return { eventId: eventId, removed: matches.length };
 }
@@ -5263,8 +6232,8 @@ function parseCount_(value, label, allowBlank) {
 }
 
 /**
- * トーナメントの勝者・敗者を次の試合の枠へ入れる（訂正時は入れ替える）。
- * 次の試合がすでに始まっている場合は、結果を変えさせない。
+ * 勝ち抜き戦の勝者・敗者を次の試合の枠へ入れる（訂正時は入れ替える）。
+ * 次の試合がすでに始まっている場合は、結果を変えさせない（進行中の対戦を壊さない・同じ選手を二重に進めない）。
  */
 function propagateElimination_(ctx, match, beforeWinner, afterWinner) {
   var table = ctx.table('Matches');
@@ -5286,12 +6255,83 @@ function propagateElimination_(ctx, match, beforeWinner, afterWinner) {
     next['player' + (mv.slot === 2 ? 2 : 1) + '_id'] = mv.after || '';
     next.rev = (next.rev || 0) + 1;
     next.updated_at = ctx.now;
+    updateRecord_(table, next);
   });
-  moves.forEach(function (mv) {
-    if (!mv.id || mv.before === mv.after || !table.byKey[mv.id]) return;
-    updateRecord_(table, table.byKey[mv.id]);
-  });
+  var meta = matchMeta_(match);
+  if (meta.gf === 1) syncGrandFinalReset_(ctx, match);
 }
+
+/**
+ * ダブルエリミのリセットの決勝（GF2）。グランドファイナル（GF1）で敗者側の選手（2 番目の枠）が勝ったときだけ行う。
+ * 勝者側の選手が勝った・リセットなしの設定のときは「実施なし」。GF1 を訂正したら合わせ直す（GF2 が始まっていたら止める）。
+ */
+function syncGrandFinalReset_(ctx, gf1) {
+  var table = ctx.table('Matches');
+  var gf2 = table.rows.filter(function (m) {
+    return m.stage_id === gf1.stage_id && matchMeta_(m).gf === 2;
+  })[0];
+  if (!gf2) return;
+  var want;
+  if (gf1.status !== MATCH_STATUS.FINAL || !gf1.winner_id) want = { p1: '', p2: '', type: '' };
+  else if (gf1.winner_id === gf1.player2_id) want = { p1: gf1.player1_id, p2: gf1.player2_id, type: '' };
+  else want = { p1: '', p2: '', type: RESULT_TYPE.NOT_NEEDED };
+  if (gf2.player1_id === want.p1 && gf2.player2_id === want.p2 && (gf2.result_type || '') === want.type) return;
+  if (matchStarted_(gf2) && gf2.result_type !== RESULT_TYPE.NOT_NEEDED) {
+    throw appError_('LOCKED', 'リセットの決勝が始まっているため、グランドファイナルの結果は変更できません。先にリセットの決勝を「未開始」に戻してください。');
+  }
+  gf2.player1_id = want.p1;
+  gf2.player2_id = want.p2;
+  gf2.result_type = want.type;
+  gf2.status = MATCH_STATUS.SCHEDULED;
+  gf2.winner_id = '';
+  gf2.rev = (gf2.rev || 0) + 1;
+  gf2.updated_at = ctx.now;
+  updateRecord_(table, gf2);
+}
+
+/**
+ * 棄権・失格した選手が勝ち抜き戦の次の試合に入ったら、その試合は相手の不戦勝にする（F15）。
+ * 両方とも棄権済みの試合は主催者が決める（そのまま残す）。連鎖して次の試合に入った場合も同じように処理する。
+ */
+function autoForfeitWithdrawn_(ctx, eventId, stageId) {
+  var withdrawn = {};
+  ctx.table('Players').rows.forEach(function (p) {
+    if (p.event_id === eventId && isWithdrawn_(p)) withdrawn[p.player_id] = playerMeta_(p).withdrawn;
+  });
+  if (!Object.keys(withdrawn).length) return 0;
+  var table = ctx.table('Matches');
+  var stage = ctx.table('Stages').byKey[stageId];
+  if (!isBracketStage_(stage)) return 0;
+  var count = 0;
+  for (var guard = 0; guard < 300; guard++) {
+    var target = table.rows.filter(function (m) {
+      if (m.stage_id !== stageId || m.status !== MATCH_STATUS.SCHEDULED || matchStarted_(m) || !m.player1_id || !m.player2_id) return false;
+      return !!withdrawn[m.player1_id] !== !!withdrawn[m.player2_id];
+    })[0];
+    if (!target) break;
+    var loser = withdrawn[target.player1_id] ? target.player1_id : target.player2_id;
+    var winner = loser === target.player1_id ? target.player2_id : target.player1_id;
+    var before = pickResult_(target);
+    target.status = MATCH_STATUS.FINAL;
+    target.result_type = withdrawn[loser].kind === 'disqualified' ? RESULT_TYPE.DISQUALIFIED : RESULT_TYPE.WALKOVER;
+    target.result_note = withdrawn[loser].reason || '';
+    target.player1_legs = null;
+    target.player2_legs = null;
+    target.player1_sets = 0;
+    target.player2_sets = 0;
+    target.winner_id = winner;
+    target.confirmed_at = ctx.now;
+    target.rev = (target.rev || 0) + 1;
+    target.updated_at = ctx.now;
+    propagateElimination_(ctx, target, '', winner);
+    updateRecord_(table, target);
+    recordHistory_(ctx, 'match.autoWalkover', 'Match', target.match_id, eventId, before, pickResult_(target));
+    count++;
+  }
+  return count;
+}
+
+var SPECIAL_RESULTS_ = [RESULT_TYPE.WALKOVER, RESULT_TYPE.RETIRED, RESULT_TYPE.DISQUALIFIED];
 
 /** 1 試合分の結果を検証する（書き込みはしない）。戻り値を applyMatchResult_ に渡して保存する */
 function prepareMatchResult_(ctx, payload) {
@@ -5303,10 +6343,28 @@ function prepareMatchResult_(ctx, payload) {
   if (match.status === MATCH_STATUS.FINAL && payload.correction !== true) {
     throw appError_('ALREADY_FINAL', '確定済みの試合です。結果を直す場合は「訂正」から操作してください。');
   }
+  if (match.result_type === RESULT_TYPE.BYE) throw appError_('LOCKED', '不戦（Bye）の記録は変更できません。');
+  if (match.result_type === RESULT_TYPE.NOT_NEEDED) throw appError_('LOCKED', 'この試合は行わないことになっています（グランドファイナルで勝者側の選手が勝ったため）。');
+  var resultType = payload.resultType === undefined || payload.resultType === null ? '' : payload.resultType;
+  if (resultType !== '' && SPECIAL_RESULTS_.indexOf(resultType) === -1) throw appError_('VALIDATION', '特殊な結果の種類が不正です。');
+  if (resultType && status !== MATCH_STATUS.FINAL) throw appError_('VALIDATION', '不戦勝・途中棄権・失格は「確定」として保存してください。');
 
   var bundle = collectEvent_(ctx, match.event_id);
   var stage = bundle.stageById[match.stage_id];
-  if (isGroupStage_(stage)) assertNotAdvanced_(stage);
+  if (isGroupStage_(stage) || stage.type === STAGE_TYPE.SERIES) assertNotAdvanced_(stage);
+  if (stage.type === STAGE_TYPE.SWISS) {
+    // スイス式: 後の回戦を組んだ後は、前の回戦の結果を変えない（組み合わせの前提が変わるため）
+    var latest = bundle.matches.reduce(function (mx, m) {
+      return m.stage_id === stage.stage_id && m.group_id === match.group_id ? Math.max(mx, m.round || 0) : mx;
+    }, 0);
+    if (match.round < latest) throw appError_('LOCKED', '第' + latest + '回戦の組み合わせを作った後は、第' + match.round + '回戦の結果を変更できません。先に第' + latest + '回戦の組み合わせを削除してください（まだ始まっていない場合のみ）。');
+  }
+  if (stage.type === STAGE_TYPE.SERIES && match.group_id) {
+    var night = bundle.groups.filter(function (g) {
+      return g.group_id === match.group_id;
+    })[0];
+    if (night && groupMeta_(night).status === 'cancelled') throw appError_('LOCKED', 'この節は中止になっています。');
+  }
   if (!match.player1_id || !match.player2_id) throw appError_('LOCKED', '対戦相手が決まっていません。前の試合の結果を確定してください。');
   var playerById = {};
   bundle.players.forEach(function (p) {
@@ -5317,16 +6375,57 @@ function prepareMatchResult_(ctx, payload) {
   }
   var spec = matchSpec_(bundle, match);
   var sets = spec && spec.format === 'sets';
-  var input = {
-    p1Legs: parseCount_(payload.p1Legs, '取得 Leg 数', sets),
-    p2Legs: parseCount_(payload.p2Legs, '取得 Leg 数', sets),
-    p1Sets: sets ? parseCount_(payload.p1Sets, '取得セット数', false) : 0,
-    p2Sets: sets ? parseCount_(payload.p2Sets, '取得セット数', false) : 0,
+  var note = cleanText_(payload.note, '理由', ADMIN_CONFIG.MAX_NOTE_LENGTH, { allowEmpty: true });
+  var input;
+  var winnerSide;
+  var draw = false;
+  if (resultType) {
+    winnerSide = payload.winnerSide === 1 || payload.winnerSide === 2 ? payload.winnerSide : 0;
+    if (!winnerSide) throw appError_('VALIDATION', '不戦勝・途中棄権・失格では、勝者（記録上の勝者）を選んでください。');
+    if (resultType === RESULT_TYPE.WALKOVER) {
+      // 不戦勝: 実際には試合をしていないので、Leg 数は記録しない（捏造しない）
+      input = { p1Legs: null, p2Legs: null, p1Sets: 0, p2Sets: 0 };
+    } else {
+      // 途中棄権・失格: その時点までの実際の Leg 数（任意）。勝敗が決まっていない数であること
+      input = {
+        p1Legs: parseCount_(payload.p1Legs, '取得 Leg 数', true),
+        p2Legs: parseCount_(payload.p2Legs, '取得 Leg 数', true),
+        p1Sets: sets ? parseCount_(payload.p1Sets, '取得セット数', true) || 0 : 0,
+        p2Sets: sets ? parseCount_(payload.p2Sets, '取得セット数', true) || 0 : 0,
+      };
+      if ((input.p1Legs === null) !== (input.p2Legs === null)) throw appError_('VALIDATION', '取得 Leg 数は両方入力するか、両方空欄にしてください。');
+      if (input.p1Legs !== null) {
+        var at = evaluateMatchInput_(MATCH_STATUS.LIVE, input, spec);
+        if (!at.ok) throw appError_('VALIDATION', '棄権・失格の時点の Leg 数は、まだ勝敗が決まっていない数にしてください（' + at.problems.join(' / ') + '）。');
+      }
+    }
+    if (!note) throw appError_('VALIDATION', '不戦勝・途中棄権・失格の理由を入力してください（運営画面にだけ残ります）。');
+  } else {
+    input = {
+      p1Legs: parseCount_(payload.p1Legs, '取得 Leg 数', sets),
+      p2Legs: parseCount_(payload.p2Legs, '取得 Leg 数', sets),
+      p1Sets: sets ? parseCount_(payload.p1Sets, '取得セット数', false) : 0,
+      p2Sets: sets ? parseCount_(payload.p2Sets, '取得セット数', false) : 0,
+    };
+    if (sets && (input.p1Legs === null) !== (input.p2Legs === null)) throw appError_('VALIDATION', '取得 Leg 数は両方入力するか、両方空欄にしてください。');
+    var result = evaluateMatchInput_(status, input, spec);
+    if (!result.ok) throw appError_('VALIDATION', result.problems.join(' / '));
+    if (result.draw && isBracketStage_(stage)) throw appError_('VALIDATION', '勝ち抜き戦では引き分けを確定できません。');
+    winnerSide = result.winnerSide;
+    draw = !!result.draw;
+  }
+  return {
+    match: match,
+    stage: stage,
+    status: status,
+    sets: sets,
+    input: input,
+    winnerSide: winnerSide,
+    draw: draw,
+    resultType: resultType,
+    note: resultType ? note : '',
+    names: [playerById[match.player1_id].display_name, playerById[match.player2_id].display_name],
   };
-  if (sets && (input.p1Legs === null) !== (input.p2Legs === null)) throw appError_('VALIDATION', '取得 Leg 数は両方入力するか、両方空欄にしてください。');
-  var result = evaluateMatchInput_(status, input, spec);
-  if (!result.ok) throw appError_('VALIDATION', result.problems.join(' / '));
-  return { match: match, stage: stage, status: status, sets: sets, input: input, winnerSide: result.winnerSide, names: [playerById[match.player1_id].display_name, playerById[match.player2_id].display_name] };
 }
 
 function applyMatchResult_(ctx, prep) {
@@ -5339,11 +6438,14 @@ function applyMatchResult_(ctx, prep) {
   match.player2_sets = prep.sets ? prep.input.p2Sets : 0;
   match.status = prep.status;
   match.winner_id = prep.winnerSide === 1 ? match.player1_id : prep.winnerSide === 2 ? match.player2_id : '';
+  match.result_type = prep.resultType || '';
+  match.result_note = prep.note || '';
   match.confirmed_at = prep.status === MATCH_STATUS.FINAL ? ctx.now : '';
   match.rev = (match.rev || 0) + 1;
   match.updated_at = ctx.now;
-  if (isEliminationStage_(prep.stage)) propagateElimination_(ctx, match, beforeWinner, match.winner_id);
+  if (isBracketStage_(prep.stage)) propagateElimination_(ctx, match, beforeWinner, match.winner_id);
   updateRecord_(ctx.table('Matches'), match);
+  if (isBracketStage_(prep.stage)) autoForfeitWithdrawn_(ctx, match.event_id, match.stage_id);
   var action = before.status === MATCH_STATUS.FINAL ? 'match.correct' : 'match.result';
   recordHistory_(ctx, action, 'Match', match.match_id, match.event_id, pickResult_(before), pickResult_(match));
 }
@@ -5356,7 +6458,7 @@ function actionSaveMatchResult_(ctx, payload) {
 
 /**
  * 複数の試合をまとめて確定する。すべての結果を先に検証し、1 つでも成立しなければ何も保存しない。
- * 対象は未確定の試合の「確定」だけ（訂正・進行中の保存は 1 試合ずつ）。
+ * 対象は未確定の試合の「確定」だけ（訂正・進行中の保存・特殊な結果は 1 試合ずつ）。
  */
 function actionSaveMatchResults_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
@@ -5399,6 +6501,7 @@ function pickResult_(m) {
     player2_sets: m.player2_sets,
     status: m.status,
     winner_id: m.winner_id,
+    result_type: m.result_type || '',
     rev: m.rev,
   };
 }
@@ -5412,7 +6515,9 @@ function actionRepublish_(ctx, payload) {
 /* ---------- 大会の削除（アーカイブ） ---------- */
 
 /** 大会に属する行を持つシート（Events・PublicSnapshots 以外） */
-var EVENT_CHILD_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History'];
+var EVENT_CHILD_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History', 'Collaborators'];
+/** 保存用ファイル（JSON）に入れるシート。共同主催者のメールアドレスは入れない */
+var ARCHIVE_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History'];
 
 /** 削除・パスワードなどの設定は、大会を作った本人と管理者だけ（店舗スタッフは不可） */
 function assertNotStaff_(ctx, what) {
@@ -5426,7 +6531,7 @@ function assertNotStaff_(ctx, what) {
 function eventArchive_(ctx, eventId) {
   var event = findRecord_(ctx.table('Events'), eventId, '大会');
   var tables = {};
-  EVENT_CHILD_TABLES_.forEach(function (name) {
+  ARCHIVE_TABLES_.forEach(function (name) {
     tables[name] = ctx.table(name).rows
       .filter(function (r) {
         return r.event_id === eventId;
@@ -5435,7 +6540,8 @@ function eventArchive_(ctx, eventId) {
   });
   return {
     format: 'n02-tournament-archive',
-    formatVersion: 1,
+    // 2 = v0.8（列が増えた。共同主催者は入れない）。復元は 1 と 2 の両方を受け付ける
+    formatVersion: 2,
     appVersion: ADMIN_CONFIG.APP_VERSION,
     exportedAt: ctx.now,
     exportedBy: ctx.user ? ctx.user.label : '',
@@ -5456,8 +6562,8 @@ function actionExportEvent_(ctx, payload) {
  * 削除したことは履歴（大会に属さない行）に残すが、大会の中身は残さない。
  */
 function actionDeleteEvent_(ctx, payload) {
-  assertNotStaff_(ctx, '大会の削除');
   var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '大会の削除');
   var events = ctx.table('Events');
   var event = findRecord_(events, eventId, '大会');
   assertRev_(event, requireRev_(payload.rev), '大会');
@@ -5573,11 +6679,1236 @@ function actionCreateSampleEvent_(ctx, payload) {
   return { eventId: eventId, adminKey: created.adminKey };
 }
 
-/* ---------- 操作の後処理（自動終了など） ---------- */
+// ---- 06b_ops.js ----
+/* v0.8 で足した運営の操作（スイス式・シリーズ・選手の CSV 登録・棄権・予定・お知らせ・複製・共同主催者・復元・自動終了） */
 
-/** 大会を変更する操作の後に呼ぶ（runMutation_ が公開データを作る前）。 */
+/* ---------- スイス式 ---------- */
+
+/**
+ * 次の回戦を組む（前の回戦がすべて確定した後に主催者が押す。自動では組まない）。
+ * 組み合わせの規則と、満たせなかった条件（緩めた内容・理由）は 04c_swiss.js。記録は段階の設定（pairingLog）と履歴に残す。
+ */
+function actionGenerateSwissRound_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = resolveStage_(bundle, payload, 'swiss');
+  assertNotAdvanced_(stage);
+  var cfg = stageConfig_(stage);
+  var group = bundle.groups.filter(function (g) {
+    return g.stage_id === stage.stage_id;
+  })[0];
+  if (!group) throw appError_('DATA_CONFLICT', 'スイス式の組がありません。');
+  var matches = bundle.matches.filter(function (m) {
+    return m.stage_id === stage.stage_id && m.group_id === group.group_id;
+  });
+  var latest = matches.reduce(function (mx, m) {
+    return Math.max(mx, m.round || 0);
+  }, 0);
+  if (latest >= cfg.rounds) throw appError_('LOCKED', '予定の ' + cfg.rounds + ' 回戦はすべて組みました。');
+  var open = matches.filter(function (m) {
+    return m.round === latest && m.result_type !== RESULT_TYPE.BYE && m.status !== MATCH_STATUS.FINAL;
+  });
+  if (open.length) throw appError_('LOCKED', '第' + latest + '回戦の結果がすべて確定してから、次の回戦を組んでください（未確定 ' + open.length + ' 試合）。');
+  var playerById = {};
+  bundle.players.forEach(function (p) {
+    playerById[p.player_id] = p;
+  });
+  var members = bundle.entries
+    .filter(function (e) {
+      return e.group_id === group.group_id && playerById[e.player_id] && !isWithdrawn_(playerById[e.player_id]);
+    })
+    .sort(function (a, b) {
+      return (a.seed || 0) - (b.seed || 0);
+    });
+  if (members.length < 2) throw appError_('VALIDATION', '参加者が 2 名以上必要です（棄権・失格した選手は組みません）。');
+  var view = buildEventView_(bundle, true).stages.filter(function (st) {
+    return st.id === stage.stage_id;
+  })[0];
+  if (view.progress.check) throw appError_('LOCKED', '「要確認」の試合があります。先に結果を直してください。');
+  var standing = view.groups[0].standings;
+  var rankOf = {};
+  var pointsOf = {};
+  standing.forEach(function (r, i) {
+    rankOf[r.playerId] = i;
+    pointsOf[r.playerId] = r.points || 0;
+  });
+  var seedOf = {};
+  members.forEach(function (e, i) {
+    seedOf[e.player_id] = i;
+  });
+  var opponents = {};
+  var byes = {};
+  members.forEach(function (e) {
+    opponents[e.player_id] = {};
+    byes[e.player_id] = 0;
+  });
+  matches.forEach(function (m) {
+    if (m.result_type === RESULT_TYPE.BYE) {
+      if (byes[m.player1_id] !== undefined) byes[m.player1_id]++;
+      return;
+    }
+    if (opponents[m.player1_id]) opponents[m.player1_id][m.player2_id] = (opponents[m.player1_id][m.player2_id] || 0) + 1;
+    if (opponents[m.player2_id]) opponents[m.player2_id][m.player1_id] = (opponents[m.player2_id][m.player1_id] || 0) + 1;
+  });
+  var ordered;
+  if (latest === 0) {
+    ordered = cfg.firstRound === 'random' ? shuffle_(members.map(function (e) { return e.player_id; })) : members.map(function (e) { return e.player_id; });
+  } else {
+    ordered = members
+      .map(function (e) {
+        return e.player_id;
+      })
+      .sort(function (a, b) {
+        return (rankOf[a] === undefined ? 999 : rankOf[a]) - (rankOf[b] === undefined ? 999 : rankOf[b]) || seedOf[a] - seedOf[b];
+      });
+  }
+  var players = ordered.map(function (pid) {
+    return { id: pid, points: latest === 0 ? 0 : pointsOf[pid] || 0, opponents: opponents[pid], byes: byes[pid] };
+  });
+  var res = swissPairRound_(players, { avoidRematch: true });
+  var round = latest + 1;
+  var taken = Object.assign({}, ctx.table('Matches').byKey);
+  var records = [];
+  res.pairs.forEach(function (pair, i) {
+    var id = newId_('MAT', taken);
+    taken[id] = true;
+    var m = blankMatch_(ctx, stage, group.group_id, id);
+    m.round = round;
+    m.order = i + 1;
+    m.player1_id = pair[0];
+    m.player2_id = pair[1];
+    records.push(m);
+  });
+  if (res.bye) {
+    var bid = newId_('MAT', taken);
+    var bye = blankMatch_(ctx, stage, group.group_id, bid);
+    bye.round = round;
+    bye.order = records.length + 1;
+    bye.player1_id = res.bye;
+    bye.status = MATCH_STATUS.FINAL;
+    bye.result_type = RESULT_TYPE.BYE;
+    bye.winner_id = res.bye;
+    bye.confirmed_at = ctx.now;
+    records.push(bye);
+  }
+  appendRecords_(ctx.table('Matches'), records);
+  var nameOf = function (pid) {
+    return playerById[pid] ? playerById[pid].display_name : '?';
+  };
+  var log = {
+    round: round,
+    at: ctx.now,
+    by: ctx.user ? ctx.user.label : '',
+    bye: res.bye ? nameOf(res.bye) : '',
+    relaxed: res.relaxed,
+    rematches: res.rematches.map(function (p) {
+      return nameOf(p[0]) + ' vs ' + nameOf(p[1]);
+    }),
+    steps: res.steps,
+  };
+  var stageRec = ctx.table('Stages').byKey[stage.stage_id];
+  cfg.pairingLog = cfg.pairingLog
+    .filter(function (l) {
+      return l && l.round !== round;
+    })
+    .concat([log]);
+  saveStage_(ctx, stageRec, cfg, ['pairingLog']);
+  ctx.touchedResults = true;
+  recordHistory_(ctx, 'swiss.pair', 'Stage', stage.stage_id, eventId, null, {
+    round: round,
+    pairs: res.pairs,
+    bye: res.bye,
+    relaxed: res.relaxed,
+    rematches: res.rematches,
+  });
+  return { eventId: eventId, round: round, created: records.length, relaxed: res.relaxed, rematches: log.rematches, bye: log.bye };
+}
+
+/** 最新の回戦の組み合わせを消す（その回戦の試合がどれも始まっていないときだけ。前の回戦の訂正のため） */
+function actionDeleteSwissRound_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = resolveStage_(bundle, payload, 'swiss');
+  assertNotAdvanced_(stage);
+  var matches = stageMatchesOf_(bundle, stage);
+  var latest = matches.reduce(function (mx, m) {
+    return Math.max(mx, m.round || 0);
+  }, 0);
+  if (!latest) throw appError_('LOCKED', '組み合わせがありません。');
+  var list = matches.filter(function (m) {
+    return m.round === latest;
+  });
+  if (list.some(function (m) { return m.result_type !== RESULT_TYPE.BYE && matchStarted_(m); })) {
+    throw appError_('LOCKED', '第' + latest + '回戦はすでに結果が入っている試合があるため、組み合わせを削除できません。');
+  }
+  deleteRecords_(ctx.table('Matches'), list);
+  var cfg = stageConfig_(stage);
+  cfg.pairingLog = cfg.pairingLog.filter(function (l) {
+    return l && l.round !== latest;
+  });
+  saveStage_(ctx, ctx.table('Stages').byKey[stage.stage_id], cfg, ['pairingLog']);
+  ctx.touchedResults = true;
+  recordHistory_(ctx, 'swiss.unpair', 'Stage', stage.stage_id, eventId, { round: latest, matches: list.length }, null);
+  return { eventId: eventId, removed: list.length, round: latest };
+}
+
+/* ---------- ポイントシリーズ（節） ---------- */
+
+function resolveNight_(bundle, payload) {
+  var gid = requireId_(payload.groupId, '節');
+  var night = bundle.groups.filter(function (g) {
+    return g.group_id === gid;
+  })[0];
+  if (!night) throw appError_('NOT_FOUND', '節が見つかりません。');
+  var stage = bundle.stageById[night.stage_id];
+  if (!stage || stage.type !== STAGE_TYPE.SERIES) throw appError_('BAD_REQUEST', 'この操作はポイントシリーズの節でのみ使えます。');
+  return { night: night, stage: stage };
+}
+
+/** 節の参加者（節を組む前だけ）。空配列なら「全員（参加者名簿）」に戻す */
+function actionSetNightParticipants_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var r = resolveNight_(bundle, payload);
+  assertNotAdvanced_(r.stage);
+  if (bundle.matches.some(function (m) { return m.group_id === r.night.group_id; })) throw appError_('LOCKED', 'この節の組み合わせを作った後は参加者を変更できません。先に組み合わせを削除してください。');
+  if (!Array.isArray(payload.playerIds) || payload.playerIds.length > ADMIN_CONFIG.MAX_ELIMINATION_ENTRANTS) throw appError_('BAD_REQUEST', '参加者の指定が不正です。');
+  var roster = {};
+  bundle.entries.forEach(function (e) {
+    if (e.stage_id === r.stage.stage_id && !e.group_id) roster[e.player_id] = true;
+  });
+  var seen = {};
+  payload.playerIds.forEach(function (pid) {
+    if (!isValidId_(pid) || !roster[pid] || seen[pid]) throw appError_('BAD_REQUEST', 'シリーズの参加者名簿にいる選手を指定してください。');
+    seen[pid] = true;
+  });
+  var entries = ctx.table('Entries');
+  deleteRecords_(entries, entries.rows.filter(function (e) {
+    return e.group_id === r.night.group_id;
+  }));
+  var taken = Object.assign({}, entries.byKey);
+  appendRecords_(
+    entries,
+    payload.playerIds.map(function (pid, i) {
+      return newEntry_(ctx, r.stage, r.night.group_id, pid, i + 1, taken);
+    })
+  );
+  recordHistory_(ctx, 'night.participants', 'Group', r.night.group_id, eventId, null, { players: payload.playerIds });
+  return { eventId: eventId };
+}
+
+/**
+ * 節の小トーナメントを組む。参加者は節ごとに指定した選手（なければ参加者名簿の全員。棄権・失格した選手は除く）。
+ * シードの決め方は段階の設定: random（既定。節ごとに独立した抽選）/ standing（その時点の累計順位）/ seed（名簿の順）。
+ * 全節の総当たりの保証などはしない（各節は独立）。
+ */
+function actionGenerateNight_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var r = resolveNight_(bundle, payload);
+  assertNotAdvanced_(r.stage);
+  var meta = groupMeta_(r.night);
+  if (meta.status === 'cancelled') throw appError_('LOCKED', 'この節は中止になっています。');
+  if (bundle.matches.some(function (m) { return m.group_id === r.night.group_id; })) throw appError_('LOCKED', 'この節の組み合わせは作成済みです。');
+  var rule = stageRule_(bundle, r.stage);
+  if (rule && rule.format === RULE_FORMAT.FIXED_LEGS) throw appError_('VALIDATION', 'ポイントシリーズの節は勝ち抜き戦なので、固定 Leg 数（引き分けあり）は使えません。');
+  var cfg = stageConfig_(r.stage);
+  var playerById = {};
+  bundle.players.forEach(function (p) {
+    playerById[p.player_id] = p;
+  });
+  var nightEntries = bundle.entries.filter(function (e) {
+    return e.group_id === r.night.group_id;
+  });
+  var roster = bundle.entries
+    .filter(function (e) {
+      return e.stage_id === r.stage.stage_id && !e.group_id;
+    })
+    .sort(function (a, b) {
+      return (a.seed || 0) - (b.seed || 0);
+    });
+  var ids = (nightEntries.length ? nightEntries.sort(function (a, b) { return (a.seed || 0) - (b.seed || 0); }) : roster)
+    .map(function (e) {
+      return e.player_id;
+    })
+    .filter(function (pid) {
+      return playerById[pid] && !isWithdrawn_(playerById[pid]);
+    });
+  if (ids.length < 2) throw appError_('VALIDATION', 'この節の参加者が 2 名以上必要です（参加者名簿は「組み合わせ」タブの「参加者を登録」で作ります）。');
+  var method = cfg.nightDraw;
+  if (method === 'random') ids = shuffle_(ids);
+  else if (method === 'standing') {
+    var view = buildEventView_(bundle, true).stages.filter(function (st) {
+      return st.id === r.stage.stage_id;
+    })[0];
+    var pos = {};
+    view.standings.forEach(function (row, i) {
+      pos[row.playerId] = i;
+    });
+    ids.sort(function (a, b) {
+      return (pos[a] === undefined ? 999 : pos[a]) - (pos[b] === undefined ? 999 : pos[b]);
+    });
+  }
+  var entries = ctx.table('Entries');
+  deleteRecords_(entries, nightEntries);
+  var taken = Object.assign({}, entries.byKey);
+  appendRecords_(
+    entries,
+    ids.map(function (pid, i) {
+      return newEntry_(ctx, r.stage, r.night.group_id, pid, i + 1, taken);
+    })
+  );
+  var plan = planSingleElimination_(ids, {});
+  var records = bracketRecords_(
+    ctx,
+    r.stage,
+    plan.matches.map(function (m) {
+      m.groupId = r.night.group_id;
+      return m;
+    }),
+    { drawnAt: ctx.now, drawnBy: ctx.user ? ctx.user.label : '', nightDraw: method }
+  );
+  appendRecords_(ctx.table('Matches'), records);
+  ctx.touchedResults = true;
+  recordHistory_(ctx, 'night.draw', 'Group', r.night.group_id, eventId, null, { method: method, seeds: ids, matches: records.length });
+  return { eventId: eventId, created: records.length };
+}
+
+/** 節の組み合わせを消す（結果の入った試合がないときだけ） */
+function actionClearNight_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var r = resolveNight_(bundle, payload);
+  assertNotAdvanced_(r.stage);
+  var list = bundle.matches.filter(function (m) {
+    return m.group_id === r.night.group_id;
+  });
+  if (list.some(matchStarted_)) throw appError_('LOCKED', '結果が入力された試合があるため削除できません。');
+  deleteRecords_(ctx.table('Matches'), list);
+  ctx.touchedResults = true;
+  recordHistory_(ctx, 'night.clear', 'Group', r.night.group_id, eventId, { removed: list.length }, null);
+  return { eventId: eventId, removed: list.length };
+}
+
+/** 節を中止にする（点なし・完了の条件から外す）・中止を取り消す。結果の入った試合があるときは中止できない */
+function actionCancelNight_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var r = resolveNight_(bundle, payload);
+  assertNotAdvanced_(r.stage);
+  var group = ctx.table('Groups').byKey[r.night.group_id];
+  assertRev_(group, requireRev_(payload.rev), '節');
+  var meta = groupMeta_(group);
+  if (payload.undo === true) {
+    delete meta.status;
+    delete meta.reason;
+  } else {
+    if (bundle.matches.some(function (m) { return m.group_id === group.group_id && matchStarted_(m); })) throw appError_('LOCKED', '結果が入力された試合があるため、この節は中止にできません。');
+    meta.status = 'cancelled';
+    meta.reason = cleanText_(payload.reason, '中止の理由', ADMIN_CONFIG.MAX_NOTE_LENGTH);
+  }
+  group.meta_json = JSON.stringify(meta);
+  group.rev = (group.rev || 0) + 1;
+  group.updated_at = ctx.now;
+  updateRecord_(ctx.table('Groups'), group);
+  ctx.touchedResults = true;
+  recordHistory_(ctx, payload.undo === true ? 'night.uncancel' : 'night.cancel', 'Group', group.group_id, eventId, null, { reason: meta.reason || '' });
+  return { eventId: eventId };
+}
+
+/** 節の名前・開催日 */
+function actionUpdateNight_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var r = resolveNight_(bundle, payload);
+  var group = ctx.table('Groups').byKey[r.night.group_id];
+  assertRev_(group, requireRev_(payload.rev), '節');
+  var meta = groupMeta_(group);
+  if (payload.name !== undefined) group.name = cleanText_(payload.name, '節の名前', ADMIN_CONFIG.MAX_LABEL_LENGTH);
+  if (payload.date !== undefined) {
+    var d = parseDateInput_(payload.date, '開催日');
+    if (d) meta.date = d;
+    else delete meta.date;
+  }
+  group.meta_json = JSON.stringify(meta);
+  group.rev = (group.rev || 0) + 1;
+  group.updated_at = ctx.now;
+  updateRecord_(ctx.table('Groups'), group);
+  recordHistory_(ctx, 'night.update', 'Group', group.group_id, eventId, null, { name: group.name, date: meta.date || '' });
+  return { eventId: eventId };
+}
+
+/* ---------- 選手（所属・Rt・シード・CSV 登録・棄権） ---------- */
+
+function parseAffiliation_(value) {
+  return cleanText_(value, '所属', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true });
+}
+
+/** Rt（任意）。空欄は未入力（0 とは別）。0〜999.99 */
+function parseRatingInput_(value) {
+  if (value === null || value === undefined || value === '') return '';
+  var v = parseRating_(value);
+  if (v === null) return '';
+  if (isNaN(v)) throw appError_('VALIDATION', 'Rt は 0〜999.99 の数で入力してください（未入力は空欄）。');
+  return String(v);
+}
+
+function parseSeedInput_(value) {
+  if (value === null || value === undefined || value === '') return null;
+  return parseSmallInt_(value, 'シード', 1, ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT, null);
+}
+
+/**
+ * CSV などからの一括登録（F11）。画面でプレビューして確認した行だけを送る。
+ * players = [{ name, affiliation?, rating?, seed? }]。1 行でも不正なら何も登録しない（一部だけ登録しない）。
+ * 同じ名前の選手（既存・ファイル内）は同一人物とみなさず、エラーとして止める（画面で名前を変えるか行を外す）。
+ */
+function actionImportPlayers_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  findRecord_(ctx.table('Events'), eventId, '大会');
+  if (!Array.isArray(payload.players) || !payload.players.length) throw appError_('VALIDATION', '登録する選手がありません。');
+  if (payload.players.length > ADMIN_CONFIG.MAX_IMPORT_PLAYERS) throw appError_('VALIDATION', '一度に登録できるのは ' + ADMIN_CONFIG.MAX_IMPORT_PLAYERS + ' 名までです。');
+  var players = ctx.table('Players');
+  var current = players.rows.filter(function (p) {
+    return p.event_id === eventId;
+  });
+  if (current.length + payload.players.length > ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT) {
+    throw appError_('VALIDATION', '1 大会の選手は ' + ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT + ' 名までです（今 ' + current.length + ' 名・追加 ' + payload.players.length + ' 名）。');
+  }
+  var names = {};
+  current.forEach(function (p) {
+    names[p.display_name] = 'existing';
+  });
+  var seeds = {};
+  current.forEach(function (p) {
+    if (p.seed) seeds[p.seed] = p.display_name;
+  });
+  var problems = [];
+  var cleaned = payload.players.map(function (row, i) {
+    var line = i + 1;
+    try {
+      if (!row || typeof row !== 'object') throw appError_('VALIDATION', '形式が不正です。');
+      var name = cleanText_(row.name, '選手名', ADMIN_CONFIG.MAX_PLAYER_NAME_LENGTH);
+      if (names[name] === 'existing') throw appError_('VALIDATION', '「' + name + '」は既に登録されています（同名の別人なら名前を区別してください）。');
+      if (names[name]) throw appError_('VALIDATION', '「' + name + '」がファイル内で重複しています。');
+      names[name] = 'file';
+      var seed = parseSeedInput_(row.seed);
+      if (seed && seeds[seed]) throw appError_('VALIDATION', 'シード ' + seed + ' は「' + seeds[seed] + '」と重複しています。');
+      if (seed) seeds[seed] = name;
+      return { name: name, affiliation: parseAffiliation_(row.affiliation), rating: parseRatingInput_(row.rating), seed: seed };
+    } catch (e) {
+      if (!e.appCode) throw e;
+      problems.push(line + ' 行目: ' + e.publicMessage);
+      return null;
+    }
+  });
+  if (problems.length) throw appError_('VALIDATION', '登録していません。次の行を直してください: ' + problems.slice(0, 10).join(' / ') + (problems.length > 10 ? ' ほか ' + (problems.length - 10) + ' 件' : ''));
+  var taken = Object.assign({}, players.byKey);
+  var records = cleaned.map(function (x) {
+    var id = newId_('PLY', taken);
+    taken[id] = true;
+    return { player_id: id, event_id: eventId, display_name: x.name, external_ref: '', notes: '', affiliation: x.affiliation, rating: x.rating, seed: x.seed, meta_json: '', rev: 1, created_at: ctx.now, updated_at: ctx.now };
+  });
+  appendRecords_(players, records);
+  recordHistory_(ctx, 'player.import', 'Player', '', eventId, null, { count: records.length, names: records.map(function (r) { return r.display_name; }) });
+  return { eventId: eventId, added: records.length };
+}
+
+/** 棄権・失格の影響（プレビュー）: 未消化の試合と、その扱い */
+function withdrawImpact_(bundle, playerId) {
+  var list = [];
+  bundle.matches.forEach(function (m) {
+    if (m.player1_id !== playerId && m.player2_id !== playerId) return;
+    if (m.status === MATCH_STATUS.FINAL || m.result_type === RESULT_TYPE.BYE || m.result_type === RESULT_TYPE.NOT_NEEDED) return;
+    var other = m.player1_id === playerId ? m.player2_id : m.player1_id;
+    list.push({ match: m, opponent: other, live: m.status === MATCH_STATUS.LIVE || matchStarted_(m) });
+  });
+  return list;
+}
+
+function actionPreviewWithdraw_(ctx, payload) {
+  var bundle = collectEvent_(ctx, findRecord_(ctx.table('Players'), requireId_(payload.playerId, '選手'), '選手').event_id);
+  var nameOf = {};
+  bundle.players.forEach(function (p) {
+    nameOf[p.player_id] = p.display_name;
+  });
+  var stageName = {};
+  bundle.stages.forEach(function (st) {
+    stageName[st.stage_id] = st.name;
+  });
+  var finals = bundle.matches.filter(function (m) {
+    return (m.player1_id === payload.playerId || m.player2_id === payload.playerId) && m.status === MATCH_STATUS.FINAL;
+  }).length;
+  return {
+    finals: finals,
+    affected: withdrawImpact_(bundle, payload.playerId).map(function (x) {
+      return {
+        matchId: x.match.match_id,
+        stage: stageName[x.match.stage_id] || '',
+        label: x.match.label || (x.match.round ? x.match.round + '' : ''),
+        opponent: x.opponent ? nameOf[x.opponent] || '' : '',
+        action: !x.opponent ? 'pending' : x.live ? 'retired' : 'walkover',
+      };
+    }),
+  };
+}
+
+/**
+ * 棄権・失格（F15）。確定済みの試合は消さずに残し、未消化の試合だけを処理する:
+ *   未開始 → 相手の不戦勝（Leg 数は記録しない） / 進行中 → 途中棄権・失格（その時点の Leg 数のまま相手の勝ち）
+ *   相手がまだ決まっていない勝ち抜き戦の試合 → 相手が決まった時点で不戦勝にする
+ * 以後のスイス式の組み合わせ・シリーズの節には入れない。
+ */
+function actionWithdrawPlayer_(ctx, payload) {
+  var players = ctx.table('Players');
+  var player = findRecord_(players, requireId_(payload.playerId, '選手'), '選手');
+  assertRev_(player, requireRev_(payload.rev), '選手');
+  var kind = payload.kind === 'disqualified' ? 'disqualified' : payload.kind === 'withdrawn' ? 'withdrawn' : '';
+  if (!kind) throw appError_('VALIDATION', '棄権か失格かを選んでください。');
+  var reason = cleanText_(payload.reason, '理由', ADMIN_CONFIG.MAX_NOTE_LENGTH);
+  var meta = playerMeta_(player);
+  if (meta.withdrawn) throw appError_('LOCKED', 'この選手は既に' + (meta.withdrawn.kind === 'disqualified' ? '失格' : '棄権') + 'として記録されています。');
+  meta.withdrawn = { kind: kind, reason: reason, at: ctx.now, by: ctx.user ? ctx.user.label : '' };
+  player.meta_json = JSON.stringify(meta);
+  player.rev = (player.rev || 0) + 1;
+  player.updated_at = ctx.now;
+  updateRecord_(players, player);
+  var bundle = collectEvent_(ctx, player.event_id);
+  var touched = 0;
+  withdrawImpact_(bundle, player.player_id).forEach(function (x) {
+    if (!x.opponent) return;
+    var m = x.match;
+    var stage = bundle.stageById[m.stage_id];
+    var before = pickResult_(m);
+    var beforeWinner = '';
+    m.status = MATCH_STATUS.FINAL;
+    m.winner_id = x.opponent;
+    if (x.live) {
+      m.result_type = kind === 'disqualified' ? RESULT_TYPE.DISQUALIFIED : RESULT_TYPE.RETIRED;
+    } else {
+      m.result_type = kind === 'disqualified' ? RESULT_TYPE.DISQUALIFIED : RESULT_TYPE.WALKOVER;
+      m.player1_legs = null;
+      m.player2_legs = null;
+      m.player1_sets = 0;
+      m.player2_sets = 0;
+    }
+    m.result_note = reason;
+    m.confirmed_at = ctx.now;
+    m.rev = (m.rev || 0) + 1;
+    m.updated_at = ctx.now;
+    if (isBracketStage_(stage)) propagateElimination_(ctx, m, beforeWinner, m.winner_id);
+    updateRecord_(ctx.table('Matches'), m);
+    recordHistory_(ctx, 'match.withdraw', 'Match', m.match_id, m.event_id, before, pickResult_(m));
+    touched++;
+  });
+  bundle.stages.forEach(function (st) {
+    if (isBracketStage_(st)) touched += autoForfeitWithdrawn_(ctx, player.event_id, st.stage_id);
+  });
+  ctx.touchedResults = true;
+  recordHistory_(ctx, kind === 'disqualified' ? 'player.disqualify' : 'player.withdraw', 'Player', player.player_id, player.event_id, null, { reason: reason, matches: touched });
+  return { eventId: player.event_id, matches: touched };
+}
+
+/** 棄権・失格の記録を外す（以後の組み合わせに戻す）。処理済みの試合の結果は戻さない（必要なら試合ごとに訂正する） */
+function actionReinstatePlayer_(ctx, payload) {
+  var players = ctx.table('Players');
+  var player = findRecord_(players, requireId_(payload.playerId, '選手'), '選手');
+  assertRev_(player, requireRev_(payload.rev), '選手');
+  var meta = playerMeta_(player);
+  if (!meta.withdrawn) return { eventId: player.event_id };
+  var before = meta.withdrawn;
+  delete meta.withdrawn;
+  player.meta_json = Object.keys(meta).length ? JSON.stringify(meta) : '';
+  player.rev = (player.rev || 0) + 1;
+  player.updated_at = ctx.now;
+  updateRecord_(players, player);
+  recordHistory_(ctx, 'player.reinstate', 'Player', player.player_id, player.event_id, before, null);
+  return { eventId: player.event_id };
+}
+
+/* ---------- 予定（日時・会場・ボード・審判・延期・毎週の日程） ---------- */
+
+/** 'YYYY-MM-DD'（大会のタイムゾーンの日付。空欄は未定） */
+function parseDateInput_(value, label) {
+  if (value === null || value === undefined || value === '') return '';
+  var t = String(value).normalize('NFKC').trim().replace(/\//g, '-');
+  var m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) throw appError_('VALIDATION', (label || '日付') + 'は 2026-11-03 の形で入力してください。');
+  var y = Number(m[1]);
+  var mo = Number(m[2]);
+  var d = Number(m[3]);
+  var dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d || y < 2000 || y > 2100) throw appError_('VALIDATION', (label || '日付') + 'が正しくありません。');
+  return y + '-' + (mo < 10 ? '0' : '') + mo + '-' + (d < 10 ? '0' : '') + d;
+}
+
+/** 'HH:MM'（24 時間。空欄は時刻未定） */
+function parseTimeInput_(value) {
+  if (value === null || value === undefined || value === '') return '';
+  var t = String(value).normalize('NFKC').trim();
+  var m = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) throw appError_('VALIDATION', '時刻は 19:30 の形（24 時間）で入力してください。');
+  return (m[1].length === 1 ? '0' : '') + m[1] + ':' + m[2];
+}
+
+function writeSchedule_(ctx, match, sch) {
+  match.schedule_json = JSON.stringify(sch);
+  match.rev = (match.rev || 0) + 1;
+  match.updated_at = ctx.now;
+  updateRecord_(ctx.table('Matches'), match);
+}
+
+/** 試合の予定（F07）。結果の状態とは別に管理する（延期は勝敗として数えない） */
+function actionSetSchedule_(ctx, payload) {
+  var match = findRecord_(ctx.table('Matches'), requireId_(payload.matchId, '試合'), '試合');
+  assertRev_(match, requireRev_(payload.rev), '試合');
+  var cur = scheduleOf_(match) || {};
+  var sch = {
+    date: parseDateInput_(payload.date, '日付'),
+    time: parseTimeInput_(payload.time),
+    venue: cleanText_(payload.venue, '会場', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
+    board: cleanText_(payload.board, 'ボード', 20, { allowEmpty: true }),
+    referee: cleanText_(payload.referee, '審判', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
+    status: cur.status || '',
+    original: cur.original || null,
+    reason: cur.reason || '',
+    changedAt: ctx.now,
+    changedBy: ctx.user ? ctx.user.label : '',
+  };
+  if (sch.time && !sch.date) throw appError_('VALIDATION', '時刻を入れるときは日付も入れてください。');
+  var before = scheduleOf_(match);
+  writeSchedule_(ctx, match, sch);
+  recordHistory_(ctx, 'match.schedule', 'Match', match.match_id, match.event_id, before, sch);
+  return { eventId: match.event_id };
+}
+
+/**
+ * 延期・振替（F08）。当初の予定（最初の 1 回）・変更後の予定・理由・操作者を残す。
+ * 新しい日付がなければ「延期（日程未定）」、あれば「振替」。確定済みの試合は延期にできない。
+ */
+function actionPostponeMatch_(ctx, payload) {
+  var match = findRecord_(ctx.table('Matches'), requireId_(payload.matchId, '試合'), '試合');
+  assertRev_(match, requireRev_(payload.rev), '試合');
+  if (match.status === MATCH_STATUS.FINAL) throw appError_('LOCKED', '確定済みの試合は延期にできません。');
+  var cur = scheduleOf_(match) || { date: '', time: '', venue: '', board: '', referee: '' };
+  var date = parseDateInput_(payload.date, '振替日');
+  var time = parseTimeInput_(payload.time);
+  var reason = cleanText_(payload.reason, '延期の理由', ADMIN_CONFIG.MAX_NOTE_LENGTH);
+  var sch = {
+    date: date,
+    time: date ? time : '',
+    venue: cur.venue || '',
+    board: cur.board || '',
+    referee: cur.referee || '',
+    status: date ? 'rescheduled' : 'postponed',
+    original: cur.original || { date: cur.date || '', time: cur.time || '' },
+    reason: reason,
+    changedAt: ctx.now,
+    changedBy: ctx.user ? ctx.user.label : '',
+  };
+  writeSchedule_(ctx, match, sch);
+  recordHistory_(ctx, 'match.postpone', 'Match', match.match_id, match.event_id, cur, sch);
+  return { eventId: match.event_id };
+}
+
+/**
+ * 毎週の日程（F13）。開始日・開催曜日・間隔（何週ごと）・休催日から、節（リーグの第 n 節・シリーズの節）ごとの日付を作る。
+ * 祝日は自動では判定しない（休催日として入力してもらう）。適用は未実施（未開始で結果なし）の試合だけ。
+ */
+function weeklyPlan_(bundle, stage, payload) {
+  var start = parseDateInput_(payload.startDate, '開始日');
+  if (!start) throw appError_('VALIDATION', '開始日を入力してください。');
+  var weekdays = Array.isArray(payload.weekdays) ? payload.weekdays : [];
+  if (!weekdays.length || weekdays.some(function (w) { return !(w >= 0 && w <= 6) || Math.floor(w) !== w; })) throw appError_('VALIDATION', '開催する曜日を 1 つ以上選んでください。');
+  var interval = parseSmallInt_(payload.intervalWeeks, '間隔（週）', 1, 8, 1);
+  var skips = {};
+  (Array.isArray(payload.skipDates) ? payload.skipDates : []).forEach(function (d) {
+    var v = parseDateInput_(d, '休催日');
+    if (v) skips[v] = true;
+  });
+  var time = parseTimeInput_(payload.time);
+  var venue = cleanText_(payload.venue, '会場', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true });
+  var units;
+  if (stage.type === STAGE_TYPE.SERIES) {
+    units = bundle.groups
+      .filter(function (g) {
+        return g.stage_id === stage.stage_id && groupMeta_(g).status !== 'cancelled';
+      })
+      .sort(byOrder_)
+      .map(function (g) {
+        return { key: g.group_id, label: g.name };
+      });
+  } else {
+    var maxRound = bundle.matches.reduce(function (mx, m) {
+      return m.stage_id === stage.stage_id ? Math.max(mx, m.round || 0) : mx;
+    }, 0);
+    if (!maxRound) throw appError_('VALIDATION', '先に対戦カードを作成してください（節ごとの日付を決めるため）。');
+    var cfg = stageConfig_(stage);
+    units = [];
+    for (var r = 1; r <= maxRound; r++) units.push({ key: r, label: cfg.roundLabels[String(r)] || (stage.type === STAGE_TYPE.LEAGUE ? '第' + r + '節' : 'R' + r) });
+  }
+  var p = start.split('-');
+  var day = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])));
+  var startWeek = Math.floor((day.getTime() / 86400000 + 3) / 7); // 月曜始まりの週番号
+  var out = [];
+  var guard = 0;
+  var skipped = [];
+  while (out.length < units.length && guard++ < 2000) {
+    var ymd = day.toISOString().slice(0, 10);
+    var week = Math.floor((day.getTime() / 86400000 + 3) / 7);
+    if (weekdays.indexOf(day.getUTCDay()) !== -1 && (week - startWeek) % interval === 0) {
+      if (skips[ymd]) skipped.push(ymd);
+      else out.push({ key: units[out.length].key, label: units[out.length].label, date: ymd, time: time });
+    }
+    day = new Date(day.getTime() + 86400000);
+  }
+  if (out.length < units.length) throw appError_('VALIDATION', '日付を割り当てきれませんでした。条件を見直してください。');
+  return { plan: out, skipped: skipped, venue: venue, time: time };
+}
+
+function actionPreviewWeeklySchedule_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = resolveStage_(bundle, payload, '');
+  var res = weeklyPlan_(bundle, stage, payload);
+  var keep = 0;
+  bundle.matches.forEach(function (m) {
+    if (m.stage_id === stage.stage_id && (matchStarted_(m) || m.status === MATCH_STATUS.FINAL)) keep++;
+  });
+  return { plan: res.plan, skipped: res.skipped, untouched: keep };
+}
+
+function actionApplyWeeklySchedule_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = resolveStage_(bundle, payload, '');
+  var res = weeklyPlan_(bundle, stage, payload);
+  var dateOf = {};
+  res.plan.forEach(function (x) {
+    dateOf[String(x.key)] = x.date;
+  });
+  var changed = 0;
+  var untouched = 0;
+  var table = ctx.table('Matches');
+  bundle.matches.forEach(function (m) {
+    if (m.stage_id !== stage.stage_id) return;
+    var key = stage.type === STAGE_TYPE.SERIES ? m.group_id : String(m.round);
+    if (!dateOf[key]) return;
+    if (matchStarted_(m) || m.status === MATCH_STATUS.FINAL || m.result_type) {
+      untouched++;
+      return;
+    }
+    var cur = scheduleOf_(m) || {};
+    var sch = { date: dateOf[key], time: res.time, venue: res.venue || cur.venue || '', board: cur.board || '', referee: cur.referee || '', status: cur.status || '', original: cur.original || null, reason: cur.reason || '', changedAt: ctx.now, changedBy: ctx.user ? ctx.user.label : '' };
+    writeSchedule_(ctx, table.byKey[m.match_id], sch);
+    changed++;
+  });
+  if (stage.type === STAGE_TYPE.SERIES) {
+    var groups = ctx.table('Groups');
+    res.plan.forEach(function (x) {
+      var g = groups.byKey[x.key];
+      if (!g) return;
+      var meta = groupMeta_(g);
+      meta.date = x.date;
+      g.meta_json = JSON.stringify(meta);
+      g.rev = (g.rev || 0) + 1;
+      g.updated_at = ctx.now;
+      updateRecord_(groups, g);
+    });
+  }
+  recordHistory_(ctx, 'schedule.weekly', 'Stage', stage.stage_id, eventId, null, { plan: res.plan, skipped: res.skipped, changed: changed, untouched: untouched });
+  return { eventId: eventId, changed: changed, untouched: untouched };
+}
+
+/* ---------- 大会の設定（お知らせ・ルール表示・公開する項目・自動終了） ---------- */
+
+var TIMEZONES_ = ['Asia/Tokyo', 'Asia/Seoul', 'Asia/Taipei', 'Asia/Shanghai', 'Asia/Singapore', 'Australia/Sydney', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'UTC'];
+
+/** 改行を残す文章（お知らせ）。制御文字は改行以外を拒否し、行ごとに前後の空白を除く */
+function cleanMultiline_(value, label, maxLength) {
+  if (value === null || value === undefined) return '';
+  if (typeof value !== 'string') throw appError_('VALIDATION', label + ' の形式が不正です。');
+  var text = value
+    .normalize('NFC')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(function (l) {
+      return l.replace(/[ \t　]+/g, ' ').trim();
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (text.length > maxLength) throw appError_('VALIDATION', label + ' は ' + maxLength + ' 文字以内で入力してください。');
+  if (/[\u0000-\u0009\u000b-\u001f\u007f]/.test(text)) throw appError_('VALIDATION', label + ' に使用できない文字が含まれています。');
+  return text;
+}
+
+/**
+ * ルールの表示（F10）。表示のための情報で、n02 の採点には使わない。
+ * category: soft（ソフトダーツ）/ steel（スティールダーツ）。startScore: 開始点数（01）。
+ * inMode / outMode: open（制限なし）/ double（ダブル）/ master（ダブル・トリプル）。bull: fat（ブルを 1 つの点にする）/ separate（25・50）。
+ * roundLimit: ラウンド上限（1〜99）。legFormat は段階のルール（Leg 制・セット制）から表示するので、ここでは持たない。
+ */
+var RULE_DISPLAY_CHOICES_ = {
+  category: ['', 'soft', 'steel'],
+  inMode: ['', 'open', 'double', 'master'],
+  outMode: ['', 'open', 'double', 'master'],
+  bull: ['', 'fat', 'separate'],
+  startScore: [null, 101, 301, 501, 701, 901, 1101, 1501],
+};
+
+function parseRuleDisplay_(value) {
+  if (value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) throw appError_('VALIDATION', 'ルールの表示の指定が不正です。');
+  var pick = function (key, label) {
+    var v = value[key] === undefined ? (key === 'startScore' ? null : '') : value[key];
+    if (key === 'startScore' && v !== null && v !== '') v = Number(v);
+    if (key === 'startScore' && v === '') v = null;
+    if (RULE_DISPLAY_CHOICES_[key].indexOf(v) === -1) throw appError_('VALIDATION', label + 'の指定が不正です。');
+    return v;
+  };
+  var out = {
+    category: pick('category', '競技区分'),
+    startScore: pick('startScore', '開始点数'),
+    inMode: pick('inMode', 'イン'),
+    outMode: pick('outMode', 'アウト'),
+    bull: pick('bull', 'ブル'),
+    roundLimit: value.roundLimit === undefined || value.roundLimit === null || value.roundLimit === '' ? null : parseSmallInt_(value.roundLimit, 'ラウンド上限', 1, 99, null),
+    note: cleanText_(value.note, 'ルールの補足', ADMIN_CONFIG.MAX_NOTE_LENGTH, { allowEmpty: true }),
+  };
+  if (out.category === 'steel' && out.bull === 'fat') throw appError_('VALIDATION', 'スティールダーツでは、ブルを 1 つの点にする（ファットブル）設定は使いません。「25・50 に分ける」を選んでください。');
+  return out;
+}
+
+function actionUpdateEventSettings_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var events = ctx.table('Events');
+  var event = findRecord_(events, eventId, '大会');
+  assertRev_(event, requireRev_(payload.rev), '大会');
+  var raw = safeJson_(event.config_json, {});
+  var before = JSON.parse(JSON.stringify(raw));
+  if (payload.announcement !== undefined) {
+    var text = cleanMultiline_(payload.announcement, 'お知らせ', ADMIN_CONFIG.MAX_ANNOUNCEMENT_LENGTH);
+    if (text) raw.announcement = { text: text, updatedAt: ctx.now };
+    else delete raw.announcement;
+  }
+  if (payload.ruleDisplay !== undefined) {
+    var rd = parseRuleDisplay_(payload.ruleDisplay);
+    if (rd) raw.ruleDisplay = rd;
+    else delete raw.ruleDisplay;
+  }
+  if (payload.autoFinish !== undefined) {
+    raw.autoFinish = requireBool_(payload.autoFinish, '自動終了');
+    if (!raw.autoFinish) delete raw.autoFinishedAt;
+  }
+  if (payload.publicFields !== undefined) {
+    var pf = payload.publicFields;
+    if (!pf || typeof pf !== 'object') throw appError_('VALIDATION', '公開する項目の指定が不正です。');
+    raw.publicFields = { affiliation: pf.affiliation === true, rating: pf.rating === true };
+  }
+  if (payload.timezone !== undefined) {
+    if (TIMEZONES_.indexOf(payload.timezone) === -1) throw appError_('VALIDATION', 'タイムゾーンの指定が不正です。');
+    raw.timezone = payload.timezone;
+  }
+  event.config_json = JSON.stringify(raw);
+  event.rev = (event.rev || 0) + 1;
+  event.updated_at = ctx.now;
+  updateRecord_(events, event);
+  recordHistory_(ctx, 'event.settings', 'Event', eventId, eventId, before, raw);
+  return { eventId: eventId };
+}
+
+/* ---------- 大会の設定を複製（F12） ---------- */
+
+/** 段階の設定のうち、複製・設定のみの復元で持ち越さないもの（結果や進行の記録） */
+var STAGE_RUNTIME_KEYS_ = ['advanced', 'advancedAt', 'pairingLog', 'lastDraw', 'adjustments'];
+
+/**
+ * 別の大会に、段階・ルール・組の設定・順位の決め方などを写して新しい ID で作る（大会設定の複製・設定のみの復元で共通）。
+ * source = { event, rules, stages, groups, players }（シートの行の形）。結果・履歴・所有者・管理パスワード・共同主催者は写さない。
+ */
+function cloneEventStructure_(ctx, source, opts) {
+  var events = ctx.table('Events');
+  var eventId = newId_('EVT', events.byKey);
+  var ruleTaken = Object.assign({}, ctx.table('Rules').byKey);
+  var stageTaken = Object.assign({}, ctx.table('Stages').byKey);
+  var groupTaken = Object.assign({}, ctx.table('Groups').byKey);
+  var playerTaken = Object.assign({}, ctx.table('Players').byKey);
+  var ruleMap = {};
+  var stageMap = {};
+  var groupMap = {};
+  var playerMap = {};
+  var rules = source.rules.map(function (r) {
+    var id = newId_('RUL', ruleTaken);
+    ruleTaken[id] = true;
+    ruleMap[r.rule_id] = id;
+    return { rule_id: id, event_id: eventId, name: r.name, format: r.format, best_of: r.best_of, is_provisional: r.is_provisional, set_best_of: r.set_best_of, notes: r.notes, rev: 1, created_at: ctx.now, updated_at: ctx.now };
+  });
+  source.stages.forEach(function (st) {
+    var id = newId_('STG', stageTaken);
+    stageTaken[id] = true;
+    stageMap[st.stage_id] = id;
+  });
+  var stages = source.stages.map(function (st) {
+    var cfg = safeJson_(st.config_json, {});
+    if (!opts.keepRuntime) STAGE_RUNTIME_KEYS_.forEach(function (k) {
+      delete cfg[k];
+    });
+    if (Array.isArray(cfg.advancement)) {
+      cfg.advancement = cfg.advancement
+        .filter(function (a) {
+          return a && stageMap[a.targetStageId];
+        })
+        .map(function (a) {
+          return { fromRank: a.fromRank, toRank: a.toRank, targetStageId: stageMap[a.targetStageId] };
+        });
+    }
+    if (Array.isArray(cfg.adjustments)) {
+      cfg.adjustments = cfg.adjustments.filter(function (a) {
+        return a && playerMapFor_(source, a.playerId);
+      });
+    }
+    return { stage_id: stageMap[st.stage_id], event_id: eventId, name: st.name, type: st.type, order: st.order, rule_id: ruleMap[st.rule_id] || rules[0].rule_id, parent_stage_id: '', config_json: JSON.stringify(cfg), rev: 1, created_at: ctx.now, updated_at: ctx.now };
+  });
+  var groups = source.groups
+    .filter(function (g) {
+      return stageMap[g.stage_id];
+    })
+    .map(function (g) {
+      var id = newId_('GRP', groupTaken);
+      groupTaken[id] = true;
+      groupMap[g.group_id] = id;
+      var meta = safeJson_(g.meta_json, {});
+      if (!opts.keepRuntime) {
+        delete meta.status;
+        delete meta.reason;
+      }
+      return { group_id: id, event_id: eventId, stage_id: stageMap[g.stage_id], name: g.name, order: g.order, meta_json: Object.keys(meta).length ? JSON.stringify(meta) : '', rev: 1, created_at: ctx.now, updated_at: ctx.now };
+    });
+  var players = (opts.players ? source.players : []).map(function (p) {
+    var id = newId_('PLY', playerTaken);
+    playerTaken[id] = true;
+    playerMap[p.player_id] = id;
+    var meta = opts.keepRuntime ? safeJson_(p.meta_json, {}) : {};
+    return {
+      player_id: id,
+      event_id: eventId,
+      display_name: p.display_name,
+      external_ref: '',
+      notes: opts.keepNotes ? p.notes || '' : '',
+      affiliation: p.affiliation || '',
+      rating: p.rating === null || p.rating === undefined ? '' : String(p.rating),
+      seed: p.seed || null,
+      meta_json: Object.keys(meta).length ? JSON.stringify(meta) : '',
+      rev: 1,
+      created_at: ctx.now,
+      updated_at: ctx.now,
+    };
+  });
+  // 加減点は、選手を写したときだけ ID を付け替えて残す（結果の一部なので、設定のみの複製では消える）
+  stages.forEach(function (st) {
+    var cfg = safeJson_(st.config_json, {});
+    if (Array.isArray(cfg.adjustments)) {
+      cfg.adjustments = cfg.adjustments
+        .filter(function (a) {
+          return playerMap[a.playerId];
+        })
+        .map(function (a) {
+          return Object.assign({}, a, { playerId: playerMap[a.playerId] });
+        });
+      st.config_json = JSON.stringify(cfg);
+    }
+  });
+  var cfgEv = safeJson_(source.event.config_json, {});
+  delete cfgEv.autoFinishedAt;
+  if (!opts.keepAnnouncement) delete cfgEv.announcement;
+  var event = {
+    event_id: eventId,
+    name: opts.name,
+    date_label: opts.dateLabel === undefined ? '' : opts.dateLabel,
+    status: EVENT_STATUS.DRAFT,
+    is_public: false,
+    is_featured: false,
+    rule_id: ruleMap[source.event.rule_id] || rules[0].rule_id,
+    is_sample: false,
+    organizer_name: '',
+    admin_key_hash: '',
+    admin_key_issued_at: '',
+    owner_email: creatorEmail_(ctx),
+    staff_pass_hash: '',
+    staff_pass_salt: '',
+    staff_pass_set_at: '',
+    notes: '',
+    config_json: JSON.stringify(cfgEv),
+    rev: 1,
+    created_at: ctx.now,
+    updated_at: ctx.now,
+  };
+  appendRecords_(events, [event]);
+  appendRecords_(ctx.table('Rules'), rules);
+  appendRecords_(ctx.table('Stages'), stages);
+  appendRecords_(ctx.table('Groups'), groups);
+  appendRecords_(ctx.table('Players'), players);
+  return { event: event, maps: { rule: ruleMap, stage: stageMap, group: groupMap, player: playerMap } };
+}
+
+function playerMapFor_(source, pid) {
+  return (source.players || []).some(function (p) {
+    return p.player_id === pid;
+  });
+}
+
+function actionDuplicateEvent_(ctx, payload) {
+  var srcId = requireId_(payload.eventId, '大会');
+  assertCreateAllowed_(ctx);
+  var bundle = collectEvent_(ctx, srcId);
+  if (!bundle.stages.length || !bundle.rule) throw appError_('DATA_CONFLICT', '複製元の大会の段階・ルールが見つかりません。');
+  var name = cleanText_(payload.name, '大会名', ADMIN_CONFIG.MAX_EVENT_NAME_LENGTH);
+  var res = cloneEventStructure_(ctx, { event: bundle.event, rules: ctx.table('Rules').rows.filter(function (r) { return r.event_id === srcId; }), stages: bundle.stages, groups: bundle.groups, players: bundle.players }, {
+    name: name,
+    players: payload.includePlayers === true,
+  });
+  recordHistory_(ctx, 'event.duplicate', 'Event', res.event.event_id, res.event.event_id, null, { from: srcId, players: payload.includePlayers === true, by: ctx.user ? ctx.user.label : '' });
+  return { eventId: res.event.event_id, duplicatedFrom: srcId };
+}
+
+/* ---------- 共同主催者（F20） ---------- */
+
+function actionAddCollaborator_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '共同主催者の追加');
+  var event = findRecord_(ctx.table('Events'), eventId, '大会');
+  var email = normalizeEmail_(payload.email);
+  if (!email) throw appError_('VALIDATION', '共同主催者の Google アカウント（メールアドレス）を正しく入力してください。');
+  if (email === event.owner_email) throw appError_('VALIDATION', 'この大会を作った本人です。');
+  var table = ctx.table('Collaborators');
+  var current = table.rows.filter(function (r) {
+    return r.event_id === eventId;
+  });
+  if (current.some(function (r) { return normalizeEmail_(r.email) === email; })) throw appError_('VALIDATION', 'この Google アカウントは既に共同主催者です。');
+  if (current.length >= ADMIN_CONFIG.MAX_COLLABORATORS) throw appError_('LIMIT', '共同主催者は ' + ADMIN_CONFIG.MAX_COLLABORATORS + ' 人までです。');
+  var id = newId_('COL', table.byKey);
+  appendRecords_(table, [{ collab_id: id, event_id: eventId, email: email, role: 'editor', added_by: ctx.user.label, rev: 1, created_at: ctx.now, updated_at: ctx.now }]);
+  recordHistory_(ctx, 'collaborator.add', 'Event', eventId, eventId, null, { email: email });
+  return { eventId: eventId };
+}
+
+function actionRemoveCollaborator_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '共同主催者の解除');
+  var table = ctx.table('Collaborators');
+  var rec = findRecord_(table, requireId_(payload.collabId, '共同主催者'), '共同主催者');
+  if (rec.event_id !== eventId) throw appError_('NOT_FOUND', '共同主催者が見つかりません。');
+  deleteRecords_(table, [rec]);
+  recordHistory_(ctx, 'collaborator.remove', 'Event', eventId, eventId, { email: rec.email }, null);
+  return { eventId: eventId };
+}
+
+/* ---------- 保存したファイル（JSON）からの復元（F21） ---------- */
+
+var RESTORE_LIMITS_ = { Rules: 16, Players: 128, Stages: 8, Groups: 64, Entries: 2000, Matches: 10000 };
+
+/**
+ * 「大会のデータを保存」で作ったファイルから、新しい大会として復元する。既存の大会は上書きしない。
+ * mode: settings = 段階・ルール・組の設定（と、選べば選手）だけ / full = 選手・組み合わせ・結果も
+ * 所有者は復元する人（Google ログイン）。管理パスワード・共同主催者・履歴は復元しない。ID はすべて新しく付け、参照を付け替える。
+ * 検証に失敗したら何も登録しない（まとめて書き込むので途中まで登録されることもない）。
+ */
+function actionRestoreEvent_(ctx, payload) {
+  assertCreateAllowed_(ctx);
+  var a = payload.archive;
+  if (!a || typeof a !== 'object' || a.format !== 'n02-tournament-archive' || (a.formatVersion !== 1 && a.formatVersion !== 2)) {
+    throw appError_('VALIDATION', 'n02 の大会データのファイル（「大会のデータを保存」で作ったもの）を選んでください。');
+  }
+  var mode = payload.mode === 'full' ? 'full' : 'settings';
+  var ev = a.event;
+  if (!ev || typeof ev !== 'object' || !isValidId_(ev.event_id)) throw appError_('VALIDATION', 'ファイルの大会の情報が不正です。');
+  var t = a.tables && typeof a.tables === 'object' ? a.tables : {};
+  var rows = {};
+  var problems = [];
+  ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches'].forEach(function (name) {
+    var list = Array.isArray(t[name]) ? t[name] : [];
+    if (list.length > RESTORE_LIMITS_[name]) problems.push(name + ' の行が多すぎます（' + list.length + '）');
+    list.forEach(function (r, i) {
+      if (!r || typeof r !== 'object' || r.event_id !== ev.event_id || !isValidId_(r[SCHEMA[name].key])) problems.push(name + ' の ' + (i + 1) + ' 行目が不正です');
+    });
+    rows[name] = list;
+  });
+  if (!rows.Rules.length || !rows.Stages.length) problems.push('ルールか段階がありません');
+  var byId = function (list, key) {
+    var out = {};
+    list.forEach(function (r) {
+      out[r[key]] = r;
+    });
+    return out;
+  };
+  var ruleById = byId(rows.Rules, 'rule_id');
+  var stageById = byId(rows.Stages, 'stage_id');
+  var groupById = byId(rows.Groups, 'group_id');
+  var playerById = byId(rows.Players, 'player_id');
+  var matchById = byId(rows.Matches, 'match_id');
+  rows.Stages.forEach(function (st) {
+    if (!ruleById[st.rule_id]) problems.push('段階「' + st.name + '」のルールがありません');
+    if (!STAGE_TYPE_LABEL[st.type]) problems.push('段階「' + st.name + '」の種類が不明です');
+  });
+  rows.Groups.forEach(function (g) {
+    if (!stageById[g.stage_id]) problems.push('グループ「' + g.name + '」の段階がありません');
+  });
+  var names = {};
+  rows.Players.forEach(function (p) {
+    try {
+      var n = cleanText_(p.display_name, '選手名', ADMIN_CONFIG.MAX_PLAYER_NAME_LENGTH);
+      if (names[n]) problems.push('選手名「' + n + '」が重複しています');
+      names[n] = true;
+    } catch (e) {
+      problems.push('選手名が不正です');
+    }
+  });
+  if (mode === 'full') {
+    rows.Entries.forEach(function (e) {
+      if (!stageById[e.stage_id] || (e.group_id && !groupById[e.group_id]) || !playerById[e.player_id]) problems.push('出場者の参照が不正です');
+    });
+    rows.Matches.forEach(function (m) {
+      var refs = [m.player1_id, m.player2_id, m.winner_id].filter(Boolean);
+      if (!stageById[m.stage_id] || (m.group_id && !groupById[m.group_id]) || refs.some(function (pid) { return !playerById[pid]; })) problems.push('試合の参照が不正です');
+      [m.next_match_id, m.loser_next_match_id].forEach(function (id) {
+        if (id && !matchById[id]) problems.push('勝ち上がり先の試合がありません');
+      });
+      if (m.rule_id && !ruleById[m.rule_id]) problems.push('試合のルールがありません');
+    });
+  }
+  if (problems.length) {
+    var uniq = problems.filter(function (p, i) {
+      return problems.indexOf(p) === i;
+    });
+    throw appError_('VALIDATION', '復元していません（ファイルの内容が不正です）: ' + uniq.slice(0, 8).join(' / ') + (uniq.length > 8 ? ' ほか' : ''));
+  }
+  var name = cleanText_(payload.name || ev.name + '（復元）', '大会名', ADMIN_CONFIG.MAX_EVENT_NAME_LENGTH);
+  var res = cloneEventStructure_(ctx, { event: ev, rules: rows.Rules, stages: rows.Stages, groups: rows.Groups, players: rows.Players }, {
+    name: name,
+    dateLabel: typeof ev.date_label === 'string' ? cleanText_(ev.date_label, '開催日', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }) : '',
+    players: mode === 'full' || payload.includePlayers === true,
+    keepRuntime: mode === 'full',
+    keepNotes: mode === 'full',
+    keepAnnouncement: mode === 'full',
+  });
+  var maps = res.maps;
+  var counts = { players: Object.keys(maps.player).length, stages: rows.Stages.length, entries: 0, matches: 0 };
+  if (mode === 'full') {
+    var entTaken = Object.assign({}, ctx.table('Entries').byKey);
+    var entries = rows.Entries.map(function (e) {
+      var id = newId_('ENT', entTaken);
+      entTaken[id] = true;
+      return {
+        entry_id: id,
+        event_id: res.event.event_id,
+        stage_id: maps.stage[e.stage_id],
+        group_id: e.group_id ? maps.group[e.group_id] : '',
+        player_id: maps.player[e.player_id],
+        seed: e.seed,
+        manual_order: e.manual_order,
+        source_label: e.source_label || '',
+        start_round: e.start_round || null,
+        meta_json: remapEntryMeta_(e.meta_json, maps),
+        rev: 1,
+        created_at: ctx.now,
+        updated_at: ctx.now,
+      };
+    });
+    var matTaken = Object.assign({}, ctx.table('Matches').byKey);
+    var matchMap = {};
+    rows.Matches.forEach(function (m) {
+      var id = newId_('MAT', matTaken);
+      matTaken[id] = true;
+      matchMap[m.match_id] = id;
+    });
+    var pmap = function (pid) {
+      return pid ? maps.player[pid] : '';
+    };
+    var matches = rows.Matches.map(function (m) {
+      return {
+        match_id: matchMap[m.match_id],
+        event_id: res.event.event_id,
+        stage_id: maps.stage[m.stage_id],
+        group_id: m.group_id ? maps.group[m.group_id] : '',
+        round: m.round,
+        order: m.order,
+        player1_id: pmap(m.player1_id),
+        player2_id: pmap(m.player2_id),
+        player1_legs: m.player1_legs,
+        player2_legs: m.player2_legs,
+        player1_sets: m.player1_sets,
+        player2_sets: m.player2_sets,
+        label: m.label || '',
+        status: m.status,
+        winner_id: pmap(m.winner_id),
+        rule_id: m.rule_id ? maps.rule[m.rule_id] : '',
+        next_match_id: m.next_match_id ? matchMap[m.next_match_id] : '',
+        next_match_slot: m.next_match_slot,
+        loser_next_match_id: m.loser_next_match_id ? matchMap[m.loser_next_match_id] : '',
+        loser_next_match_slot: m.loser_next_match_slot,
+        external_ref: '',
+        rev: 1,
+        created_at: ctx.now,
+        updated_at: ctx.now,
+        confirmed_at: m.confirmed_at || '',
+        result_type: m.result_type || '',
+        result_note: m.result_note || '',
+        schedule_json: typeof m.schedule_json === 'string' ? m.schedule_json : '',
+        bracket_side: m.bracket_side || '',
+        meta_json: typeof m.meta_json === 'string' ? m.meta_json : '',
+      };
+    });
+    appendRecords_(ctx.table('Entries'), entries);
+    appendRecords_(ctx.table('Matches'), matches);
+    counts.entries = entries.length;
+    counts.matches = matches.length;
+    // 復元した結果を、保存する前に検証する（不成立の結果があれば、何も登録しない）
+    var view = buildEventView_(collectEvent_(ctx, res.event.event_id), true);
+    if (view.progress.check) throw appError_('VALIDATION', '復元していません: ファイルの試合結果に、ルールと合わないものが ' + view.progress.check + ' 試合あります。');
+  }
+  recordHistory_(ctx, 'event.restore', 'Event', res.event.event_id, res.event.event_id, null, { from: ev.event_id, exportedAt: a.exportedAt || '', mode: mode, counts: counts, by: ctx.user ? ctx.user.label : '' });
+  return { eventId: res.event.event_id, restored: counts, mode: mode };
+}
+
+function remapEntryMeta_(text, maps) {
+  var meta = safeJson_(text, {});
+  if (meta.sourceGroupId) meta.sourceGroupId = maps.group[meta.sourceGroupId] || '';
+  if (meta.fromStageId) meta.fromStageId = maps.stage[meta.fromStageId] || '';
+  return Object.keys(meta).length ? JSON.stringify(meta) : '';
+}
+
+/* ---------- 操作の後処理（F05 自動終了） ---------- */
+
+/**
+ * 大会を変更する操作の後に呼ぶ（runMutation_ が公開データを作る前）。
+ * 自動終了が有効な大会（v0.8 で作った大会。既存の大会は主催者が設定で有効にしたときだけ）で、結果・組み合わせが変わったとき:
+ * - すべての段階が終わった（未作成の本戦・未実施の節・リセットの決勝・3 位決定戦を含む）→「終了」
+ * - 自動で終了にした大会で、訂正などにより終わっていない段階ができた →「開催中」に戻す（主催者が手で終了にした大会は戻さない）
+ */
 function afterEventChange_(ctx, eventId) {
-  if (!ctx.table('Events').byKey[eventId]) return;
+  var events = ctx.table('Events');
+  var event = events.byKey[eventId];
+  if (!event || !ctx.touchedResults) return;
+  var cfg = eventConfig_(event);
+  if (!cfg.autoFinish) return;
+  var view = buildEventView_(collectEvent_(ctx, eventId), true);
+  var raw = safeJson_(event.config_json, {});
+  if (view.complete && event.status !== EVENT_STATUS.FINISHED) {
+    raw.autoFinishedAt = ctx.now;
+    event.status = EVENT_STATUS.FINISHED;
+    recordHistory_(ctx, 'event.autoFinish', 'Event', eventId, eventId, null, { at: ctx.now });
+  } else if (!view.complete && event.status === EVENT_STATUS.FINISHED && cfg.autoFinishedAt) {
+    delete raw.autoFinishedAt;
+    event.status = EVENT_STATUS.RUNNING;
+    recordHistory_(ctx, 'event.autoReopen', 'Event', eventId, eventId, null, { reasons: view.completion.reasons.slice(0, 5) });
+  } else {
+    return;
+  }
+  event.config_json = JSON.stringify(raw);
+  event.rev = (event.rev || 0) + 1;
+  event.updated_at = ctx.now;
+  updateRecord_(events, event);
 }
 
 // ---- 07_api.js ----
@@ -5632,6 +7963,30 @@ function adminActions_() {
     setEntrants: { fn: actionSetEntrants_, scope: 'event', mutating: true },
     generateBracket: { fn: actionGenerateBracket_, scope: 'event', mutating: true },
     clearBracket: { fn: actionClearBracket_, scope: 'event', mutating: true },
+    // v0.8
+    previewAdvancement: { fn: actionPreviewAdvancement_, scope: 'event', mutating: false },
+    previewBracket: { fn: actionPreviewBracket_, scope: 'event', mutating: false },
+    drawNextRound: { fn: actionDrawNextRound_, scope: 'event', mutating: true },
+    generateSwissRound: { fn: actionGenerateSwissRound_, scope: 'event', mutating: true },
+    deleteSwissRound: { fn: actionDeleteSwissRound_, scope: 'event', mutating: true },
+    setNightParticipants: { fn: actionSetNightParticipants_, scope: 'event', mutating: true },
+    generateNight: { fn: actionGenerateNight_, scope: 'event', mutating: true },
+    clearNight: { fn: actionClearNight_, scope: 'event', mutating: true },
+    cancelNight: { fn: actionCancelNight_, scope: 'event', mutating: true },
+    updateNight: { fn: actionUpdateNight_, scope: 'event', mutating: true },
+    importPlayers: { fn: actionImportPlayers_, scope: 'event', mutating: true },
+    previewWithdraw: { fn: actionPreviewWithdraw_, scope: 'event', mutating: false },
+    withdrawPlayer: { fn: actionWithdrawPlayer_, scope: 'event', mutating: true },
+    reinstatePlayer: { fn: actionReinstatePlayer_, scope: 'event', mutating: true },
+    setSchedule: { fn: actionSetSchedule_, scope: 'event', mutating: true },
+    postponeMatch: { fn: actionPostponeMatch_, scope: 'event', mutating: true },
+    previewWeeklySchedule: { fn: actionPreviewWeeklySchedule_, scope: 'event', mutating: false },
+    applyWeeklySchedule: { fn: actionApplyWeeklySchedule_, scope: 'event', mutating: true },
+    updateEventSettings: { fn: actionUpdateEventSettings_, scope: 'event', mutating: true },
+    duplicateEvent: { fn: actionDuplicateEvent_, scope: 'event', mutating: true },
+    addCollaborator: { fn: actionAddCollaborator_, scope: 'event', mutating: true },
+    removeCollaborator: { fn: actionRemoveCollaborator_, scope: 'event', mutating: true },
+    restoreEvent: { fn: actionRestoreEvent_, scope: 'create', mutating: true },
   };
 }
 
@@ -5739,6 +8094,11 @@ function runQuery_(user, spec, payload, reuse) {
 }
 
 var REQUEST_ID_PATTERN_ = /^[A-Za-z0-9-]{16,64}$/;
+var NO_COMPLETION_CHECK_ = [
+  'updateEvent', 'updateEventSettings', 'setStaffPassword', 'setOwner', 'addCollaborator', 'removeCollaborator', 'republish', 'renameGroup',
+  'updatePlayer', 'setSchedule', 'postponeMatch', 'applyWeeklySchedule', 'updateNight', 'createEvent', 'createSampleEvent', 'duplicateEvent',
+  'restoreEvent', 'importPlayers', 'addPlayers', 'deleteEvent', 'reinstatePlayer',
+];
 var WRITE_JOURNAL_KEY_ = 'WRITE_JOURNAL';
 
 /**
@@ -5796,6 +8156,8 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
         ctx.user = user;
       }
       if (spec.scope === 'event') authorizeEventPayload_(ctx, payload);
+      // 自動終了（F05）の判定は、試合・組み合わせ・段階が変わりうる操作の後だけ（大会設定の保存などでは判定しない）
+      ctx.touchedResults = NO_COMPLETION_CHECK_.indexOf(action) === -1;
       result = spec.fn(ctx, payload) || {};
       var eventIds = [];
       if (result.eventId) eventIds.push(result.eventId);
