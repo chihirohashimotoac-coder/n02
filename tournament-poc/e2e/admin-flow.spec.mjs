@@ -1,6 +1,6 @@
 // 運営画面（GitHub Pages の /admin/）: 管理者の初期設定 → 誰でも大会を作成 → 運営用 URL で運営 → 公開 → 閲覧ページに反映
 import { test, expect } from '@playwright/test';
-import { reset, routeAppsScript, expectNoHorizontalOverflow, ADMIN_KEY } from './helpers.mjs';
+import { reset, routeAppsScript, expectNoHorizontalOverflow, publishedSample, ADMIN_KEY } from './helpers.mjs';
 
 const SHEET_LINK = 'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcd/edit?usp=sharing';
 const ADMIN_PAGE = '/pages/admin/index.html';
@@ -95,6 +95,12 @@ test('管理者の初期設定 → 大会作成（ログインなし）→ 運�
   await expect(org.getByText('確定 1 / 12 試合')).toBeVisible();
   const viewerLink = org.getByRole('link', { name: '閲覧画面を開く' });
   await expect(viewerLink).toHaveAttribute('href', /^https:\/\/example-user\.github\.io\/n02-tournament-viewer\/\?event=EVT-/);
+  // 閲覧ページの QR コード（画面表示・PNG 保存）
+  const share = org.locator('.qr-share');
+  await expect(share.locator('svg')).toBeVisible();
+  await expect(share.locator('.qr-share__url')).toHaveText(await viewerLink.getAttribute('href'));
+  const [download] = await Promise.all([org.waitForEvent('download'), share.getByRole('button', { name: '画像（PNG）で保存' }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^qr-EVT-[A-Z0-9]+\.png$/);
   await expectNoHorizontalOverflow(org);
   await org.screenshot({ path: testInfo.outputPath('admin-progress.png') });
 
@@ -287,5 +293,43 @@ test('ロビン → A / B トーナメント: 順位を確定して進出 → �
   await expect(page.getByRole('heading', { name: '出場者とシード（2 名）' })).toBeVisible();
   await page.getByRole('button', { name: 'トーナメント表を作成' }).click();
   await expect(page.getByText('1 試合のトーナメント表を作成しました。').last()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
+test('試合結果: 入力途中の結果は他の試合を確定しても消えず、入力済みの複数試合をまとめて確定できる', async ({ page, request }) => {
+  const sample = await publishedSample(request);
+  await routeAppsScript(page, request);
+  await page.goto(`${ADMIN_PAGE}#e=${sample.event.id}&k=${sample.adminKey}`);
+  await page.getByRole('button', { name: '試合結果', exact: true }).click();
+  await page.getByRole('button', { name: 'グループD', exact: true }).click();
+  const ids = sample.groups[3].matches.map((m) => m.id);
+  const card = (i) => page.locator(`.match-editor[data-match-id="${ids[i]}"]`);
+  const fill = async (i, a, b) => {
+    await card(i).locator('input').nth(0).fill(String(a));
+    await card(i).locator('input').nth(1).fill(String(b));
+  };
+  await fill(0, 3, 0);
+  await fill(1, 3, 1);
+  await fill(2, 2, 1); // Best of 5 では確定できない入力
+  await expect(card(1).getByText('未保存の入力')).toBeVisible();
+  // 確定できる入力が 2 試合あるのでバーが出る
+  await expect(page.locator('.batch-bar')).toContainText('確定できる入力が 2 試合あります');
+
+  // 1 試合だけ確定しても、他の入力は残る
+  await card(0).getByRole('button', { name: '確定', exact: true }).click();
+  await expect(page.getByText('結果を確定しました。').last()).toBeVisible();
+  await expect(card(1).locator('input').nth(0)).toHaveValue('3');
+  await expect(card(1).locator('input').nth(1)).toHaveValue('1');
+  await expect(card(2).locator('input').nth(0)).toHaveValue('2');
+  await expect(page.locator('.batch-bar')).toBeHidden();
+
+  // 3 試合目を直すと、2 試合をまとめて確定できる
+  await card(2).locator('input').nth(1).fill('3');
+  await page.getByRole('button', { name: '2 試合をまとめて確定' }).click();
+  await expect(page.getByText('2 試合の結果を確定しました。').last()).toBeVisible();
+  await page.getByRole('button', { name: 'すべての状態' }).click();
+  await expect(card(1).locator('.status')).toHaveText('確定済み');
+  await expect(card(2).locator('.match-editor__winner')).toContainText(`勝者: ${sample.groups[3].matches[2].p2.name}`);
+  await expect(card(3).locator('.status')).toHaveText('未開始');
   await expectNoHorizontalOverflow(page);
 });

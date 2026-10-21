@@ -99,6 +99,8 @@ const server = http.createServer(async (req, res) => {
         'index.html': 'text/html; charset=utf-8',
         'viewer.css': 'text/css; charset=utf-8',
         'viewer.js': 'text/javascript; charset=utf-8',
+        'qrcode.js': 'text/javascript; charset=utf-8',
+        'admin/qrcode.js': 'text/javascript; charset=utf-8',
         'admin/index.html': 'text/html; charset=utf-8',
         'admin/admin.css': 'text/css; charset=utf-8',
         'admin/admin.js': 'text/javascript; charset=utf-8',

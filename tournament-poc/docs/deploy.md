@@ -119,7 +119,7 @@ Web アプリの URL が変わると、これらのページが動かなくな�
    この方法なら **URL は変わりません**。「新しいデプロイ」を作ると URL が変わるので注意してください。
 3. 権限（`oauthScopes`）が変わった場合は、再度承認を求められます。
 4. 運営用を更新したら、`…/admin/#admin` で管理者の鍵を入れて「初期化する」を押してください。新しい版で増えた列（v0.4.0 ではセット数・3 位決定戦の行き先・手動の順位など）がシートの末尾に追加されます。既存のデータは消えません。
-5. GitHub Pages 側も、`dist/pages/` の `viewer.js` `viewer.css` `index.html` と `admin/` の `admin.js` `admin.css` `index.html` を新しいものに置き換えます（`config.js` はそのまま）。
+5. GitHub Pages 側も、`dist/pages/` の `viewer.js` `viewer.css` `index.html` `qrcode.js` と `admin/` の `admin.js` `admin.css` `index.html` `qrcode.js` を新しいものに置き換えます（`config.js` はそのまま）。
 
 ## 6.5 うまくいかないとき（権限の許可し直し）
 

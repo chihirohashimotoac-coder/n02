@@ -102,6 +102,8 @@ test('主催者: 自分の大会は操作でき、他の大会は eventId / matc
     // 自分の eventId と他の大会の ID を混ぜても通らない
     ['assignPlayer', { eventId: a.eventId, playerId: op.id, groupId: '' }],
     ['clearMatches', { eventId: a.eventId, groupId: og.id }],
+    ['saveMatchResults', { eventId: other.event.id, results: [{ matchId: om.id, rev: om.rev, p1Legs: 3, p2Legs: 0 }] }],
+    ['saveMatchResults', { eventId: a.eventId, results: [{ matchId: om.id, rev: om.rev, p1Legs: 3, p2Legs: 0 }] }],
   ];
   for (const [action, payload] of attempts) {
     const res = p.call(action, payload, { auth: authA });

@@ -44,3 +44,45 @@ test('?event= で大会を指定でき、通信失敗時は再試行して復旧
   // 2 回目以降は版番号を送り、変化がなければ本体を受け取らない
   expect(seen.some((s) => s.url.includes('known='))).toBe(true);
 });
+
+test('QR コード: 広い画面は右下に固定表示（スクロールしても追従・内容と重ならない）、狭い画面はボタンで拡大表示', async ({ page, request }, testInfo) => {
+  const detail = await publishedSample(request);
+  const violations = [];
+  page.on('console', (m) => {
+    if (/Content Security Policy|Refused to/.test(m.text())) violations.push(m.text());
+  });
+  await routeAppsScript(page, request);
+  await page.goto(`/pages/index.html?event=${detail.event.id}`);
+  await expect(page.locator('.match')).toHaveCount(24);
+  const url = new URL(`/pages/index.html?event=${detail.event.id}`, page.url()).href;
+  const panel = page.locator('#qr-panel');
+  const wide = page.viewportSize().width >= 1100;
+  if (wide) {
+    await expect(panel.locator('svg')).toBeVisible();
+    const before = await panel.boundingBox();
+    await page.mouse.wheel(0, 2000);
+    await page.waitForFunction(() => window.scrollY > 500);
+    const after = await panel.boundingBox();
+    expect(after.y).toBeCloseTo(before.y, 0); // 画面上の同じ位置にある
+    // どのグループの枠とも重ならない
+    const groups = await page.locator('.group').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().right));
+    expect(Math.max(...groups)).toBeLessThanOrEqual(after.x);
+    await page.screenshot({ path: testInfo.outputPath('viewer-qr.png') });
+  } else {
+    await expect(panel).toBeHidden();
+  }
+  // ボタンで拡大表示（スマートフォンで他の人に見せる用）
+  await page.getByRole('button', { name: 'QR コード' }).click();
+  const overlay = page.getByRole('dialog', { name: 'この大会の QR コード' });
+  await expect(overlay.locator('svg')).toBeVisible();
+  await expect(page.locator('#qr-overlay-url')).toHaveText(url);
+  await page.keyboard.press('Escape');
+  await expect(overlay).toBeHidden();
+  await expectNoHorizontalOverflow(page);
+  expect(violations).toEqual([]);
+
+  // ?qr=0 なら固定表示しない
+  await page.goto(`/pages/index.html?event=${detail.event.id}&qr=0`);
+  await expect(page.locator('.match')).toHaveCount(24);
+  await expect(panel).toBeHidden();
+});

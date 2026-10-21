@@ -28,7 +28,10 @@
         <div><dt>取得</dt><dd id="fetched-at">—</dd></div>
         <div><dt>次回自動更新</dt><dd id="next-refresh">—</dd></div>
       </dl>
-      <button id="refresh-button" class="refresh" type="button">今すぐ更新</button>
+      <div class="statusbar__actions">
+        <button id="qr-button" class="refresh refresh--ghost" type="button" hidden>QR コード</button>
+        <button id="refresh-button" class="refresh" type="button">今すぐ更新</button>
+      </div>
     </div>
 
     <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
@@ -41,6 +44,21 @@
         勝-敗・セット/Leg 得-失・順位は「確定済み」の試合だけで数えています。順位の決め方は各ステージの下に表示しています。
       </p>
     </main>
+
+    <aside id="qr-panel" class="qr-panel" aria-label="スマートフォンで見る" hidden>
+      <div id="qr-code" class="qr-panel__code"></div>
+      <p class="qr-panel__title">スマホで見る</p>
+      <p class="qr-panel__hint">カメラで読み取ると、この大会の速報が開きます</p>
+    </aside>
+
+    <div id="qr-overlay" class="qr-overlay" role="dialog" aria-modal="true" aria-label="この大会の QR コード" hidden>
+      <div class="qr-overlay__box">
+        <div id="qr-overlay-code" class="qr-overlay__code"></div>
+        <p class="qr-overlay__hint">カメラで読み取ると、この大会の速報が開きます</p>
+        <p id="qr-overlay-url" class="qr-overlay__url"></p>
+        <button id="qr-close" class="refresh" type="button">閉じる</button>
+      </div>
+    </div>
 
     <script>
 /*@@SCRIPT@@*/

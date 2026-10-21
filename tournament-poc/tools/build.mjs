@@ -57,6 +57,7 @@ function buildApp(name, spec) {
  * インラインのスクリプトを持たないので、CSP で script-src 'self' に絞れる。
  */
 function toStaticPage(templatePath, css, js, connect) {
+  // qrcode.js（同梱ライブラリ）は画面のスクリプトより先に読む
   const csp = [
     "default-src 'none'",
     "script-src 'self'",
@@ -75,7 +76,7 @@ function toStaticPage(templatePath, css, js, connect) {
         '    <meta name="referrer" content="no-referrer" />'
     )
     .replace(/<style>\s*\/\*@@STYLES@@\*\/\s*<\/style>/, `<link rel="stylesheet" href="${css}" />`)
-    .replace(/<script>\s*\/\*@@SCRIPT@@\*\/\s*<\/script>/, `<script src="config.js"></script>\n    <script src="${js}"></script>`);
+    .replace(/<script>\s*\/\*@@SCRIPT@@\*\/\s*<\/script>/, `<script src="config.js"></script>\n    <script src="qrcode.js"></script>\n    <script src="${js}"></script>`);
   if (html.includes('@@') || html.includes('<base')) throw new Error('pages template not converted: ' + templatePath);
   return html;
 }
@@ -89,7 +90,10 @@ function toStaticPage(templatePath, css, js, connect) {
 function buildPages() {
   const connect = 'https://script.google.com https://script.googleusercontent.com';
   const header = '/* このファイルは tools/build.mjs が生成したものです。直接編集しないでください。 */\n';
+  const qrcode = read('vendor/qrcode-generator/qrcode.js');
   return {
+    'dist/pages/qrcode.js': qrcode,
+    'dist/pages/admin/qrcode.js': qrcode,
     'dist/pages/index.html': toStaticPage('viewer/src/client/index.html', 'viewer.css', 'viewer.js', connect),
     'dist/pages/viewer.css': header + read('viewer/src/client/viewer.css'),
     'dist/pages/viewer.js': header + read('viewer/src/client/viewer.js'),

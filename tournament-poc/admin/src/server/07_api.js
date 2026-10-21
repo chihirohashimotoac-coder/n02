@@ -29,6 +29,7 @@ function adminActions_() {
     generateMatches: { fn: actionGenerateMatches_, scope: 'event', mutating: true },
     clearMatches: { fn: actionClearMatches_, scope: 'event', mutating: true },
     saveMatchResult: { fn: actionSaveMatchResult_, scope: 'event', mutating: true },
+    saveMatchResults: { fn: actionSaveMatchResults_, scope: 'event', mutating: true },
     republish: { fn: actionRepublish_, scope: 'event', mutating: true },
     addStage: { fn: actionAddStage_, scope: 'event', mutating: true },
     updateStage: { fn: actionUpdateStage_, scope: 'event', mutating: true },

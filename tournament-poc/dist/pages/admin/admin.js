@@ -48,6 +48,62 @@
     return node;
   }
 
+  /** 同梱の qrcode-generator（グローバルの qrcode）で QR コードの行列を作る。ライブラリがなければ null */
+  function qrMatrix(text) {
+    var lib = typeof window !== 'undefined' ? window.qrcode : null;
+    if (typeof lib !== 'function' || !text) return null;
+    var qr = lib(0, 'M');
+    qr.addData(text);
+    qr.make();
+    return { size: qr.getModuleCount(), isDark: qr.isDark };
+  }
+
+  var QR_QUIET = 4;
+
+  function qrSvg(matrix, label) {
+    var ns = 'http://www.w3.org/2000/svg';
+    var size = matrix.size + QR_QUIET * 2;
+    var d = '';
+    for (var r = 0; r < matrix.size; r++) {
+      for (var c = 0; c < matrix.size; c++) {
+        if (matrix.isDark(r, c)) d += 'M' + (c + QR_QUIET) + ' ' + (r + QR_QUIET) + 'h1v1h-1z';
+      }
+    }
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + size + ' ' + size);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', label);
+    svg.setAttribute('shape-rendering', 'crispEdges');
+    var bg = document.createElementNS(ns, 'rect');
+    bg.setAttribute('width', String(size));
+    bg.setAttribute('height', String(size));
+    bg.setAttribute('fill', '#ffffff');
+    var path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', '#000000');
+    svg.appendChild(bg);
+    svg.appendChild(path);
+    return svg;
+  }
+
+  /** 印刷・掲示用の PNG（1 モジュール 12px） */
+  function qrPngBlob(matrix, done) {
+    var scale = 12;
+    var size = (matrix.size + QR_QUIET * 2) * scale;
+    var canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    var g = canvas.getContext('2d');
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, size, size);
+    g.fillStyle = '#000000';
+    for (var r = 0; r < matrix.size; r++) {
+      for (var c = 0; c < matrix.size; c++) {
+        if (matrix.isDark(r, c)) g.fillRect((c + QR_QUIET) * scale, (r + QR_QUIET) * scale, scale, scale);
+      }
+    }
+    canvas.toBlob(done, 'image/png');
+  }
+
   function newRequestId() {
     var bytes = new Uint8Array(16);
     (global.crypto || global.msCrypto).getRandomValues(bytes);
@@ -239,7 +295,9 @@
       issued: null, // 直前に発行した運営用 URL { eventId, url, name }
       stageId: '', // 試合結果・組み合わせタブで選んでいる段階
       entrantDraft: {}, // トーナメントの出場者・シード順の編集中の並び（段階ごと）
+      drafts: {}, // 試合結果の未保存の入力 { matchId: { rev, p1, p2, l1, l2 } }。画面を描き直しても消さない
     };
+    var batchUi = null; // 「まとめて確定」バーの更新関数（試合結果タブの表示中のみ）
     try {
       state.adminKey = win.sessionStorage.getItem('tpoc-admin-key') || '';
     } catch (e) {
@@ -401,6 +459,17 @@
     /* ---------- 描画 ---------- */
 
     function render() {
+      // 描き直しで入力中の欄のフォーカスが外れないよう、id のある要素は描き直し後に戻す
+      var active = doc.activeElement && doc.activeElement.id && root.contains(doc.activeElement) ? doc.activeElement.id : '';
+      renderInner();
+      if (active) {
+        var again = doc.getElementById(active);
+        if (again && !again.disabled) again.focus();
+      }
+    }
+
+    function renderInner() {
+      batchUi = null;
       root.textContent = '';
       var who = doc.getElementById('actor');
       if (who) who.textContent = { admin: '管理者', organizer: '主催者', create: '', invalid: '' }[state.route.mode] || '';
@@ -850,6 +919,7 @@
       if (viewerUrl && d.publication.published) {
         var href = viewerUrl + '?event=' + encodeURIComponent(d.event.id);
         pub.appendChild(el('p', null, [el('a', { href: href, target: '_blank', rel: 'noopener', text: '閲覧画面を開く' })]));
+        pub.appendChild(renderShareQr(href, d.event));
       }
       pub.appendChild(
         el('button', {
@@ -905,6 +975,7 @@
         any = true;
         wrap.appendChild(el('section', { className: 'panel' }, [el('h3', { text: sec.name })].concat(ms.map(function (m) { return renderMatchEditor(m); }))));
       });
+      wrap.appendChild(batchBar(st));
       if (!any) {
         var empty = stageMatches(st).length ? '該当する試合はありません。' : st.type === 'single_elimination' ? 'トーナメント表がありません。「組み合わせ」タブで作成してください。' : '対戦カードがありません。「組み合わせ」タブで作成してください。';
         wrap.appendChild(el('p', { className: 'panel muted', text: empty }));
@@ -912,8 +983,59 @@
       return wrap;
     }
 
-    function numberInput(value, max, label, allowBlank) {
+    /** 下書きのうち、そのまま「確定」できる結果（Leg 制は画面側でも成立条件を確認。セット制の Leg 合計はサーバーで確認） */
+    function batchCandidates(st) {
+      var out = [];
+      stageMatches(st).forEach(function (m) {
+        var dr = state.drafts[m.id];
+        if (!dr || dr.rev !== m.rev || m.storedStatus === 'final' || m.status === 'pending' || state.editing[m.id]) return;
+        var spec = m.spec || { format: 'legs', bestOf: m.bestOf };
+        if (spec.format === 'sets') {
+          if (checkResult('final', dr.p1.trim(), dr.p2.trim(), spec.bestOf)) return;
+          out.push({ m: m, result: { matchId: m.id, rev: m.rev, p1Sets: dr.p1.trim(), p2Sets: dr.p2.trim(), p1Legs: dr.l1.trim(), p2Legs: dr.l2.trim() } });
+        } else {
+          if (checkResult('final', dr.p1.trim(), dr.p2.trim(), spec.bestOf)) return;
+          out.push({ m: m, result: { matchId: m.id, rev: m.rev, p1Legs: dr.p1.trim(), p2Legs: dr.p2.trim() } });
+        }
+      });
+      return out;
+    }
+
+    /** 入力済みの試合をまとめて確定するバー（画面下に固定）。入力のたびに件数を更新する */
+    function batchBar(st) {
+      var d = state.detail;
+      var label = el('span', { className: 'batch-bar__label' });
+      var button = el('button', { className: 'btn btn--primary', type: 'button', 'data-mut': true });
+      var bar = el('div', { className: 'batch-bar', role: 'region', 'aria-label': 'まとめて確定' }, [label, button]);
+      var current = [];
+      var update = function () {
+        current = batchCandidates(st);
+        bar.hidden = current.length < 2;
+        label.textContent = '確定できる入力が ' + current.length + ' 試合あります';
+        button.textContent = current.length + ' 試合をまとめて確定';
+        button.disabled = state.busy;
+      };
+      button.addEventListener('click', function () {
+        var list = current.slice();
+        if (list.length < 2) return;
+        mutate('saveMatchResults', { eventId: d.event.id, results: list.map(function (c) { return c.result; }) }, function (r) {
+          return r.saved + ' 試合の結果を確定しました。';
+        }).then(function (data) {
+          if (!data) return;
+          list.forEach(function (c) {
+            delete state.drafts[c.m.id];
+          });
+          render();
+        });
+      });
+      update();
+      batchUi = update;
+      return bar;
+    }
+
+    function numberInput(value, max, label, allowBlank, id) {
       return el('input', {
+        id: id,
         className: 'legs-input',
         type: 'number',
         inputmode: 'numeric',
@@ -940,14 +1062,33 @@
         ]);
       }
       var need = legsToWin(spec.bestOf);
-      var p1 = sets ? numberInput(m.storedP1Sets, need, m.p1.name + ' の取得セット', false) : numberInput(m.storedP1Legs, need, m.p1.name + ' の取得 Leg', false);
-      var p2 = sets ? numberInput(m.storedP2Sets, need, m.p2.name + ' の取得セット', false) : numberInput(m.storedP2Legs, need, m.p2.name + ' の取得 Leg', false);
-      var l1 = sets ? numberInput(m.storedP1Legs, 99, m.p1.name + ' の取得 Leg（合計・任意）', true) : null;
-      var l2 = sets ? numberInput(m.storedP2Legs, 99, m.p2.name + ' の取得 Leg（合計・任意）', true) : null;
+      var draft = state.drafts[m.id];
+      if (draft && (draft.rev !== m.rev || locked)) {
+        // 別の画面で更新された・確定済みになった試合の下書きは捨てる
+        delete state.drafts[m.id];
+        draft = null;
+      }
+      var pick = function (key, stored) {
+        return draft ? draft[key] : stored;
+      };
+      var idp = 'me-' + m.id + '-';
+      var p1 = numberInput(pick('p1', sets ? m.storedP1Sets : m.storedP1Legs), need, m.p1.name + (sets ? ' の取得セット' : ' の取得 Leg'), false, idp + 'p1');
+      var p2 = numberInput(pick('p2', sets ? m.storedP2Sets : m.storedP2Legs), need, m.p2.name + (sets ? ' の取得セット' : ' の取得 Leg'), false, idp + 'p2');
+      var l1 = sets ? numberInput(pick('l1', m.storedP1Legs), 99, m.p1.name + ' の取得 Leg（合計・任意）', true, idp + 'l1') : null;
+      var l2 = sets ? numberInput(pick('l2', m.storedP2Legs), 99, m.p2.name + ' の取得 Leg（合計・任意）', true, idp + 'l2') : null;
       [p1, p2, l1, l2].forEach(function (x) {
         if (x) x.disabled = locked;
       });
       if (l1) l1.className = l2.className = 'legs-input legs-input--small';
+      var draftMark = el('span', { className: 'match-editor__draft', text: '未保存の入力', hidden: !draft });
+      var onInput = function () {
+        state.drafts[m.id] = { rev: m.rev, p1: p1.value, p2: p2.value, l1: l1 ? l1.value : '', l2: l2 ? l2.value : '' };
+        draftMark.hidden = false;
+        if (batchUi) batchUi();
+      };
+      [p1, p2, l1, l2].forEach(function (x) {
+        if (x) x.addEventListener('input', onInput);
+      });
       var msg = el('p', { className: 'match-editor__msg', role: 'status' });
 
       function send(status) {
@@ -971,6 +1112,7 @@
         mutate('saveMatchResult', payload, status === 'final' ? '結果を確定しました。' : '保存しました。').then(function (data) {
           if (data) {
             delete state.editing[m.id];
+            delete state.drafts[m.id];
             render();
           }
         });
@@ -996,9 +1138,10 @@
             },
           }),
         ];
-        if (editing) buttons.push(el('button', { className: 'btn btn--ghost', type: 'button', text: 'キャンセル', onClick: function () { delete state.editing[m.id]; render(); } }));
+        if (editing) buttons.push(el('button', { className: 'btn btn--ghost', type: 'button', text: 'キャンセル', onClick: function () { delete state.editing[m.id]; delete state.drafts[m.id]; render(); } }));
       }
       var winner = m.status === 'final' ? (m.winnerId === m.p1.id ? m.p1.name : m.p2.name) : '';
+      meta.insertBefore(draftMark, meta.lastChild);
       return el('article', { className: 'match-editor match-editor--' + m.status, 'data-match-id': m.id }, [
         meta,
         el('div', { className: 'match-editor__row' }, [
@@ -1013,6 +1156,60 @@
         m.problems && m.problems.length ? el('p', { className: 'error small', text: '要確認: ' + m.problems.join(' / ') }) : null,
         msg,
         el('div', { className: 'btn-row' }, buttons),
+      ]);
+    }
+
+    /** 閲覧ページの QR コード（参加者に配る・掲示する用）。閲覧ページ側にも同じ QR が表示される */
+    function renderShareQr(href, event) {
+      var matrix = qrMatrix(href);
+      if (!matrix) return el('p', { className: 'muted small', text: 'QR コードを表示できませんでした（qrcode.js が読み込まれていません）。' });
+      var url = el('code', { className: 'qr-share__url', text: href });
+      return el('div', { className: 'qr-share' }, [
+        el('div', { className: 'qr-share__code' }, [qrSvg(matrix, event.name + ' の閲覧ページの QR コード')]),
+        el('div', { className: 'stack stack--tight' }, [
+          el('strong', { text: '閲覧ページの QR コード' }),
+          el('p', { className: 'muted small', text: '参加者がスマホのカメラで読み取ると、この大会の閲覧ページが開きます。閲覧ページを大きな画面で開くと、右下にも同じ QR コードが表示されます。' }),
+          url,
+          el('div', { className: 'btn-row' }, [
+            el('button', {
+              className: 'btn',
+              type: 'button',
+              text: '画像（PNG）で保存',
+              onClick: function () {
+                qrPngBlob(matrix, function (blob) {
+                  if (!blob) {
+                    toast('error', '画像を作れませんでした。');
+                    return;
+                  }
+                  var a = el('a', { href: URL.createObjectURL(blob), download: 'qr-' + event.id + '.png' });
+                  doc.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  setTimeout(function () {
+                    URL.revokeObjectURL(a.href);
+                  }, 10000);
+                });
+              },
+            }),
+            el('button', {
+              className: 'btn',
+              type: 'button',
+              text: 'URL をコピー',
+              onClick: function () {
+                var nav = win.navigator;
+                if (nav.clipboard && nav.clipboard.writeText) {
+                  nav.clipboard.writeText(href).then(function () {
+                    toast('ok', 'コピーしました。');
+                  }, function () {
+                    toast('error', 'コピーできませんでした。URL を長押しして選択してください。');
+                  });
+                } else {
+                  toast('error', 'コピーできませんでした。URL を長押しして選択してください。');
+                }
+              },
+            }),
+          ]),
+        ]),
       ]);
     }
 

@@ -401,6 +401,51 @@
     });
   }
 
+  /* ---------- QR コード ---------- */
+
+  /**
+   * 同梱の qrcode-generator（グローバルの qrcode）で URL の QR コードを SVG にする。
+   * ライブラリがない環境（Apps Script の画面）では null を返し、QR は出さない。
+   */
+  function qrSvg(text, label) {
+    var lib = global.qrcode;
+    if (typeof lib !== 'function' || !text) return null;
+    var qr = lib(0, 'M');
+    qr.addData(text);
+    qr.make();
+    var n = qr.getModuleCount();
+    var quiet = 4;
+    var d = '';
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        if (qr.isDark(r, c)) d += 'M' + (c + quiet) + ' ' + (r + quiet) + 'h1v1h-1z';
+      }
+    }
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    var size = n + quiet * 2;
+    svg.setAttribute('viewBox', '0 0 ' + size + ' ' + size);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', label);
+    svg.setAttribute('shape-rendering', 'crispEdges');
+    var bg = document.createElementNS(ns, 'rect');
+    bg.setAttribute('width', String(size));
+    bg.setAttribute('height', String(size));
+    bg.setAttribute('fill', '#ffffff');
+    var path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', '#000000');
+    svg.appendChild(bg);
+    svg.appendChild(path);
+    return svg;
+  }
+
+  /** この大会の閲覧ページの URL（QR 用）。http(s) で開いているときだけ作る */
+  function shareUrl(loc, eventId) {
+    if (!loc || !/^https?:$/.test(loc.protocol) || !eventId) return '';
+    return loc.origin + loc.pathname + '?event=' + encodeURIComponent(eventId);
+  }
+
   /* ---------- 画面の組み立て ---------- */
 
   function startApp(doc, win) {
@@ -420,7 +465,15 @@
       banner: $('banner'),
       refresh: $('refresh-button'),
       message: $('message'),
+      qrPanel: $('qr-panel'),
+      qrCode: $('qr-code'),
+      qrButton: $('qr-button'),
+      qrOverlay: $('qr-overlay'),
+      qrOverlayCode: $('qr-overlay-code'),
+      qrOverlayUrl: $('qr-overlay-url'),
+      qrClose: $('qr-close'),
     };
+    var qrState = { url: '' };
     var view = { data: null, filter: { stage: 'all', group: 'all' }, lastError: null, eventId: '' };
 
     function showBanner(kind, text) {
@@ -492,8 +545,37 @@
       ui.rule.hidden = !ruleText(rule);
       ui.rule.textContent = ruleText(rule);
       ui.updated.textContent = formatTime(d.dataUpdatedAt);
+      renderQr(d);
       renderFilter();
       renderEvent(ui.groups, d, view.filter);
+    }
+
+    /**
+     * QR コード: 広い画面（店内モニターなど）では右下に固定表示し、スクロールしても追従する。
+     * スマートフォンでは「QR コード」ボタンで大きく表示する。?qr=0 で固定表示をやめ、?qr=1 で幅に関係なく固定表示する。
+     */
+    function renderQr(d) {
+      if (!ui.qrPanel) return;
+      var url = shareUrl(win.location, d.event.id);
+      if (url === qrState.url) return;
+      var svg = qrSvg(url, 'この大会の閲覧ページの QR コード');
+      if (!svg) return;
+      qrState.url = url;
+      ui.qrCode.textContent = '';
+      ui.qrCode.appendChild(svg);
+      ui.qrOverlayCode.textContent = '';
+      ui.qrOverlayCode.appendChild(qrSvg(url, 'この大会の閲覧ページの QR コード（拡大）'));
+      ui.qrOverlayUrl.textContent = url;
+      ui.qrPanel.hidden = params.qr === '0';
+      if (params.qr === '1') doc.body.classList.add('qr-forced');
+      if (!ui.qrPanel.hidden) doc.body.classList.add('has-qr');
+      ui.qrButton.hidden = false;
+    }
+
+    function openQr(open) {
+      ui.qrOverlay.hidden = !open;
+      if (open) ui.qrClose.focus();
+      else ui.qrButton.focus();
     }
 
     function showMessage(text) {
@@ -589,6 +671,20 @@
         intervalLocked: locked,
         onEvent: onEvent,
       });
+      if (ui.qrButton) {
+        ui.qrButton.addEventListener('click', function () {
+          openQr(true);
+        });
+        ui.qrClose.addEventListener('click', function () {
+          openQr(false);
+        });
+        ui.qrOverlay.addEventListener('click', function (e) {
+          if (e.target === ui.qrOverlay) openQr(false);
+        });
+        doc.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' && !ui.qrOverlay.hidden) openQr(false);
+        });
+      }
       ui.refresh.addEventListener('click', function () {
         var r = poller.refreshNow();
         if (r === 'throttled') showBanner('info', '少し時間をおいてから更新してください。');
@@ -669,6 +765,7 @@
     createFetchTransport: createFetchTransport,
     createPoller: createPoller,
     renderEvent: renderEvent,
+    shareUrl: shareUrl,
     formatTime: formatTime,
     STATUS_LABEL: STATUS_LABEL,
   };

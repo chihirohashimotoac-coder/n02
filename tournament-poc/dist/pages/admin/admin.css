@@ -212,3 +212,12 @@ body.is-busy .busy-indicator { display: block; }
 .match-editor--pending { opacity: .75; }
 .match-editor--check { box-shadow: inset 3px 0 0 var(--check); padding-left: 10px; }
 .status--pending { background: var(--sched-bg); color: var(--ink-2); font-weight: 600; }
+
+/* 試合結果: 未保存の入力とまとめて確定（v0.4.1） */
+.match-editor__draft { margin-left: auto; margin-right: 8px; font-size: 12px; font-weight: 700; color: var(--live); }
+.batch-bar { position: sticky; bottom: 12px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface); border: 2px solid var(--brand); box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+.batch-bar__label { font-weight: 700; }
+.qr-share { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 12px 16px; align-items: start; margin: 8px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.qr-share__code svg { display: block; width: 100%; height: auto; border-radius: 6px; }
+.qr-share__url { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; color: var(--ink-2); }
+@media (max-width: 560px) { .qr-share { grid-template-columns: minmax(0, 1fr); } .qr-share__code { width: min(220px, 100%); } }

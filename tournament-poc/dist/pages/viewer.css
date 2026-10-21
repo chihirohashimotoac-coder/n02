@@ -607,6 +607,118 @@ body {
   }
 }
 
+/* QR コード（v0.4.1）: 広い画面では右下に固定表示し、スクロールしても追従する */
+.statusbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.refresh--ghost {
+  border-color: var(--line);
+}
+
+.qr-panel {
+  display: none;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  width: 200px;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  text-align: center;
+}
+
+.qr-panel__code svg,
+.qr-overlay__code svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.qr-panel__title {
+  margin: 8px 0 2px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.qr-panel__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+
+body.qr-forced .qr-panel {
+  display: block;
+  width: 150px;
+}
+
+@media (min-width: 1100px) {
+  .qr-panel {
+    display: block;
+  }
+
+  body.has-qr .content {
+    padding-right: 236px;
+  }
+}
+
+/* 大きなモニター: 離れた席からも読み取れるよう大きくする */
+@media (min-width: 1600px) {
+  .qr-panel,
+  body.qr-forced .qr-panel {
+    width: 260px;
+  }
+
+  body.has-qr .content {
+    padding-right: 296px;
+  }
+}
+
+.qr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.qr-overlay__box {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  width: min(100%, 360px);
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: center;
+}
+
+.qr-overlay__code {
+  width: min(80vw, 300px);
+}
+
+.qr-overlay__hint {
+  margin: 0;
+  font-weight: 700;
+}
+
+.qr-overlay__url {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
 /* スマートフォン: 回戦・状態を 1 行目、対戦を 2 行目に */
 @media (max-width: 560px) {
   .group {

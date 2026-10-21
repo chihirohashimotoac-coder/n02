@@ -214,6 +214,47 @@ test('試合結果: 進行中 → 確定 → 訂正。勝者は確定時のみ�
   assert.equal(d.groups[0].summary.reduce((s, x) => s + x.played, 0), 0);
 });
 
+test('まとめて確定: 複数の試合を 1 回で確定できる。1 試合でも成立しなければ何も保存しない', () => {
+  const p = ready();
+  const { eventId, detail } = setupEventWithMatches(p);
+  const [m1, m2, m3] = detail.groups[0].matches;
+  const records = () => p.store.get().getSheetByName('Matches').records();
+  // 3 試合目が 2-1（Best of 5 で確定できない）→ 全体を拒否し、どの試合の問題かを示す
+  const bad = p.call('saveMatchResults', {
+    eventId,
+    results: [
+      { matchId: m1.id, rev: m1.rev, p1Legs: 3, p2Legs: 2 },
+      { matchId: m2.id, rev: m2.rev, p1Legs: 0, p2Legs: 3 },
+      { matchId: m3.id, rev: m3.rev, p1Legs: 2, p2Legs: 1 },
+    ],
+  });
+  assert.equal(bad.error.code, 'VALIDATION');
+  assert.match(bad.error.message, new RegExp(m3.p1.name + ' vs ' + m3.p2.name));
+  assert.match(bad.error.message, /どの試合も保存していません/);
+  assert.ok(records().every((r) => r.status === 'scheduled'), '1 試合も書き込まれていない');
+
+  const res = p.ok('saveMatchResults', {
+    eventId,
+    results: [
+      { matchId: m1.id, rev: m1.rev, p1Legs: 3, p2Legs: 2 },
+      { matchId: m2.id, rev: m2.rev, p1Legs: '０', p2Legs: 3 },
+    ],
+  });
+  assert.equal(res.saved, 2);
+  const ms = res.detail.groups[0].matches;
+  assert.equal(ms[0].status, 'final');
+  assert.equal(ms[0].winnerId, m1.p1.id);
+  assert.equal(ms[1].winnerId, m2.p2.id);
+  assert.equal(ms[2].status, 'scheduled');
+  assert.equal(res.detail.history.filter((h) => h.action === 'match.result').length, 2);
+  // 確定済み・古い版・重複・空は拒否
+  assert.equal(p.call('saveMatchResults', { eventId, results: [{ matchId: m1.id, rev: ms[0].rev, p1Legs: 0, p2Legs: 3 }] }).error.code, 'ALREADY_FINAL');
+  assert.equal(p.call('saveMatchResults', { eventId, results: [{ matchId: m3.id, rev: m3.rev + 5, p1Legs: 3, p2Legs: 0 }] }).error.code, 'CONFLICT');
+  assert.equal(p.call('saveMatchResults', { eventId, results: [{ matchId: m3.id, rev: m3.rev, p1Legs: 3, p2Legs: 0 }, { matchId: m3.id, rev: m3.rev, p1Legs: 3, p2Legs: 0 }] }).error.code, 'BAD_REQUEST');
+  assert.equal(p.call('saveMatchResults', { eventId, results: [] }).error.code, 'VALIDATION');
+  assert.equal(p.call('saveMatchResults', { eventId, results: 'x' }).error.code, 'VALIDATION');
+});
+
 test('同時更新: 2 つの画面が同じ試合を読み、後から保存した方は CONFLICT で拒否される', () => {
   const p = ready();
   const { detail } = setupEventWithMatches(p);

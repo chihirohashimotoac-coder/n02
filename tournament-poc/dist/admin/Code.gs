@@ -14,7 +14,7 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.4.0',
+  APP_VERSION: '0.4.1',
   SCHEMA_VERSION: 1,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
@@ -1789,6 +1789,7 @@ function publicationStatus_(ctx, eventId) {
 
 var SAMPLE_GROUP_COUNT_ = 4;
 var SAMPLE_PLAYER_COUNT_ = 16;
+var MAX_BATCH_RESULTS_ = 64;
 
 /* ---------- 読み取り ---------- */
 
@@ -3098,7 +3099,8 @@ function propagateElimination_(ctx, match, beforeWinner, afterWinner) {
   });
 }
 
-function actionSaveMatchResult_(ctx, payload) {
+/** 1 試合分の結果を検証する（書き込みはしない）。戻り値を applyMatchResult_ に渡して保存する */
+function prepareMatchResult_(ctx, payload) {
   var matchesTable = ctx.table('Matches');
   var match = findRecord_(matchesTable, requireId_(payload.matchId, '試合'), '試合');
   assertRev_(match, requireRev_(payload.rev), '試合');
@@ -3130,23 +3132,67 @@ function actionSaveMatchResult_(ctx, payload) {
   if (sets && (input.p1Legs === null) !== (input.p2Legs === null)) throw appError_('VALIDATION', '取得 Leg 数は両方入力するか、両方空欄にしてください。');
   var result = evaluateMatchInput_(status, input, spec);
   if (!result.ok) throw appError_('VALIDATION', result.problems.join(' / '));
+  return { match: match, stage: stage, status: status, sets: sets, input: input, winnerSide: result.winnerSide, names: [playerById[match.player1_id].display_name, playerById[match.player2_id].display_name] };
+}
 
+function applyMatchResult_(ctx, prep) {
+  var match = prep.match;
   var before = plain_(match);
   var beforeWinner = match.status === MATCH_STATUS.FINAL ? match.winner_id : '';
-  match.player1_legs = input.p1Legs;
-  match.player2_legs = input.p2Legs;
-  match.player1_sets = sets ? input.p1Sets : 0;
-  match.player2_sets = sets ? input.p2Sets : 0;
-  match.status = status;
-  match.winner_id = result.winnerSide === 1 ? match.player1_id : result.winnerSide === 2 ? match.player2_id : '';
-  match.confirmed_at = status === MATCH_STATUS.FINAL ? ctx.now : '';
+  match.player1_legs = prep.input.p1Legs;
+  match.player2_legs = prep.input.p2Legs;
+  match.player1_sets = prep.sets ? prep.input.p1Sets : 0;
+  match.player2_sets = prep.sets ? prep.input.p2Sets : 0;
+  match.status = prep.status;
+  match.winner_id = prep.winnerSide === 1 ? match.player1_id : prep.winnerSide === 2 ? match.player2_id : '';
+  match.confirmed_at = prep.status === MATCH_STATUS.FINAL ? ctx.now : '';
   match.rev = (match.rev || 0) + 1;
   match.updated_at = ctx.now;
-  if (isEliminationStage_(stage)) propagateElimination_(ctx, match, beforeWinner, match.winner_id);
-  updateRecord_(matchesTable, match);
+  if (isEliminationStage_(prep.stage)) propagateElimination_(ctx, match, beforeWinner, match.winner_id);
+  updateRecord_(ctx.table('Matches'), match);
   var action = before.status === MATCH_STATUS.FINAL ? 'match.correct' : 'match.result';
   recordHistory_(ctx, action, 'Match', match.match_id, match.event_id, pickResult_(before), pickResult_(match));
-  return { eventId: match.event_id };
+}
+
+function actionSaveMatchResult_(ctx, payload) {
+  var prep = prepareMatchResult_(ctx, payload);
+  applyMatchResult_(ctx, prep);
+  return { eventId: prep.match.event_id };
+}
+
+/**
+ * 複数の試合をまとめて確定する。すべての結果を先に検証し、1 つでも成立しなければ何も保存しない。
+ * 対象は未確定の試合の「確定」だけ（訂正・進行中の保存は 1 試合ずつ）。
+ */
+function actionSaveMatchResults_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var list = payload.results;
+  if (!Array.isArray(list) || !list.length) throw appError_('VALIDATION', '確定する試合がありません。');
+  if (list.length > MAX_BATCH_RESULTS_) throw appError_('VALIDATION', '一度に確定できるのは ' + MAX_BATCH_RESULTS_ + ' 試合までです。');
+  var seen = {};
+  var preps = list.map(function (r) {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) throw appError_('BAD_REQUEST', '結果の形式が不正です。');
+    var matchId = requireId_(r.matchId, '試合');
+    if (seen[matchId]) throw appError_('BAD_REQUEST', '同じ試合が重複しています。');
+    seen[matchId] = true;
+    var match = findRecord_(ctx.table('Matches'), matchId, '試合');
+    // 他の大会の試合は存在しないものとして扱う（authorizeEventPayload_ と同じ方針）
+    if (match.event_id !== eventId) throw appError_('NOT_FOUND', '試合 が見つかりません。画面を再読み込みしてください。');
+    if (match.status === MATCH_STATUS.FINAL) throw appError_('ALREADY_FINAL', '確定済みの試合が含まれています。画面を再読み込みしてください。');
+    try {
+      return prepareMatchResult_(ctx, { matchId: matchId, rev: r.rev, status: MATCH_STATUS.FINAL, p1Legs: r.p1Legs, p2Legs: r.p2Legs, p1Sets: r.p1Sets, p2Sets: r.p2Sets });
+    } catch (e) {
+      if (!e.appCode) throw e;
+      var p1 = ctx.table('Players').byKey[match.player1_id];
+      var p2 = ctx.table('Players').byKey[match.player2_id];
+      var label = (p1 ? p1.display_name : '?') + ' vs ' + (p2 ? p2.display_name : '?');
+      throw appError_(e.appCode, label + ': ' + e.publicMessage + '（どの試合も保存していません）');
+    }
+  });
+  preps.forEach(function (prep) {
+    applyMatchResult_(ctx, prep);
+  });
+  return { eventId: eventId, saved: preps.length };
 }
 
 function pickResult_(m) {
@@ -3283,6 +3329,7 @@ function adminActions_() {
     generateMatches: { fn: actionGenerateMatches_, scope: 'event', mutating: true },
     clearMatches: { fn: actionClearMatches_, scope: 'event', mutating: true },
     saveMatchResult: { fn: actionSaveMatchResult_, scope: 'event', mutating: true },
+    saveMatchResults: { fn: actionSaveMatchResults_, scope: 'event', mutating: true },
     republish: { fn: actionRepublish_, scope: 'event', mutating: true },
     addStage: { fn: actionAddStage_, scope: 'event', mutating: true },
     updateStage: { fn: actionUpdateStage_, scope: 'event', mutating: true },

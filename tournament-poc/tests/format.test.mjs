@@ -351,3 +351,28 @@ test('主催者は他の大会の段階を、stageId や eventId との組み合
   // 自分の大会の操作は可能
   assert.equal(p.call('addStage', { eventId: a.eventId, type: 'single_elimination' }, { auth: authA }).ok, true);
 });
+
+test('まとめて確定: トーナメントの準決勝 2 試合を一度に確定すると、決勝・3 位決定戦に勝者・敗者が入る', () => {
+  const p = ready();
+  p.eventId = p.ok('createEvent', { name: 'Batch', template: 'elimination', rule: { format: 'legs', bestOf: 3 }, thirdPlace: true }).eventId;
+  let d = p.ok('eventDetail', { eventId: p.eventId });
+  const st = d.stages[0];
+  p.ok('addPlayers', { eventId: p.eventId, names: names(4) });
+  d = p.ok('eventDetail', { eventId: p.eventId });
+  p.ok('setEntrants', { eventId: p.eventId, stageId: st.id, playerIds: d.players.map((x) => x.id) });
+  d = p.ok('generateBracket', { eventId: p.eventId, stageId: st.id }).detail;
+  const [s1, s2] = d.stages[0].rounds[0].matches;
+  d = p.ok('saveMatchResults', {
+    eventId: p.eventId,
+    results: [
+      { matchId: s1.id, rev: s1.rev, p1Legs: 2, p2Legs: 0 },
+      { matchId: s2.id, rev: s2.rev, p1Legs: 1, p2Legs: 2 },
+    ],
+  }).detail;
+  const last = d.stages[0].rounds[1].matches;
+  const final = last.find((m) => m.label === '決勝');
+  const third = last.find((m) => m.label === '3位決定戦');
+  assert.deepEqual([final.p1.id, final.p2.id], [s1.p1.id, s2.p2.id]);
+  assert.deepEqual([third.p1.id, third.p2.id], [s1.p2.id, s2.p1.id]);
+  assert.equal(final.status, 'scheduled');
+});
