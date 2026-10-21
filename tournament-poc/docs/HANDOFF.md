@@ -10,7 +10,7 @@
 
 | リポジトリ | 役割 | ブランチ | 備考 |
 | --- | --- | --- | --- |
-| **chihirohashimotoac-coder/n02** | **ソースの正本**（`tournament-poc/` 配下だけを触る） | `claude/bold-albattani-5vsk78` | 未マージ。PR は未作成（ユーザーの指示があるまで作らない） |
+| **chihirohashimotoac-coder/n02** | **ソースの正本**（`tournament-poc/` 配下だけを触る） | `claude/confident-carson-4jh0g5`（最新。`claude/bold-albattani-5vsk78` から派生し、v0.4.1 の実環境確認の記録を追加） | 未マージ。PR は未作成（ユーザーの指示があるまで作らない） |
 | chihirohashimotoac-coder/n02-tournament-viewer | GitHub Pages の公開先（`dist/pages/` のコピー置き場） | `main` | `config.js`・`admin/config.js` に Web アプリの URL。ここは**手で編集しない**で `dist/pages/` からコピーする |
 
 新しいセッションでは **n02 を選択**し、Pages を更新するときだけ `add_repo` で n02-tournament-viewer を追加する。
