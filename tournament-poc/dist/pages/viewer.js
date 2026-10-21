@@ -17,6 +17,8 @@
    * - 取得中は次の取得を始めない（重複リクエスト防止）
    * - 応答が timeoutMs 以内に返らなければ失敗扱いにし、遅れて届いた応答は捨てる
    * - タブが非表示の間は取得しない。表示に戻ったら、間隔を過ぎていれば少しずらして取得する
+   * - opts.nextDelay(res, normalMs) があれば、成功後の次の取得までの時間をそれで決める（null を返すと自動更新を止める）。
+   *   止めた後も、表示に戻ったとき・手動更新では 1 回取得し、その結果でまた決め直す
    */
   function createPoller(opts) {
     var now = opts.now;
@@ -45,6 +47,7 @@
       hidden: false,
       dueWhileHidden: false,
       stopped: true,
+      halted: false, // 自動更新を止めている（nextDelay が null を返した）
       requests: 0,
       latencies: [],
     };
@@ -63,6 +66,7 @@
         version: st.version,
         requests: st.requests,
         intervalMs: cfg.intervalMs,
+        halted: st.halted,
       };
     }
 
@@ -142,7 +146,17 @@
           cfg.jitterMs = clamp(res.refresh.jitterSec || 0, 0, 30) * 1000;
         }
         emit('success', { response: res });
-        schedule(normalDelay());
+        var next = opts.nextDelay && !cfg.intervalLocked ? opts.nextDelay(res, normalDelay()) : normalDelay();
+        if (next === null) {
+          if (st.timer !== null) clearTimer(st.timer);
+          st.timer = null;
+          st.nextAt = 0;
+          st.halted = true;
+          emit('halted');
+        } else {
+          st.halted = false;
+          schedule(next);
+        }
       } else {
         st.failures++;
         var error = err || (res && res.error) || { code: 'UNKNOWN', message: '不明なエラー' };
@@ -174,7 +188,7 @@
       setHidden: function (hidden) {
         st.hidden = !!hidden;
         if (st.hidden || st.stopped) return;
-        var overdue = st.dueWhileHidden || (st.lastSuccessAt && now() - st.lastSuccessAt >= cfg.intervalMs);
+        var overdue = st.halted || st.dueWhileHidden || (st.lastSuccessAt && now() - st.lastSuccessAt >= cfg.intervalMs);
         st.dueWhileHidden = false;
         if (overdue && !st.inFlight) schedule(random() * 2000);
       },
@@ -186,6 +200,42 @@
         return st.latencies.slice();
       },
     };
+  }
+
+  var MINUTE = 60000;
+  var HOUR = 60 * MINUTE;
+  var DAY = 24 * HOUR;
+
+  /**
+   * 自動更新の間隔（DOM に依存しないので単体テストできる）。最後にデータが変わってからの時間で決める。
+   *   〜60 分: 通常（約 60 秒）/ 〜3 時間: 5 分 / 〜24 時間: 30 分 / 〜14 日: 60 分 / それ以降: 停止
+   * 次の場合はすぐに止める: 大会が「終了」/ 全試合が確定して 60 分変化がない（終了にし忘れても止まる）
+   * info = { now, lastChangeAt, finished, allFinal, normalMs }
+   * 戻り値 = { delayMs: number | null（null は停止）, mode: 'normal' | 'slow' | 'stopped', everyMs?, reason? }
+   */
+  function refreshPlan(info) {
+    if (info.finished) return { delayMs: null, mode: 'stopped', reason: 'finished' };
+    var idle = Math.max(0, info.now - info.lastChangeAt);
+    if (info.allFinal && idle >= HOUR) return { delayMs: null, mode: 'stopped', reason: 'allFinal' };
+    if (idle < HOUR) return { delayMs: info.normalMs, mode: 'normal' };
+    var every = idle < 3 * HOUR ? 5 * MINUTE : idle < DAY ? 30 * MINUTE : idle < 14 * DAY ? HOUR : 0;
+    if (!every) return { delayMs: null, mode: 'stopped', reason: 'idle' };
+    // 全試合が確定していれば、60 分たった時点で止める判定ができるよう、それより先へは延ばさない
+    var delay = every * (0.9 + Math.random() * 0.2);
+    if (info.allFinal) delay = Math.min(delay, Math.max(1000, HOUR - idle + 1000));
+    return { delayMs: delay, mode: 'slow', everyMs: every };
+  }
+
+  /**
+   * 全試合が確定したか。まだ試合のない段階（トーナメント表を作る前の A / B トーナメントなど）があれば、
+   * 次の段階を待っているので「確定」とはみなさない
+   */
+  function allMatchesFinal(d) {
+    var p = d && d.progress;
+    if (!p || !(p.total > 0) || p.final !== p.total) return false;
+    return (d.stages || []).every(function (st) {
+      return st.progress && st.progress.total > 0;
+    });
   }
 
   /* ---------- 表示 ---------- */
@@ -717,6 +767,26 @@
 
     var params = {};
     var poller;
+    // 自動更新の間隔を決めるための記録: 最後にデータが変わった時刻（ページ側で変化に気づいた時刻も含む）
+    var activity = { lastChangeAt: Date.now(), seenVersion: '', plan: { mode: 'normal' } };
+
+    function nextDelay(res, normalMs) {
+      var d = res.ok ? view.data : null;
+      if (res.ok && res.version && res.version !== activity.seenVersion) {
+        var updated = d && Date.parse(d.dataUpdatedAt);
+        // 最初に開いたときはデータの更新時刻、開いている間に変わったら気づいた時刻
+        activity.lastChangeAt = activity.seenVersion ? Date.now() : isFinite(updated) && updated > 0 ? Math.min(updated, Date.now()) : Date.now();
+        activity.seenVersion = res.version;
+      }
+      activity.plan = refreshPlan({
+        now: Date.now(),
+        lastChangeAt: activity.lastChangeAt,
+        finished: !!(d && d.event && d.event.status === 'finished'),
+        allFinal: allMatchesFinal(d),
+        normalMs: normalMs,
+      });
+      return activity.plan.delayMs;
+    }
     // 負荷試験（tools/loadtest.mjs）が読み取る計測値。画面の動作には使わない
     var metrics = { success: 0, failure: 0, notModified: 0, stale: 0, errors: {}, versions: {} };
 
@@ -767,12 +837,20 @@
       }
     }
 
+    var STOP_REASON = { finished: '大会終了のため停止中', allFinal: '全試合確定のため停止中', idle: '14 日間更新がないため停止中' };
+
     function tick() {
       if (!poller) return;
       var s = poller.state();
+      var plan = activity.plan;
       if (s.inFlight) ui.next.textContent = '取得中…';
+      else if (s.halted) ui.next.textContent = (STOP_REASON[plan.reason] || '停止中') + '（「今すぐ更新」で確認）';
       else if (!s.nextAt) ui.next.textContent = '画面表示中に再開';
-      else ui.next.textContent = '約 ' + Math.max(0, Math.ceil((s.nextAt - Date.now()) / 1000)) + ' 秒後';
+      else {
+        var sec = Math.max(0, Math.ceil((s.nextAt - Date.now()) / 1000));
+        var left = sec >= 120 ? '約 ' + Math.round(sec / 60) + ' 分後' : '約 ' + sec + ' 秒後';
+        ui.next.textContent = plan.mode === 'slow' ? left + '（更新が少ないため ' + Math.round(plan.everyMs / MINUTE) + ' 分ごと）' : left;
+      }
     }
 
     function boot() {
@@ -793,6 +871,7 @@
         intervalMs: locked ? interval * 1000 : 60000,
         intervalLocked: locked,
         onEvent: onEvent,
+        nextDelay: nextDelay,
       });
       if (ui.qrButton) {
         ui.qrButton.addEventListener('click', function () {
@@ -892,6 +971,8 @@
     createPoller: createPoller,
     renderEvent: renderEvent,
     bracketLayout: bracketLayout,
+    refreshPlan: refreshPlan,
+    allMatchesFinal: allMatchesFinal,
     shareUrl: shareUrl,
     formatTime: formatTime,
     STATUS_LABEL: STATUS_LABEL,

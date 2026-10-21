@@ -68,6 +68,10 @@ node tournament-poc/tools/loadtest.mjs --url "<閲覧者用 URL>" --clients 50 -
 
 本試験（段階 3）の実行中に、運営画面で **2〜3 分おきに 1 試合ずつ結果を確定**してください（反映時間の計測用）。
 
+> v0.5.1 以降の閲覧ページは、最後の更新から 60 分を過ぎると取得間隔を延ばし、大会が「終了」なら自動更新を止めます。
+> 負荷試験では条件をそろえるため、`loadtest.mjs` は既定で取得間隔を 60 秒に固定します（URL に `interval=60` を付ける。固定した間隔は延ばさない）。
+> 実際の閲覧者の取得回数は、更新が少ない時間帯や終了後にはこれより少なくなります。
+
 ### 4-1. 試験 A を GitHub Actions で実行する（推奨）
 
 公開先リポジトリ（n02-tournament-viewer）に、手動で実行する負荷テストを置いています（`.github/workflows/loadtest.yml` と `tools/loadtest.mjs`。

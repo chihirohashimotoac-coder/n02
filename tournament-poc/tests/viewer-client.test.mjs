@@ -304,3 +304,65 @@ test('トーナメント表の配置: 試合は order の枠に置き、不戦�
   assert.deepEqual(plain(bracketLayout([]).columns), []);
 });
 
+test('自動更新の間隔: 最後の更新から 60 分は通常・3 時間まで 5 分・24 時間まで 30 分・14 日まで 60 分・それ以降は停止', () => {
+  const { refreshPlan } = ctx.TPViewer;
+  const M = 60_000;
+  const H = 60 * M;
+  const plan = (idle, extra = {}) => refreshPlan({ now: 100 * 24 * H, lastChangeAt: 100 * 24 * H - idle, finished: false, allFinal: false, normalMs: 60_000, ...extra });
+  const every = (idle) => {
+    const p = plan(idle);
+    return p.mode === 'stopped' ? 'stop' : p.mode === 'normal' ? 'normal' : p.everyMs / M;
+  };
+  assert.deepEqual(
+    [0, 59 * M, 60 * M, 179 * M, 3 * H, 23 * H, 24 * H, 14 * 24 * H - M, 14 * 24 * H].map(every),
+    ['normal', 'normal', 5, 5, 30, 30, 60, 60, 'stop']
+  );
+  assert.equal(plan(0).delayMs, 60_000);
+  // 間隔には ±10% の揺らぎを付け、閲覧者ごとに取得の時刻をずらす
+  const d = plan(5 * H).delayMs;
+  assert.ok(d >= 27 * M && d <= 33 * M, String(d));
+  // 「終了」ならすぐ止める。リーグのように週 1 回の更新でも、終了でなければ 14 日までは止めない
+  assert.equal(plan(0, { finished: true }).reason, 'finished');
+  assert.equal(plan(6 * 24 * H).mode, 'slow');
+  // 全試合が確定して 60 分変化がなければ止める（終了にし忘れても止まる）。60 分になる前は止める判定の時刻を越えて延ばさない
+  assert.equal(plan(59 * M, { allFinal: true }).mode, 'normal');
+  assert.equal(plan(60 * M, { allFinal: true }).reason, 'allFinal');
+  assert.equal(plan(14 * 24 * H, {}).reason, 'idle');
+});
+
+test('全試合の確定: まだ試合のない段階（トーナメント表を作る前）があれば確定とみなさない', () => {
+  const { allMatchesFinal } = ctx.TPViewer;
+  const stage = (final, total) => ({ progress: { final, total } });
+  assert.equal(allMatchesFinal({ progress: { final: 6, total: 6 }, stages: [stage(6, 6)] }), true);
+  assert.equal(allMatchesFinal({ progress: { final: 5, total: 6 }, stages: [stage(5, 6)] }), false);
+  assert.equal(allMatchesFinal({ progress: { final: 6, total: 6 }, stages: [stage(6, 6), stage(0, 0), stage(0, 0)] }), false);
+  assert.equal(allMatchesFinal({ progress: { final: 0, total: 0 }, stages: [] }), false);
+  assert.equal(allMatchesFinal(null), false);
+});
+
+test('自動更新を止めた後も、表示に戻ったとき・手動更新で 1 回取得し、変化があれば再開する', () => {
+  let stop = true;
+  const h = harness({ respond: (c) => c.ok(okRes()), nextDelay: (res, normal) => (stop ? null : normal) });
+  h.poller.start();
+  assert.equal(h.poller.state().halted, true);
+  h.advance(24 * 3600_000);
+  assert.equal(h.requests, 1, '止めている間は取得しない');
+  h.poller.setHidden(true);
+  h.poller.setHidden(false);
+  h.advance(2_000);
+  assert.equal(h.requests, 2, '表示に戻ったら 1 回だけ取得');
+  h.advance(3600_000);
+  assert.equal(h.requests, 2);
+  stop = false;
+  h.advance(10_000);
+  assert.equal(h.poller.refreshNow(), 'started');
+  assert.equal(h.poller.state().halted, false);
+  h.advance(60_000);
+  assert.equal(h.requests, 4, '再開後は通常の間隔');
+  // URL で間隔を固定したとき（負荷試験など）は止めない
+  const fixed = harness({ intervalMs: 15_000, jitterMs: 0, intervalLocked: true, respond: (c) => c.ok(okRes()), nextDelay: () => null });
+  fixed.poller.start();
+  fixed.advance(15_000);
+  assert.equal(fixed.requests, 2);
+});
+

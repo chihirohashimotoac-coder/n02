@@ -1,6 +1,6 @@
 // GitHub Pages 用の閲覧ページ（dist/pages）。Google の外から ?format=json を fetch で読む方式の確認
 import { test, expect } from '@playwright/test';
-import { publishedSample, setFault, expectNoHorizontalOverflow, routeAppsScript, VIEWER_ENDPOINT } from './helpers.mjs';
+import { publishedSample, setFault, expectNoHorizontalOverflow, routeAppsScript, adminCall, VIEWER_ENDPOINT } from './helpers.mjs';
 
 const ENDPOINT = VIEWER_ENDPOINT;
 
@@ -101,3 +101,22 @@ test('QR コード: 内容の右に余白がある画面だけ右下に固定表
   await expect(page.locator('.match')).toHaveCount(24);
   await expect(panel).toBeHidden();
 });
+
+test('自動更新: 終了した大会は最初の 1 回だけ取得して止まり、「今すぐ更新」で確認できる', async ({ page, request }) => {
+  const detail = await publishedSample(request);
+  const ev = detail.event;
+  const res = await adminCall(request, 'updateEvent', { eventId: ev.id, rev: ev.rev, name: ev.name, dateLabel: ev.dateLabel, status: 'finished', isPublic: true, isFeatured: false, notes: '' }, detail.auth);
+  expect(res.ok).toBe(true);
+  const seen = await routeAppsScript(page, request);
+  await page.clock.install();
+  await page.goto(`/pages/index.html?event=${ev.id}`);
+  await expect(page.locator('.match')).toHaveCount(24);
+  await expect(page.locator('#next-refresh')).toContainText('大会終了のため停止中');
+  const first = seen.length;
+  await page.clock.runFor(10 * 60_000);
+  expect(seen.length, '10 分たっても取得しない').toBe(first);
+  await page.getByRole('button', { name: '今すぐ更新' }).click();
+  await expect.poll(() => seen.length).toBe(first + 1);
+  await expect(page.locator('#next-refresh')).toContainText('大会終了のため停止中');
+});
+

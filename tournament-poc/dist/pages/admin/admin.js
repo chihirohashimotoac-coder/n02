@@ -1118,6 +1118,27 @@
       bar.style.width = pct + '%';
       panel.appendChild(el('div', { className: 'meter', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': pct }, [bar]));
       panel.appendChild(el('p', { text: '確定 ' + p.final + ' / ' + p.total + ' 試合（進行中 ' + p.live + '・未開始 ' + p.scheduled + (p.pending ? '・対戦待ち ' + p.pending : '') + (p.check ? '・要確認 ' + p.check : '') + '）' }));
+      // 全試合が確定したら「終了」を案内する（終了にすると、閲覧ページの自動更新が止まり、実行数が増えない）
+      var allStagesHaveMatches = d.stages.every(function (st) {
+        return st.progress.total > 0;
+      });
+      if (p.total > 0 && p.final === p.total && allStagesHaveMatches && d.event.status !== 'finished') {
+        var ev = d.event;
+        panel.appendChild(
+          el('div', { className: 'notice finish-hint' }, [
+            el('p', { text: 'すべての試合が確定しました。大会を「終了」にすると、閲覧ページの自動更新が止まります（終了にしなくても、1 時間変化がなければ止まります）。' }),
+            el('button', {
+              className: 'btn btn--primary',
+              type: 'button',
+              'data-mut': true,
+              text: '大会を「終了」にする',
+              onClick: function () {
+                mutate('updateEvent', { eventId: ev.id, rev: ev.rev, name: ev.name, dateLabel: ev.dateLabel, status: 'finished', isPublic: ev.isPublic, isFeatured: ev.isFeatured, notes: ev.notes || '' }, '大会を「終了」にしました。');
+              },
+            }),
+          ])
+        );
+      }
       var rows = [];
       d.stages.forEach(function (st) {
         rows.push(

@@ -248,6 +248,11 @@ test('トーナメントのみ: 5 名・シード・不戦勝・3 位決定戦 �
   await page.getByLabel('閲覧画面に公開する').check();
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await expect(page.locator('.event-head .badge')).toHaveText('公開中');
+  // 全試合が確定したので、進行状況に「終了」の案内が出る
+  await page.getByRole('button', { name: '進行状況' }).click();
+  await page.getByRole('button', { name: '大会を「終了」にする' }).click();
+  await expect(page.getByText('大会を「終了」にしました。').last()).toBeVisible();
+  await expect(page.getByRole('button', { name: '大会を「終了」にする' })).toHaveCount(0);
 
   const eventId = page.url().match(/#e=(EVT-[A-Z0-9]+)/)[1];
   const viewer = await context.newPage();

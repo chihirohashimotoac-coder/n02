@@ -19,7 +19,8 @@ const clients = Number(arg('clients', 50));
 const minutes = Number(arg('minutes', 10));
 const reportSec = Number(arg('report', 30));
 const rampSec = Number(arg('ramp', 60));
-const interval = arg('interval', '');
+// 閲覧ページは更新が少ないと取得間隔を延ばす（v0.5.1〜）。負荷を一定にするため、既定で 60 秒に固定する（URL の interval で固定）
+const interval = arg('interval', '60');
 const out = arg('out', `loadtest-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
 const executablePath = process.env.CHROMIUM_PATH || (existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 
