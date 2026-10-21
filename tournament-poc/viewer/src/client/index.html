@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <base target="_top" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>n02 Tournament</title>
+    <style>
+/*@@STYLES@@*/
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__inner">
+        <div class="topbar__row">
+          <p class="brand">n02 Tournament</p>
+          <!--@@PORTAL_LINK@@-->
+        </div>
+        <h1 id="event-title" class="event-title is-loading">読み込み中…</h1>
+        <p class="event-meta">
+          <span id="event-date"></span>
+          <span id="event-status" class="event-status"></span>
+          <span id="rule-badge" class="rule-badge" hidden></span>
+        </p>
+      </div>
+    </header>
+
+    <div class="statusbar" role="region" aria-label="更新状況">
+      <dl class="statusbar__times">
+        <div><dt>データ更新</dt><dd id="updated-at">—</dd></div>
+        <div><dt>取得</dt><dd id="fetched-at">—</dd></div>
+        <div><dt>次回自動更新</dt><dd id="next-refresh">—</dd></div>
+      </dl>
+      <div class="statusbar__actions">
+        <button id="qr-button" class="refresh refresh--ghost" type="button" hidden>QR コード</button>
+        <button id="refresh-button" class="refresh" type="button">今すぐ更新</button>
+      </div>
+    </div>
+
+    <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
+
+    <main class="content">
+      <section id="overview" class="overview" aria-label="大会の進み具合" hidden></section>
+      <div id="player-search" class="player-search" hidden></div>
+      <nav id="group-filter" class="filter" aria-label="グループの絞り込み" hidden></nav>
+      <p id="message" class="message" role="status" hidden></p>
+      <div id="groups" class="stages">
+        <div class="skeleton" role="status">
+          <span class="visually-hidden">大会のデータを読み込んでいます</span>
+          <span class="ux-skeleton sk-stage" aria-hidden="true"></span>
+          <div class="sk-groups" aria-hidden="true">
+            <span class="ux-skeleton sk-card"></span>
+            <span class="ux-skeleton sk-card"></span>
+          </div>
+        </div>
+      </div>
+      <p class="footnote">
+        勝-敗・セット/Leg 得-失・順位は「確定済み」の試合だけで数えています。順位の決め方は各ステージの下に表示しています。
+      </p>
+    </main>
+
+    <aside id="qr-panel" class="qr-panel" aria-label="スマートフォンで見る" hidden>
+      <div id="qr-code" class="qr-panel__code"></div>
+      <p class="qr-panel__title">スマホで見る</p>
+      <p class="qr-panel__hint">カメラで読み取ると、この大会の速報が開きます</p>
+    </aside>
+
+    <div id="qr-overlay" class="qr-overlay" role="dialog" aria-modal="true" aria-label="この大会の QR コード" hidden>
+      <div class="qr-overlay__box">
+        <div id="qr-overlay-code" class="qr-overlay__code"></div>
+        <p class="qr-overlay__hint">カメラで読み取ると、この大会の速報が開きます</p>
+        <p id="qr-overlay-url" class="qr-overlay__url"></p>
+        <button id="qr-close" class="refresh" type="button">閉じる</button>
+      </div>
+    </div>
+
+    <script>
+/*@@SCRIPT@@*/
+    </script>
+  </body>
+</html>

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import TopBar from './TopBar';
 import ThemeSelect from './ThemeSelect';
 import StatsPanel from './StatsPanel';
+import TournamentPortalLink from './tournament/TournamentPortalLink';
 import { computeDefaultMaxRounds, type X01MatchState, type X01Settings } from '../domain/x01Engine';
 import {
   defaultTargetLegs,
@@ -108,7 +109,7 @@ export default function SetupScreen({
 
   return (
     <div className="app-shell">
-      <TopBar />
+      <TopBar actions={<TournamentPortalLink />} />
       <section className="setup-layout">
         <div className="panel setup-panel">
           <div className="section-heading">

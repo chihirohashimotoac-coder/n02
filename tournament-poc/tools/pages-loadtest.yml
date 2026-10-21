@@ -1,0 +1,95 @@
+# 閲覧ページの負荷テスト（R-14）を GitHub Actions で手動実行する。
+# 公開先リポジトリ（n02-tournament-viewer）の .github/workflows/loadtest.yml にコピーして使う。
+# loadtest.mjs は同じリポジトリの tools/loadtest.mjs（tournament-poc/tools/loadtest.mjs のコピー）。
+# 手順と判定基準は tournament-poc/docs/load-test.md。Google の本番環境に負荷をかけるので、大会当日には実行しない。
+name: 負荷テスト（閲覧ページ）
+
+on:
+  workflow_dispatch:
+    inputs:
+      event:
+        description: '大会 ID（EVT-… 閲覧ページの URL の ?event= の後ろ）。空なら閲覧ページの既定の大会'
+        required: false
+        default: ''
+      clients:
+        description: '同時に開く画面の数（1〜60）'
+        required: true
+        default: '50'
+      minutes:
+        description: '続ける時間（分。1〜30）'
+        required: true
+        default: '15'
+      ramp:
+        description: '全画面を開き終えるまでの秒数（5〜300。5 にすると一斉アクセス）'
+        required: true
+        default: '60'
+      interval:
+        description: '取得間隔（秒。15〜600）。空なら通常どおり 60 秒'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loadtest
+  cancel-in-progress: false
+
+jobs:
+  loadtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 入力の確認
+        env:
+          EVENT: ${{ inputs.event }}
+          CLIENTS: ${{ inputs.clients }}
+          MINUTES: ${{ inputs.minutes }}
+          RAMP: ${{ inputs.ramp }}
+          INTERVAL: ${{ inputs.interval }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          set -eu
+          fail() { echo "::error::$1"; exit 1; }
+          [[ -z "$EVENT" || "$EVENT" =~ ^EVT-[A-Z0-9]+$ ]] || fail "大会 ID は EVT- で始まる英大文字・数字で入力してください"
+          [[ "$CLIENTS" =~ ^[0-9]+$ ]] && (( CLIENTS >= 1 && CLIENTS <= 60 )) || fail "画面の数は 1〜60 で入力してください"
+          [[ "$MINUTES" =~ ^[0-9]+$ ]] && (( MINUTES >= 1 && MINUTES <= 30 )) || fail "時間は 1〜30 分で入力してください"
+          [[ "$RAMP" =~ ^[0-9]+$ ]] && (( RAMP >= 5 && RAMP <= 300 )) || fail "開き終えるまでの秒数は 5〜300 で入力してください"
+          [[ -z "$INTERVAL" ]] || { [[ "$INTERVAL" =~ ^[0-9]+$ ]] && (( INTERVAL >= 15 && INTERVAL <= 600 )); } || fail "取得間隔は 15〜600 秒で入力してください"
+          url="https://${OWNER,,}.github.io/${REPO}/"
+          [[ -z "$EVENT" ]] || url="${url}?event=${EVENT}"
+          echo "TARGET_URL=$url" >> "$GITHUB_ENV"
+          echo "対象: $url"
+
+      - name: ブラウザの準備
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.62.1
+          npx playwright install --with-deps chromium
+
+      - name: 負荷テスト
+        env:
+          CLIENTS: ${{ inputs.clients }}
+          MINUTES: ${{ inputs.minutes }}
+          RAMP: ${{ inputs.ramp }}
+          INTERVAL: ${{ inputs.interval }}
+        run: |
+          set -eu
+          args=(--url "$TARGET_URL" --clients "$CLIENTS" --minutes "$MINUTES" --ramp "$RAMP" --out loadtest-result.json)
+          [[ -z "$INTERVAL" ]] || args+=(--interval "$INTERVAL")
+          node tools/loadtest.mjs "${args[@]}"
+
+      - name: 結果の保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-result
+          path: loadtest-result.json
+          if-no-files-found: ignore
+          retention-days: 30

@@ -10,6 +10,7 @@ import './styles/practice.css';
 import './styles/tower.css';
 import './styles/award.css';
 import './styles/brand.css';
+import './styles/tournament-link.css';
 
 void purgeLegacyCache();
 

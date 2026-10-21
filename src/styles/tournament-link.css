@@ -1,0 +1,99 @@
+/*
+ * The way into the tournament & league portal from the top screen: the action slot at the right of
+ * the tungsten top bar. It is a link, not a mode tile, so it sits with the bar's own controls and the
+ * mode grid stays exactly as it was. On hover/focus the bracket mark draws itself in, the only motion.
+ */
+.tournament-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 6px 14px 6px 10px;
+  border: 1px solid var(--tungsten-line, #ffffff1c);
+  border-radius: 12px;
+  background: var(--tungsten-2, #252c30);
+  color: var(--on-tungsten, #f1f4f2);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background 0.18s,
+    border-color 0.18s,
+    transform 0.18s var(--ease-out, ease-out);
+}
+.tournament-link:hover {
+  background: var(--tungsten-3, #313a3f);
+  border-color: var(--on-tungsten-muted, #aab4af);
+}
+.tournament-link:active {
+  transform: scale(0.97);
+}
+.tournament-link:focus-visible {
+  outline: 3px solid var(--on-tungsten, #f1f4f2);
+  outline-offset: 3px;
+}
+.tournament-link__icon {
+  flex: none;
+  color: var(--ring-green-bright, #7fe0b3);
+}
+.tournament-link__icon path {
+  stroke-dasharray: 120;
+  stroke-dashoffset: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tournament-link:hover .tournament-link__icon path,
+  .tournament-link:focus-visible .tournament-link__icon path {
+    animation: tournament-link-draw 0.6s var(--ease-out, ease-out);
+  }
+}
+@keyframes tournament-link-draw {
+  from {
+    stroke-dashoffset: 120;
+  }
+}
+.tournament-link__text {
+  display: grid;
+  min-width: 0;
+  line-height: 1.25;
+  text-align: left;
+}
+.tournament-link__text strong {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.tournament-link__text small {
+  color: var(--on-tungsten-muted, #aab4af);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tournament-link__go {
+  display: none;
+}
+@media (width<=720px) {
+  .tournament-link {
+    gap: 4px;
+    min-height: 44px;
+    padding: 4px 7px 4px 5px;
+    border-radius: 10px;
+  }
+  .tournament-link__icon {
+    width: 18px;
+    height: 18px;
+  }
+  .tournament-link__text strong {
+    width: min-content;
+    font-size: 10px;
+    white-space: normal;
+    word-break: keep-all;
+  }
+  .tournament-link__text small {
+    display: none;
+  }
+}
+@media (width<=360px) {
+  .tournament-link__icon {
+    display: none;
+  }
+}

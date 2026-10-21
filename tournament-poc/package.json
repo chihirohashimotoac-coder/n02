@@ -1,0 +1,16 @@
+{
+  "name": "n02-tournament-poc",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "n02 Tournament / League Manager Phase 1 PoC（Google Apps Script + スプレッドシート）",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "check": "node tools/build.mjs --check",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "preview": "node tools/preview-server.mjs",
+    "e2e": "node ../node_modules/@playwright/test/cli.js test -c playwright.config.mjs",
+    "verify": "npm run check && npm test && npm run e2e",
+    "preview-site": "node tools/preview-site/build-preview-site.mjs"
+  }
+}
