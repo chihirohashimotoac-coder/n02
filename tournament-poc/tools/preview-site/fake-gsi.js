@@ -90,8 +90,9 @@
           b.className = 'fake-gsi';
           b.textContent = 'Google でログイン';
           css(b, {
-            'min-height': opts && opts.size === 'medium' ? '36px' : '40px',
-            padding: '6px 18px',
+            // 本物と同じ高さ（medium 32px・large 40px）
+            height: opts && opts.size === 'medium' ? '32px' : '40px',
+            padding: '0 18px',
             'border-radius': '999px',
             border: '1px solid ' + (dark ? '#8e918f' : '#747775'),
             background: dark ? '#131314' : '#ffffff',
