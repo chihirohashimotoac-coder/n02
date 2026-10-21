@@ -57,8 +57,8 @@
 
 | 項目 | 状態 |
 | --- | --- |
-| ソース（n02 ブランチ） | v0.4.1 をコミット・push 済み（`c7d1fd6`） |
-| GitHub Pages | v0.4.1 を push 済み（`421d00e`。`qrcode.js` 2 つを含む） |
+| ソース（n02 ブランチ） | v0.4.2 をコミット・push 済み（`aabd439`。v0.4.1 は `c7d1fd6`） |
+| GitHub Pages | v0.4.2 を push 済み（`e1ee333`。`viewer.css`・`viewer.js` のみ差し替え、pages build and deployment は成功）。Pages 側の `README.md` には `admin/` の行が手で足されており `dist/pages/README.md` と 1 行違う（上書きしていない） |
 | 運営用 Apps Script のコード | ユーザーが v0.4.1 を貼り付け済み。Drive コネクタで読み出し、**ビルドと完全一致**を確認 |
 | 運営用のデプロイ（新バージョン） | **動作確認済み**（2026-10-21）。ユーザーが「まとめて確定」で「2 試合の結果を確定しました。」と表示されたと報告 → v0.4.1 の `saveMatchResults` が実環境で動いている。閲覧ページにも反映された（R-17 合格） |
 | 閲覧者用 Apps Script | 変更不要（v0.2.0 のまま）。v0.4.2 で `dist/viewer/Index.html` の CSS も変わるが、Apps Script 版の画面は QR を出さないので貼り替え不要 |
