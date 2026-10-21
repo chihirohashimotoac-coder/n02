@@ -59,8 +59,8 @@
 | 項目 | 状態 |
 | --- | --- |
 | ソース（n02 ブランチ） | v0.5.0 をコミット・push 済み（v0.4.3 は `5a8dbc8`、v0.4.1 は `c7d1fd6`） |
-| v0.5.0 の反映 | **未反映**。順番: ①ユーザーが Google Cloud で OAuth クライアント ID を作る → ②運営用 Apps Script に v0.5.0 を貼り付け・`GOOGLE_CLIENT_ID` を設定・承認し直し・新バージョンでデプロイ・管理者画面で「初期化する」→ ③こちらで Pages の `admin/` 一式と `admin/config.js`（`googleClientId` を追加）を push。②の前に③を出すと運営画面のログインが「不明な操作です。」になる |
-| GitHub Pages | v0.4.3 を push 済み（`fd90803`）。v0.4.2 は `e1ee333`（`viewer.css`・`viewer.js` のみ差し替え、pages build and deployment は成功）。Pages 側の `README.md` には `admin/` の行が手で足されており `dist/pages/README.md` と 1 行違う（上書きしていない） |
+| v0.5.0 の反映 | 2026-10-21: ユーザーが OAuth クライアント ID を作成（`99512252323-um86…apps.googleusercontent.com`。秘密ではない）。運営用 Apps Script の `appsscript.json`・`コード.gs` は Drive コネクタで読み出し、v0.5.0 のビルドと**完全一致**を確認。`GOOGLE_CLIENT_ID` の設定・承認し直し・新バージョンのデプロイ・初期化は**未確認**（ユーザーの報告待ち）。Pages の `admin/` 一式と `admin/config.js`（`googleClientId` 追加）を push 済み（`c538cba`、pages build and deployment 成功）。実際の Google ログインは**未検証** |
+| GitHub Pages | v0.5.0 の運営画面を push 済み（`c538cba`）。閲覧ページは v0.4.3（`fd90803`）。v0.4.2 は `e1ee333`（`viewer.css`・`viewer.js` のみ差し替え、pages build and deployment は成功）。Pages 側の `README.md` には `admin/` の行が手で足されており `dist/pages/README.md` と 1 行違う（上書きしていない） |
 | 運営用 Apps Script のコード | ユーザーが v0.4.1 を貼り付け済み。Drive コネクタで読み出し、**ビルドと完全一致**を確認 |
 | 運営用のデプロイ（新バージョン） | **動作確認済み**（2026-10-21）。ユーザーが「まとめて確定」で「2 試合の結果を確定しました。」と表示されたと報告 → v0.4.1 の `saveMatchResults` が実環境で動いている。閲覧ページにも反映された（R-17 合格） |
 | 閲覧者用 Apps Script | 変更不要（v0.2.0 のまま）。v0.4.2 で `dist/viewer/Index.html` の CSS も変わるが、Apps Script 版の画面は QR を出さないので貼り替え不要 |
