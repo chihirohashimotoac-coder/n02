@@ -222,16 +222,18 @@
     };
   }
 
-  /* ---------- 運営用 URL（#e=…&k=…）と通信 ---------- */
+  /* ---------- 画面の URL（#e=…）と通信 ---------- */
 
   var EVENT_ID_PATTERN = /^EVT-[A-Z0-9]{4,32}$/;
-  var EVENT_KEY_PATTERN = /^[a-f0-9]{48,64}$/;
   var ENDPOINT_PATTERN = /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/;
+  var GOOGLE_CLIENT_ID_PATTERN = /^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/;
 
   /**
-   * URL の # 以降を読む。# 以降はサーバー（GitHub Pages）にも送られず、リンク先への Referer にも含まれない。
-   *   #e=EVT-…&k=…  … 主催者（その大会の運営用 URL）
-   *   #admin        … 管理者
+   * URL の # 以降を読む。秘密の情報は入れない（大会の ID だけ）。
+   *   #e=EVT-…  … その大会の運営画面（作った本人の Google ログイン、または管理パスワード）
+   *   #admin    … 管理者
+   *   なし      … 主催者のホーム（Google でログインして、自分の大会の一覧・新しい大会の作成）
+   * v0.4 までの運営用 URL（#e=…&k=…）の鍵の部分は使わない。
    */
   function parseHash(hash) {
     var h = String(hash || '').replace(/^#/, '');
@@ -239,15 +241,33 @@
     var out = {};
     h.split('&').forEach(function (pair) {
       var i = pair.indexOf('=');
-      if (i > 0) out[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1));
+      if (i > 0) {
+        try {
+          out[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1));
+        } catch (e) {
+          out[pair.slice(0, i)] = '';
+        }
+      }
     });
-    if (EVENT_ID_PATTERN.test(out.e || '') && EVENT_KEY_PATTERN.test(out.k || '')) return { mode: 'organizer', eventId: out.e, key: out.k };
+    if (EVENT_ID_PATTERN.test(out.e || '')) return { mode: 'event', eventId: out.e, legacyKey: !!out.k };
     if (out.e || out.k) return { mode: 'invalid' };
-    return { mode: 'create' };
+    return { mode: 'home' };
   }
 
-  function organizerUrl(loc, eventId, key) {
-    return loc.origin + loc.pathname + '#e=' + encodeURIComponent(eventId) + '&k=' + encodeURIComponent(key);
+  /** 大会の運営画面の URL（スタッフに共有する。秘密の情報は含まない） */
+  function eventUrl(loc, eventId) {
+    return loc.origin + loc.pathname + '#e=' + encodeURIComponent(eventId);
+  }
+
+  /** ID トークン（JWT）の中身を読む（画面の表示用。正しさの確認はサーバーが行う） */
+  function decodeJwtPayload(token) {
+    try {
+      var part = String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (part.length % 4) part += '=';
+      return JSON.parse(decodeURIComponent(escape(atob(part))));
+    } catch (e) {
+      return null;
+    }
   }
 
   /** GitHub Pages から運営用 Web アプリ（doPost）へ JSON を送る。Cookie は送らない */
@@ -284,29 +304,71 @@
     var state = {
       route: parseHash(win.location.hash),
       adminKey: '',
+      google: null, // Google でログインしたセッション { session, email, expiresAt }
+      staff: {}, // 管理パスワードでログインしたセッション { eventId: { session, expiresAt } }
       boot: null,
       eventId: '',
       detail: null,
+      noAccess: false, // ログインしているが、この大会を運営する権限がない
       tab: 'progress',
       busy: false,
       matchFilter: 'all',
       statusFilter: 'open',
       editing: {},
-      issued: null, // 直前に発行した運営用 URL { eventId, url, name }
       stageId: '', // 試合結果・組み合わせタブで選んでいる段階
       entrantDraft: {}, // トーナメントの出場者・シード順の編集中の並び（段階ごと）
       drafts: {}, // 試合結果の未保存の入力 { matchId: { rev, p1, p2, l1, l2 } }。画面を描き直しても消さない
     };
     var batchUi = null; // 「まとめて確定」バーの更新関数（試合結果タブの表示中のみ）
-    try {
-      state.adminKey = win.sessionStorage.getItem('tpoc-admin-key') || '';
-    } catch (e) {
-      state.adminKey = '';
+
+    /* ログインの記憶: 管理者の鍵はタブを閉じるまで（sessionStorage）。主催者・スタッフのセッションは
+       期限（6 時間）まで、この端末のブラウザに記憶する（localStorage。大会当日に店舗の端末で開き直せるように） */
+    function storageGet(kind, key) {
+      try {
+        return win[kind].getItem(key);
+      } catch (e) {
+        return null;
+      }
+    }
+    function storageSet(kind, key, value) {
+      try {
+        if (value === null) win[kind].removeItem(key);
+        else win[kind].setItem(key, value);
+      } catch (e) {
+        /* 保存できない環境では、このページを開いている間だけ有効 */
+      }
+    }
+    function readLogin(key) {
+      var v = null;
+      try {
+        v = JSON.parse(storageGet('localStorage', key) || 'null');
+      } catch (e) {
+        v = null;
+      }
+      return v && typeof v.session === 'string' && Date.parse(v.expiresAt) > Date.now() ? v : null;
+    }
+    state.adminKey = storageGet('sessionStorage', 'tpoc-admin-key') || '';
+    state.google = readLogin('tpoc-google');
+
+    function staffLogin(eventId) {
+      if (!state.staff[eventId]) state.staff[eventId] = readLogin('tpoc-staff:' + eventId);
+      return state.staff[eventId];
+    }
+    function setGoogle(login) {
+      state.google = login;
+      storageSet('localStorage', 'tpoc-google', login ? JSON.stringify(login) : null);
+    }
+    function setStaff(eventId, login) {
+      state.staff[eventId] = login;
+      storageSet('localStorage', 'tpoc-staff:' + eventId, login ? JSON.stringify(login) : null);
     }
 
+    /** 送る認証: 管理者の鍵、または（この大会の管理パスワードの）セッション、または Google のセッション */
     function currentAuth() {
-      if (state.route.mode === 'organizer') return { eventId: state.route.eventId, key: state.route.key };
-      if (state.route.mode === 'admin' && state.adminKey) return { adminKey: state.adminKey };
+      if (state.route.mode === 'admin') return state.adminKey ? { adminKey: state.adminKey } : undefined;
+      var staff = state.route.mode === 'event' ? staffLogin(state.route.eventId) : null;
+      if (staff) return { session: staff.session };
+      if (state.google) return { session: state.google.session };
       return undefined;
     }
     var api = createApi(createFetchRunner(win, config.endpoint, currentAuth));
@@ -327,23 +389,30 @@
       });
     }
 
+    var AUTH_ERRORS = { AUTH_INVALID: true, AUTH_REQUIRED: true, AUTH_EXPIRED: true, AUTH_NOT_CONFIGURED: true };
+
+    /** ログインが切れた・無効になったとき: 使っていた記憶を消して、ログイン画面に戻す（入力途中の結果は state に残る） */
+    function dropLogin() {
+      if (state.route.mode === 'admin') {
+        state.adminKey = '';
+        storageSet('sessionStorage', 'tpoc-admin-key', null);
+      } else if (state.route.mode === 'event' && staffLogin(state.route.eventId)) {
+        setStaff(state.route.eventId, null);
+      } else {
+        setGoogle(null);
+      }
+    }
+
     function handleError(err) {
-      if (err && (err.code === 'AUTH_INVALID' || err.code === 'AUTH_REQUIRED')) {
-        if (state.route.mode === 'admin') {
-          state.adminKey = '';
-          try {
-            win.sessionStorage.removeItem('tpoc-admin-key');
-          } catch (e) {
-            /* 保存できない環境では何もしない */
-          }
-        }
+      if (err && AUTH_ERRORS[err.code]) {
+        if (err.code !== 'AUTH_NOT_CONFIGURED') dropLogin();
         state.authError = err.message;
         state.boot = null;
         render();
         return;
       }
       toast('error', (err && err.message) || 'エラーが発生しました。');
-      if (err && (err.code === 'CONFLICT' || err.code === 'NOT_FOUND' || err.code === 'ALREADY_FINAL') && state.eventId) {
+      if (err && (err.code === 'CONFLICT' || err.code === 'NOT_FOUND' || err.code === 'ALREADY_FINAL') && state.eventId && state.detail) {
         loadDetail(state.eventId);
       }
     }
@@ -355,12 +424,13 @@
       return api
         .mutate(action, payload)
         .then(function (data) {
-          if (data && data.adminKey) rememberIssued(data);
+          // 大会を作ったら、その大会の運営画面へ（通信の再送で二重に作られた場合も同じ大会を開く）
+          if (data && data.eventId && (action === 'createEvent' || action === 'createSampleEvent')) {
+            if (okMessage && !data.duplicate) toast('ok', okMessage);
+            goTo('#e=' + encodeURIComponent(data.eventId));
+            return data;
+          }
           if (data && data.duplicate) {
-            if (data.adminKey) {
-              render();
-              return data;
-            }
             if (state.eventId) return loadDetail(state.eventId);
             return loadBoot();
           }
@@ -380,18 +450,126 @@
         });
     }
 
-    /** 大会作成・再発行で受け取った鍵から運営用 URL を作る。主催者本人の画面なら、以後の通信も新しい鍵に切り替える */
-    function rememberIssued(data) {
-      var url = organizerUrl(win.location, data.eventId, data.adminKey);
-      state.issued = { eventId: data.eventId, url: url, name: data.detail ? data.detail.event.name : '' };
-      if (state.route.mode === 'organizer' && state.route.eventId === data.eventId) {
-        state.route = { mode: 'organizer', eventId: data.eventId, key: data.adminKey };
-        win.history.replaceState(null, '', url);
+    /* ---------- ログイン ---------- */
+
+    var gis = { initialized: false, waiting: [] };
+
+    /** Google Identity Services（accounts.google.com/gsi/client）が読み込まれるのを待つ */
+    function whenGoogleReady(done, fail) {
+      var started = Date.now();
+      (function poll() {
+        var id = win.google && win.google.accounts && win.google.accounts.id;
+        if (id) return done(id);
+        if (Date.now() - started > 15000) return fail();
+        setTimeout(poll, 100);
+      })();
+    }
+
+    /** Google のログインボタンを置く。押して選んだアカウントの ID トークンをサーバーで確かめ、セッションを受け取る */
+    function googleButton() {
+      var box = el('div', { className: 'gsi-button' });
+      var note = el('p', { className: 'muted small', text: 'Google のログインボタンを読み込んでいます…' });
+      var wrap = el('div', { className: 'gsi' }, [box, note]);
+      if (!GOOGLE_CLIENT_ID_PATTERN.test(String(config.googleClientId || ''))) {
+        note.className = 'error';
+        note.textContent = '設定エラー: admin/config.js の googleClientId に OAuth クライアント ID（…apps.googleusercontent.com）を設定してください。';
+        return wrap;
       }
+      whenGoogleReady(
+        function (id) {
+          if (!gis.initialized) {
+            id.initialize({ client_id: config.googleClientId, callback: onGoogleCredential, auto_select: false, cancel_on_tap_outside: true });
+            gis.initialized = true;
+          }
+          id.renderButton(box, { type: 'standard', theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill', locale: 'ja' });
+          note.textContent = 'ログインすると、このブラウザに 6 時間記憶します。';
+        },
+        function () {
+          note.className = 'error';
+          note.textContent = 'Google のログインボタンを読み込めませんでした。通信状態を確認し、ページを再読み込みしてください。広告ブロックやアプリ内のブラウザ（LINE など）では使えないことがあります。その場合は Chrome や Safari で開いてください。';
+        }
+      );
+      return wrap;
+    }
+
+    function onGoogleCredential(resp) {
+      var token = resp && resp.credential;
+      if (!token) return;
+      var claims = decodeJwtPayload(token) || {};
+      setBusy(true);
+      api
+        .query('login', { idToken: token })
+        .then(function (data) {
+          setGoogle({ session: data.session, email: data.email || claims.email || '', expiresAt: data.expiresAt });
+          state.authError = '';
+          state.noAccess = false;
+          toast('ok', (data.email || 'Google') + ' でログインしました。');
+          return loadBoot();
+        })
+        .catch(function (err) {
+          state.authError = (err && err.message) || 'ログインできませんでした。';
+          render();
+        })
+        .then(function () {
+          setBusy(false);
+        });
+    }
+
+    function staffPasswordForm(eventId) {
+      var input = el('input', { type: 'password', id: 'staff-password', className: 'input', autocomplete: 'current-password', maxlength: 64 });
+      return el('form', {
+        className: 'row',
+        onSubmit: function (e) {
+          e.preventDefault();
+          if (state.busy) return;
+          setBusy(true);
+          api
+            .query('staffLogin', { eventId: eventId, password: input.value })
+            .then(function (data) {
+              setStaff(eventId, { session: data.session, expiresAt: data.expiresAt });
+              state.authError = '';
+              state.noAccess = false;
+              return loadBoot();
+            })
+            .catch(function (err) {
+              state.authError = (err && err.message) || 'ログインできませんでした。';
+              render();
+            })
+            .then(function () {
+              setBusy(false);
+            });
+        },
+      }, [el('label', { className: 'visually-hidden', for: 'staff-password', text: '管理パスワード' }), input, el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '開く' })]);
+    }
+
+    function logout() {
+      var auth = currentAuth();
+      if (auth && auth.session) api.query('logout', { session: auth.session }).catch(function () {});
+      if (state.route.mode === 'event' && staffLogin(state.route.eventId)) setStaff(state.route.eventId, null);
+      else setGoogle(null);
+      try {
+        if (win.google && win.google.accounts && win.google.accounts.id) win.google.accounts.id.disableAutoSelect();
+      } catch (e) {
+        /* Google のライブラリがなくてもログアウトできる */
+      }
+      state.boot = null;
+      state.detail = null;
+      state.eventId = '';
+      state.noAccess = false;
+      toast('ok', 'ログアウトしました。');
+      render();
+      loadBoot();
+    }
+
+    /* ---------- 読み込み ---------- */
+
+    function loggedIn() {
+      return !!currentAuth();
     }
 
     function loadBoot() {
-      if (state.route.mode === 'admin' && !state.adminKey) {
+      if (!loggedIn() && state.route.mode !== 'home') {
+        // 管理者の鍵・ログインがまだない: 入力・ログインの画面を出す（大会の存在はサーバーに問い合わせない）
         render();
         return Promise.resolve();
       }
@@ -400,17 +578,36 @@
         .then(function (data) {
           state.boot = data;
           state.authError = '';
-          if (state.route.mode === 'organizer') {
-            state.eventId = state.route.eventId;
-            return loadDetail(state.route.eventId);
-          }
+          if (state.route.mode === 'event') return loadEventFirst(state.route.eventId);
           render();
         })
         .catch(function (err) {
-          if (err && (err.code === 'AUTH_INVALID' || err.code === 'AUTH_REQUIRED' || err.code === 'AUTH_NOT_CONFIGURED')) return handleError(err);
+          if (err && AUTH_ERRORS[err.code]) return handleError(err);
           root.textContent = '';
           root.appendChild(el('p', { className: 'panel error', text: (err && err.message) || '読み込みに失敗しました。' }));
           root.appendChild(el('button', { className: 'btn', type: 'button', text: '再読み込み', onClick: loadBoot }));
+        });
+    }
+
+    /** 大会の運営画面を開く（ログインしているが権限がない場合は、管理パスワードの入力を案内する） */
+    function loadEventFirst(eventId) {
+      state.eventId = eventId;
+      return api
+        .query('eventDetail', { eventId: eventId })
+        .then(function (detail) {
+          state.detail = detail;
+          state.noAccess = false;
+          state.editing = {};
+          render();
+        })
+        .catch(function (err) {
+          if (err && err.code === 'NOT_FOUND') {
+            state.noAccess = true;
+            state.detail = null;
+            render();
+            return;
+          }
+          handleError(err);
         });
     }
 
@@ -426,7 +623,12 @@
         .catch(handleError);
     }
 
+    /** 管理者はその場で開く（URL は #admin のまま）。主催者はその大会の運営画面の URL へ */
     function openEvent(eventId) {
+      if (state.route.mode !== 'admin') {
+        goTo('#e=' + encodeURIComponent(eventId));
+        return;
+      }
       state.tab = 'progress';
       state.detail = null;
       state.eventId = eventId;
@@ -435,6 +637,10 @@
     }
 
     function goHome() {
+      if (state.route.mode !== 'admin') {
+        goTo('');
+        return;
+      }
       state.eventId = '';
       state.detail = null;
       render();
@@ -442,16 +648,35 @@
     }
 
     function goTo(hash) {
-      win.location.hash = hash;
+      if (win.location.hash === hash || (!hash && !win.location.hash)) {
+        state.route = parseHash(hash);
+        resetView();
+        render();
+        loadBoot();
+        return;
+      }
+      if (hash) win.location.hash = hash;
+      else win.history.pushState(null, '', win.location.pathname + win.location.search);
+      if (!hash) {
+        state.route = parseHash('');
+        resetView();
+        render();
+        loadBoot();
+      }
+    }
+
+    function resetView() {
+      state.boot = null;
+      state.detail = null;
+      state.eventId = '';
+      state.noAccess = false;
+      state.authError = '';
+      state.tab = 'progress';
     }
 
     win.addEventListener('hashchange', function () {
       state.route = parseHash(win.location.hash);
-      state.boot = null;
-      state.detail = null;
-      state.eventId = '';
-      state.issued = null;
-      state.authError = '';
+      resetView();
       render();
       loadBoot();
     });
@@ -471,31 +696,26 @@
     function renderInner() {
       batchUi = null;
       root.textContent = '';
-      var who = doc.getElementById('actor');
-      if (who) who.textContent = { admin: '管理者', organizer: '主催者', create: '', invalid: '' }[state.route.mode] || '';
-      if (state.issued) {
-        root.appendChild(renderIssued());
-        setBusy(state.busy);
+      renderWho();
+      var mode = state.route.mode;
+      if (mode === 'invalid') {
+        root.appendChild(renderMessage('URL が正しくありません', 'URL が途中で切れていないか確認してください。'));
         return;
       }
-      if (state.route.mode === 'invalid') {
-        root.appendChild(renderMessage('運営用 URL が正しくありません', 'URL が途中で切れていないか確認してください。最後までコピーした URL を開き直してください。'));
+      if (mode === 'admin' && !state.adminKey) {
+        root.appendChild(renderAdminLogin(state.authError || ''));
         return;
       }
-      if (state.authError) {
-        if (state.route.mode === 'admin') {
-          root.appendChild(renderAdminLogin(state.authError));
-          return;
-        }
-        root.appendChild(renderMessage('この運営用 URL は使えません', state.authError + ' 紛失・再発行の場合は管理者に連絡してください。'));
+      if (mode === 'event' && !loggedIn()) {
+        root.appendChild(renderEventLogin(state.route.eventId, state.authError || ''));
         return;
       }
-      if (state.route.mode === 'admin' && !state.adminKey) {
-        root.appendChild(renderAdminLogin(''));
+      if (state.authError && mode === 'admin') {
+        root.appendChild(renderAdminLogin(state.authError));
         return;
       }
       if (!state.boot) {
-        root.appendChild(el('p', { className: 'panel', text: '読み込み中…' }));
+        root.appendChild(state.authError ? renderHomeLogin(state.authError) : el('p', { className: 'panel', text: '読み込み中…' }));
         return;
       }
       var s = state.boot.storage;
@@ -503,18 +723,34 @@
         root.appendChild(state.boot.role.isPlatformAdmin ? renderSetup(s) : renderMessage('準備中です', s.message || '管理者の設定が終わるまでお待ちください。'));
         return;
       }
-      if (state.eventId) root.appendChild(renderEvent());
-      else if (state.route.mode === 'admin') root.appendChild(renderAdminHome());
-      else if (state.route.mode === 'organizer') root.appendChild(el('p', { className: 'panel', text: '読み込み中…' }));
-      else root.appendChild(renderCreate());
+      if (mode === 'event' && state.noAccess) root.appendChild(renderNoAccess(state.route.eventId));
+      else if (state.eventId) root.appendChild(renderEvent());
+      else if (mode === 'admin') root.appendChild(renderAdminHome());
+      else if (state.boot.role.kind === 'google') root.appendChild(renderHome());
+      else root.appendChild(renderHomeLogin(''));
       setBusy(state.busy);
+    }
+
+    /** 右上: 誰としてログインしているか・ログアウト */
+    function renderWho() {
+      var who = doc.getElementById('actor');
+      if (!who) return;
+      who.textContent = '';
+      var mode = state.route.mode;
+      var label = '';
+      if (mode === 'admin') label = state.adminKey ? '管理者' : '';
+      else if (mode === 'event' && staffLogin(state.route.eventId)) label = 'スタッフ（管理パスワード）';
+      else if (state.google) label = state.google.email;
+      if (!label) return;
+      who.appendChild(el('span', { className: 'topbar__name', text: label }));
+      if (mode !== 'admin') who.appendChild(el('button', { className: 'btn btn--ghost btn--small topbar__logout', type: 'button', text: 'ログアウト', onClick: logout }));
     }
 
     function renderMessage(title, text) {
       return el('section', { className: 'panel' }, [
         el('h2', { text: title }),
         el('p', { text: text }),
-        el('p', null, [el('a', { href: '#', text: '新しい大会を作る' })]),
+        el('p', null, [el('a', { href: '#', text: '主催者のページへ' })]),
       ]);
     }
 
@@ -529,11 +765,7 @@
           onSubmit: function (e) {
             e.preventDefault();
             state.adminKey = input.value.trim();
-            try {
-              win.sessionStorage.setItem('tpoc-admin-key', state.adminKey);
-            } catch (err) {
-              /* 保存できない環境では、このページを開いている間だけ有効 */
-            }
+            storageSet('sessionStorage', 'tpoc-admin-key', state.adminKey);
             state.authError = '';
             render();
             loadBoot();
@@ -542,56 +774,56 @@
       ]);
     }
 
-    /** 運営用 URL の表示（大会作成・再発行の直後に 1 回だけ） */
-    function renderIssued() {
-      var issued = state.issued;
-      var box = el('code', { className: 'issued__url', id: 'issued-url', text: issued.url });
-      var saved = el('input', { type: 'checkbox', id: 'issued-saved' });
-      var go = el('button', { className: 'btn btn--primary', type: 'button', text: 'この大会の運営画面を開く', disabled: true });
-      saved.addEventListener('change', function () {
-        go.disabled = !saved.checked;
-      });
-      go.addEventListener('click', function () {
-        state.issued = null;
-        if (win.location.href === issued.url) {
-          render();
-        } else {
-          win.location.href = issued.url;
-        }
-      });
-      var copy = el('button', { className: 'btn', type: 'button', text: 'URL をコピー' });
-      copy.addEventListener('click', function () {
-        var done = function () {
-          copy.textContent = 'コピーしました';
-        };
-        try {
-          win.navigator.clipboard.writeText(issued.url).then(done, function () {
-            selectText(box);
-          });
-        } catch (e) {
-          selectText(box);
-        }
-      });
-      var back = state.route.mode === 'admin'
-        ? el('button', { className: 'btn btn--ghost', type: 'button', text: '大会一覧に戻る', onClick: function () { state.issued = null; render(); } })
-        : null;
-      return el('section', { className: 'panel issued' }, [
-        el('h2', { text: '運営用 URL' + (issued.name ? '（' + issued.name + '）' : '') }),
-        el('p', { className: 'issued__warn', text: 'この URL を知っている人は、誰でもこの大会を運営（結果の入力・変更）できます。他人に教えないでください。この画面を閉じると、同じ URL は二度と表示されません。' }),
-        box,
-        el('div', { className: 'btn-row' }, [copy]),
-        el('label', { className: 'check' }, [saved, ' URL をブックマーク、またはメモに保存しました']),
-        el('div', { className: 'btn-row' }, [go, back]),
-        el('p', { className: 'muted small', text: '紛失した場合は、管理者に再発行を依頼してください（再発行すると古い URL は使えなくなります）。' }),
+    /** ログイン前のホーム: 主催者は Google でログイン。スタッフには大会の URL を開くよう案内する */
+    function renderHomeLogin(error) {
+      return el('div', { className: 'stack' }, [
+        el('section', { className: 'panel' }, [
+          el('h2', { text: '大会を主催する' }),
+          el('p', { text: 'Google アカウントでログインすると、大会を作成し、自分が作った大会の運営画面を開けます。' }),
+          error ? el('p', { className: 'error', text: error }) : null,
+          googleButton(),
+        ]),
+        el('section', { className: 'panel' }, [
+          el('h2', { text: '店舗スタッフの方' }),
+          el('p', { className: 'muted', text: '主催者から教わった大会の運営画面の URL を開き、管理パスワードを入力してください。' }),
+        ]),
+      ]);
+    }
+
+    /** 大会の運営画面をログイン前に開いた: 主催者は Google、スタッフは管理パスワード */
+    function renderEventLogin(eventId, error) {
+      return el('div', { className: 'stack' }, [
+        el('section', { className: 'panel' }, [
+          el('h2', { text: 'この大会の運営画面を開く' }),
+          state.route.legacyKey ? el('p', { className: 'notice', text: 'v0.4 までの「運営用 URL」は使えなくなりました。主催者は Google でログイン、スタッフは管理パスワードで開いてください。' }) : null,
+          error ? el('p', { className: 'error', text: error }) : null,
+          el('h3', { text: '店舗スタッフの方（管理パスワード）' }),
+          staffPasswordForm(eventId),
+          el('h3', { text: '主催者の方（大会を作った Google アカウント）' }),
+          googleButton(),
+        ]),
+      ]);
+    }
+
+    /** ログインしているが、この大会を運営できない（他人の大会・存在しない大会） */
+    function renderNoAccess(eventId) {
+      return el('div', { className: 'stack' }, [
+        el('section', { className: 'panel' }, [
+          el('h2', { text: 'この大会を運営する権限がありません' }),
+          el('p', { text: (state.google ? state.google.email + ' が作った大会ではないか、' : '') + '大会が見つかりません。店舗スタッフの方は管理パスワードを入力してください。' }),
+          state.authError ? el('p', { className: 'error', text: state.authError }) : null,
+          staffPasswordForm(eventId),
+          el('p', null, [el('a', { href: '#', text: '自分の大会の一覧へ' })]),
+        ]),
       ]);
     }
 
     function selectText(node) {
       var r = doc.createRange();
       r.selectNodeContents(node);
-      var s = win.getSelection();
-      s.removeAllRanges();
-      s.addRange(r);
+      var sel = win.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
       toast('ok', '選択しました。Ctrl+C（Mac は ⌘C）でコピーしてください。');
     }
 
@@ -632,11 +864,9 @@
       return panel;
     }
 
-    /** 大会作成フォーム（誰でも。作成コードが必要な設定なら入力欄を出す） */
+    /** 大会作成フォーム（Google でログインした主催者と管理者） */
     function createForms() {
-      var boot = state.boot;
       var wrap = el('div', { className: 'stack' });
-      var needCode = boot.createCodeRequired && !boot.role.isPlatformAdmin;
       var name = el('input', { className: 'input', id: 'new-name', required: true, maxlength: 80 });
       var date = el('input', { className: 'input', id: 'new-date', maxlength: 40, placeholder: '例: 2026/11/03' });
       var organizer = el('input', { className: 'input', id: 'new-organizer', maxlength: 40, placeholder: '例: 〇〇ダーツ部（任意・非公開）' });
@@ -648,7 +878,6 @@
       var advanceCount = el('input', { className: 'input input--short', id: 'new-advance', type: 'number', min: 1, max: 16, value: '2', inputmode: 'numeric' });
       var thirdPlace = el('input', { type: 'checkbox', id: 'new-third' });
       var cycles = el('select', { className: 'input input--short', id: 'new-cycles' }, [el('option', { value: '1', text: '1 回' }), el('option', { value: '2', text: '2 回' })]);
-      var code = needCode ? el('input', { className: 'input', id: 'new-code', type: 'password', autocomplete: 'off', required: true }) : null;
       var groupField = field('ロビンのグループ数', groupCount);
       var advanceField = field('A トーナメントへ進む順位（各組の上位何位まで。残りは B へ）', advanceCount);
       var thirdField = el('label', { className: 'check' }, [thirdPlace, ' トーナメントに 3 位決定戦を入れる']);
@@ -679,7 +908,6 @@
                 advanceCount: Number(advanceCount.value),
                 thirdPlace: thirdPlace.checked,
                 cycles: Number(cycles.value),
-                createCode: code ? code.value : undefined,
               }, '大会を作成しました。');
             },
           }, [
@@ -692,26 +920,23 @@
             advanceField,
             thirdField,
             cyclesField,
-            code ? field('作成コード（管理者から教えてもらったもの）', code) : null,
-            el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '作成して運営用 URL を発行' }),
+            el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '大会を作成' }),
           ]),
         ])
       );
       var publishSample = el('input', { type: 'checkbox', id: 'sample-publish' });
-      var sampleCode = needCode ? el('input', { className: 'input', id: 'sample-code', type: 'password', autocomplete: 'off' }) : null;
       wrap.appendChild(
         el('section', { className: 'panel' }, [
           el('h2', { text: '検証用サンプル' }),
           el('p', { className: 'muted', text: '16 名（サンプル選手01〜16）・4 人 × 4 グループのロビン、Best of 5 Legs（暫定）。確定・進行中・未開始の試合を含みます。' }),
           el('label', { className: 'check' }, [publishSample, ' 作成後すぐ閲覧画面に公開する']),
-          sampleCode ? field('作成コード', sampleCode) : null,
           el('button', {
             className: 'btn',
             type: 'button',
             'data-mut': true,
             text: 'サンプル大会を作成',
             onClick: function () {
-              mutate('createSampleEvent', { publish: publishSample.checked, createCode: sampleCode ? sampleCode.value : undefined }, 'サンプル大会を作成しました。');
+              mutate('createSampleEvent', { publish: publishSample.checked }, 'サンプル大会を作成しました。');
             },
           }),
         ])
@@ -719,16 +944,39 @@
       return wrap;
     }
 
-    function renderCreate() {
-      var wrap = createForms();
-      wrap.insertBefore(
-        el('section', { className: 'panel' }, [
-          el('h2', { text: '大会を主催する' }),
-          el('p', { text: '大会を作成すると、その大会専用の「運営用 URL」が発行されます。運営（選手登録・組み合わせ・結果入力・公開）は、その URL から行います。ログインは不要です。' }),
-          el('p', { className: 'muted small', text: 'すでに大会を作成済みの場合は、発行された運営用 URL を開いてください。' }),
-        ]),
-        wrap.firstChild
-      );
+    /** event-card の一覧（主催者のホーム・管理者の一覧で共通） */
+    function eventCards(events, admin) {
+      return events.map(function (ev) {
+        return el('article', { className: 'event-card' }, [
+          el('div', { className: 'event-card__main' }, [
+            el('h3', { text: ev.name }),
+            el('p', { className: 'muted', text: [ev.dateLabel, EVENT_STATUS_LABEL[ev.status] || ev.status, admin && ev.organizerName ? '主催: ' + ev.organizerName : '', admin && ev.ownerEmail ? ev.ownerEmail : '', '選手 ' + ev.playerCount + ' 名', '確定 ' + ev.finalCount + ' / ' + ev.matchCount + ' 試合'].filter(Boolean).join('・') }),
+            el('p', null, [
+              el('span', { className: 'badge ' + (ev.isPublic ? 'badge--on' : ''), text: ev.isPublic ? '公開中' : '非公開' }),
+              ev.isFeatured ? el('span', { className: 'badge badge--on', text: '既定表示' }) : null,
+              ev.isSample ? el('span', { className: 'badge', text: 'サンプル' }) : null,
+              ev.staffPasswordSet ? el('span', { className: 'badge', text: '管理パスワード設定済み' }) : null,
+              admin && !ev.ownerEmail ? el('span', { className: 'badge', text: '主催者未設定' }) : null,
+            ]),
+          ]),
+          el('button', { className: 'btn', type: 'button', text: '開く', onClick: function () { openEvent(ev.id); } }),
+        ]);
+      });
+    }
+
+    /** Google でログインした主催者のホーム: 自分の大会の一覧と新しい大会の作成 */
+    function renderHome() {
+      var boot = state.boot;
+      var wrap = el('div', { className: 'stack' });
+      var list = el('section', { className: 'panel' }, [el('h2', { text: 'あなたの大会' })]);
+      if (!boot.events.length) list.appendChild(el('p', { className: 'muted', text: 'まだ大会がありません。下のフォームから作成してください。' }));
+      eventCards(boot.events, false).forEach(function (n) {
+        list.appendChild(n);
+      });
+      wrap.appendChild(list);
+      Array.prototype.slice.call(createForms().childNodes).forEach(function (n) {
+        wrap.appendChild(n);
+      });
       return wrap;
     }
 
@@ -737,22 +985,8 @@
       var wrap = el('div', { className: 'stack' });
       var list = el('section', { className: 'panel' }, [el('h2', { text: 'すべての大会（管理者）' })]);
       if (!boot.events.length) list.appendChild(el('p', { className: 'muted', text: 'まだ大会がありません。' }));
-      boot.events.forEach(function (ev) {
-        list.appendChild(
-          el('article', { className: 'event-card' }, [
-            el('div', { className: 'event-card__main' }, [
-              el('h3', { text: ev.name }),
-              el('p', { className: 'muted', text: [ev.dateLabel, EVENT_STATUS_LABEL[ev.status] || ev.status, ev.organizerName ? '主催: ' + ev.organizerName : '', '選手 ' + ev.playerCount + ' 名', '確定 ' + ev.finalCount + ' / ' + ev.matchCount + ' 試合'].filter(Boolean).join('・') }),
-              el('p', null, [
-                el('span', { className: 'badge ' + (ev.isPublic ? 'badge--on' : ''), text: ev.isPublic ? '公開中' : '非公開' }),
-                ev.isFeatured ? el('span', { className: 'badge badge--on', text: '既定表示' }) : null,
-                ev.isSample ? el('span', { className: 'badge', text: 'サンプル' }) : null,
-                ev.hasKey ? null : el('span', { className: 'badge', text: '運営用 URL 未発行' }),
-              ]),
-            ]),
-            el('button', { className: 'btn', type: 'button', text: '開く', onClick: function () { openEvent(ev.id); } }),
-          ])
-        );
+      eventCards(boot.events, true).forEach(function (n) {
+        list.appendChild(n);
       });
       wrap.appendChild(list);
       Array.prototype.slice.call(createForms().childNodes).forEach(function (n) {
@@ -785,7 +1019,7 @@
       var d = state.detail;
       wrap.appendChild(
         el('div', { className: 'event-head' }, [
-          state.route.mode === 'admin' ? el('button', { className: 'btn btn--ghost', type: 'button', text: '← 大会一覧', onClick: goHome }) : null,
+          state.route.mode === 'admin' || (state.google && !staffLogin(state.eventId)) ? el('button', { className: 'btn btn--ghost', type: 'button', text: state.route.mode === 'admin' ? '← 大会一覧' : '← あなたの大会', onClick: goHome }) : null,
           el('h2', { className: 'event-head__title', text: d ? d.event.name : '読み込み中…' }),
           d ? el('span', { className: 'badge ' + (d.event.isPublic ? 'badge--on' : ''), text: d.event.isPublic ? '公開中' : '非公開' }) : null,
         ])
@@ -1809,16 +2043,74 @@
         ]),
       ]);
 
-      var keyPanel = el('section', { className: 'panel' }, [
-        el('h3', { text: '運営用 URL の再発行' }),
-        el('p', { className: 'muted small', text: '運営用 URL が他人に知られた場合や紛失した場合に、新しい URL を発行します。古い URL はすぐに使えなくなります。' + (ev.adminKeyIssuedAt ? '（現在の URL の発行: ' + formatDateTime(ev.adminKeyIssuedAt) + '）' : '（未発行）') }),
-        el('div', { className: 'btn-row' }, [
-          confirmButton('再発行する', '本当に再発行', function () {
-            mutate('rotateKey', { eventId: ev.id, rev: ev.rev }, '運営用 URL を再発行しました。');
-          }),
-        ]),
+      var url = eventUrl(win.location, ev.id);
+      var urlBox = el('code', { className: 'issued__url', id: 'event-url', text: url });
+      var copy = el('button', { className: 'btn', type: 'button', text: 'URL をコピー' });
+      copy.addEventListener('click', function () {
+        try {
+          win.navigator.clipboard.writeText(url).then(
+            function () {
+              copy.textContent = 'コピーしました';
+            },
+            function () {
+              selectText(urlBox);
+            }
+          );
+        } catch (e) {
+          selectText(urlBox);
+        }
+      });
+      var accessPanel = el('section', { className: 'panel' }, [
+        el('h3', { text: '店舗スタッフに運営を任せる' }),
+        el('p', { className: 'muted small', text: 'スタッフには、この URL と管理パスワードを別々に伝えてください（URL だけでは開けません）。スタッフは結果の入力などの運営ができますが、管理パスワードの変更はできません。' }),
+        urlBox,
+        el('div', { className: 'btn-row' }, [copy]),
       ]);
-      return el('div', { className: 'stack' }, [eventForm, keyPanel]);
+      if (ev.canChangePassword) {
+        var pass = el('input', { className: 'input', id: 'staff-pass-new', type: 'password', autocomplete: 'new-password', maxlength: 64 });
+        accessPanel.appendChild(el('p', { text: '管理パスワード: ' + (ev.staffPasswordSet ? '設定済み（' + formatDateTime(ev.staffPasswordSetAt) + '）' : '未設定（スタッフは開けません）') }));
+        accessPanel.appendChild(
+          el('form', {
+            className: 'form',
+            onSubmit: function (e) {
+              e.preventDefault();
+              mutate('setStaffPassword', { eventId: ev.id, rev: ev.rev, password: pass.value }, '管理パスワードを設定しました。以前のパスワードで開いているスタッフの画面は、もう一度ログインが必要です。');
+            },
+          }, [
+            field(ev.staffPasswordSet ? '新しい管理パスワード（8〜64 文字・空白なし）' : '管理パスワード（8〜64 文字・空白なし）', pass),
+            el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: ev.staffPasswordSet ? '変更する' : '設定する' }),
+          ])
+        );
+        if (ev.staffPasswordSet) {
+          accessPanel.appendChild(
+            el('div', { className: 'btn-row' }, [
+              confirmButton('管理パスワードを解除', '本当に解除（スタッフは開けなくなります）', function () {
+                mutate('setStaffPassword', { eventId: ev.id, rev: ev.rev, password: '' }, '管理パスワードを解除しました。');
+              }),
+            ])
+          );
+        }
+      } else {
+        accessPanel.appendChild(el('p', { className: 'muted small', text: '管理パスワードの変更は、大会を作った主催者だけが行えます。' }));
+      }
+      var panels = [eventForm, accessPanel];
+      if (state.boot && state.boot.role.isPlatformAdmin) {
+        var owner = el('input', { className: 'input', id: 'owner-email', type: 'email', value: ev.ownerEmail || '', placeholder: '主催者の Google アカウントのメールアドレス' });
+        panels.push(
+          el('section', { className: 'panel' }, [
+            el('h3', { text: '主催者（管理者のみ）' }),
+            el('p', { className: 'muted small', text: 'この大会を運営できる Google アカウント。v0.4 以前に作った大会や、管理者が作った大会に主催者を付けるときに使います。空欄にすると管理者だけが運営できます。' }),
+            el('form', {
+              className: 'row',
+              onSubmit: function (e) {
+                e.preventDefault();
+                mutate('setOwner', { eventId: ev.id, rev: ev.rev, ownerEmail: owner.value }, '主催者を保存しました。');
+              },
+            }, [el('label', { className: 'visually-hidden', for: 'owner-email', text: '主催者の Google アカウント' }), owner, el('button', { className: 'btn', type: 'submit', 'data-mut': true, text: '保存' })]),
+          ])
+        );
+      }
+      return el('div', { className: 'stack' }, panels);
     }
 
     function renderHistory() {
@@ -1838,7 +2130,7 @@
     return { state: state };
   }
 
-  global.TPAdmin = { checkResult: checkResult, createApi: createApi, legsToWin: legsToWin, parseHash: parseHash, organizerUrl: organizerUrl, createFetchRunner: createFetchRunner };
+  global.TPAdmin = { checkResult: checkResult, createApi: createApi, legsToWin: legsToWin, parseHash: parseHash, eventUrl: eventUrl, decodeJwtPayload: decodeJwtPayload, createFetchRunner: createFetchRunner };
 
   if (global.document && global.TPOC_ADMIN_CONFIG) {
     var go = function () {

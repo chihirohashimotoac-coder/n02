@@ -6,11 +6,11 @@
  *
  * 運営画面は GitHub Pages に置き、この Web アプリには fetch（doPost）で JSON を送る。
  * 公開されるトップレベル関数は doGet と doPost の 2 つだけ。それ以外は名前の末尾に "_" を付けた内部関数。
- * doPost は呼び出しのたびに、大会ごとの運営用の鍵（または管理者の鍵）を検証する（02_auth.js）。
+ * doPost は呼び出しのたびに、ログインのセッション（または管理者の鍵）を検証する（02_auth.js）。
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.4.1',
+  APP_VERSION: '0.5.0',
   SCHEMA_VERSION: 1,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
@@ -33,6 +33,9 @@ var ADMIN_CONFIG = Object.freeze({
   // 誰でも主催できるため、悪用・誤操作で保存先が膨らまないよう上限を設ける（管理者は対象外）
   MAX_EVENTS_TOTAL: 200,
   MAX_CREATES_PER_HOUR: 10,
+  MAX_CREATES_PER_USER_HOUR: 5,
+  // Google ログインの確認（tokeninfo への問い合わせ）の回数。全体で 1 分あたり
+  MAX_LOGINS_PER_MINUTE: 30,
   MAX_STAGES: 8,
   MAX_ELIMINATION_ENTRANTS: 128,
   MAX_REQUEST_CHARS: 100000,
@@ -98,8 +101,12 @@ var SCHEMA = Object.freeze({
       ['rule_id', 'text'],
       ['is_sample', 'bool'],
       ['organizer_name', 'text'], // 主催者名（任意・非公開。管理者が誰の大会か分かるように）
-      ['admin_key_hash', 'text'], // 運営用の鍵の SHA-256。空欄の大会は管理者だけが操作できる
+      ['admin_key_hash', 'text'], // v0.4 までの運営用の鍵（v0.5 以降は使わない。既存のシートとの互換のため列だけ残す）
       ['admin_key_issued_at', 'text'],
+      ['owner_email', 'text'], // 大会を作った Google アカウント（小文字）。空欄の大会は管理者だけが操作できる
+      ['staff_pass_hash', 'text'], // 店舗スタッフ用の管理パスワードのソルト付き SHA-256。空欄なら未設定
+      ['staff_pass_salt', 'text'],
+      ['staff_pass_set_at', 'text'],
       ['notes', 'text'],
       ['rev', 'int'],
       ['created_at', 'text'],

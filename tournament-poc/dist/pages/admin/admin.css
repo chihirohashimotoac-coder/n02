@@ -221,3 +221,11 @@ body.is-busy .busy-indicator { display: block; }
 .qr-share__code svg { display: block; width: 100%; height: auto; border-radius: 6px; }
 .qr-share__url { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; color: var(--ink-2); }
 @media (max-width: 560px) { .qr-share { grid-template-columns: minmax(0, 1fr); } .qr-share__code { width: min(220px, 100%); } }
+
+/* ログイン（v0.5） */
+.topbar__who { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.topbar__logout { color: inherit; border-color: currentColor; background: transparent; }
+.gsi { display: grid; gap: 8px; margin: 8px 0 4px; }
+.gsi-button { min-height: 44px; }
+.notice { padding: 8px 12px; border-radius: 8px; background: var(--warn-bg, #fff4d6); color: var(--warn-ink, #5c4300); }
+.panel .row + h3 { margin-top: 20px; }

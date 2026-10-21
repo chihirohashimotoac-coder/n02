@@ -2,21 +2,26 @@
 
 /**
  * 操作の一覧。
- * - scope: public = 誰でも（未認証可）/ create = 大会の作成（作成コードを確認）/
- *          platform = 管理者のみ / event = その大会の運営用の鍵を持つ人（または管理者）のみ
+ * - scope: public = 誰でも（未認証可）/ login = ログイン（送られた auth は見ない）/
+ *          create = 大会の作成（Google ログインした人と管理者）/ platform = 管理者のみ /
+ *          event = その大会を運営できる人（作った本人・その大会の管理パスワードでログインした人・管理者）のみ
  * - mutating=true の操作は、スクリプトロックの中で実行し、二重送信を requestId で弾き、最後に公開データを同期する
  * - needsStorage=false の操作は保存先が未設定・未初期化でも実行できる
  */
 function adminActions_() {
   return {
     bootstrap: { fn: actionBootstrap_, scope: 'public', mutating: false, needsStorage: false },
+    login: { fn: actionLogin_, scope: 'login', mutating: false, needsStorage: false },
+    staffLogin: { fn: actionStaffLogin_, scope: 'login', mutating: false },
+    logout: { fn: actionLogout_, scope: 'login', mutating: false, needsStorage: false },
     eventDetail: { fn: actionEventDetail_, scope: 'event', mutating: false },
     configureStorage: { fn: actionConfigureStorage_, scope: 'platform', mutating: true, needsStorage: false },
     initializeStorage: { fn: actionInitializeStorage_, scope: 'platform', mutating: true, needsStorage: false },
     setViewerUrl: { fn: actionSetViewerUrl_, scope: 'platform', mutating: true, needsStorage: false },
     createEvent: { fn: actionCreateEvent_, scope: 'create', mutating: true },
     createSampleEvent: { fn: actionCreateSampleEvent_, scope: 'create', mutating: true },
-    rotateKey: { fn: actionRotateKey_, scope: 'event', mutating: true },
+    setStaffPassword: { fn: actionSetStaffPassword_, scope: 'event', mutating: true },
+    setOwner: { fn: actionSetOwner_, scope: 'event', mutating: true },
     updateEvent: { fn: actionUpdateEvent_, scope: 'event', mutating: true },
     updateRule: { fn: actionUpdateRule_, scope: 'event', mutating: true },
     addPlayers: { fn: actionAddPlayers_, scope: 'event', mutating: true },
@@ -54,7 +59,7 @@ function doGet() {
 
 /**
  * 運営画面からの API 呼び出し。本文は JSON（Content-Type: text/plain で送る。CORS のプリフライトを避けるため）。
- * request = { action, payload, requestId?, auth?: { eventId, key } | { adminKey } }
+ * request = { action, payload, requestId?, auth?: { session } | { adminKey } }
  * 戻り値  = { ok: true, data } | { ok: false, error: { code, message } }
  */
 function doPost(e) {
@@ -86,10 +91,11 @@ function handleAdminRequest_(request, startedAt) {
       if (!shared) shared = createContext_(openStorage_(), '', null);
       return shared;
     };
-    var user = authenticate_(getCtx, request.auth);
+    // ログインの操作では、送られてきた（期限切れかもしれない）セッションを見ない
+    var user = spec.scope === 'login' ? authenticate_(getCtx, null) : authenticate_(getCtx, request.auth);
     if (spec.scope === 'platform') assertPlatformAdmin_(user);
     if (spec.scope === 'event' && user.kind === 'anonymous') {
-      throw appError_('AUTH_REQUIRED', '運営用 URL から開いてください。');
+      throw appError_('AUTH_REQUIRED', 'Google でログインするか、管理パスワードを入力してください。');
     }
     var payload = request.payload && typeof request.payload === 'object' && !Array.isArray(request.payload) ? request.payload : {};
     var data = spec.mutating ? runMutation_(user, action, spec, payload, request.requestId, request.auth) : runQuery_(user, spec, payload, shared);
@@ -150,8 +156,8 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
       result = spec.fn({ actor: user.label, user: user }, payload);
     } else {
       var ctx = contextFor_(user, null);
-      // 鍵の確認と権限の確認は、ロックの中で最新のデータに対してやり直す（再発行と同時に操作された場合に備える）
-      if (user.kind === 'organizer') {
+      // ログインの確認と権限の確認は、ロックの中で最新のデータに対してやり直す（パスワード変更・主催者の付け替えと同時に操作された場合に備える）
+      if (user.kind === 'staff' || user.kind === 'google') {
         user = authenticate_(function () {
           return ctx;
         }, auth);
@@ -167,8 +173,8 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
       delete result.forceRepublish;
     }
     SpreadsheetApp.flush();
-    // 大会作成・鍵の再発行は、通信が切れて再送されても同じ鍵を返せるよう結果の要点を保存する（サーバー内のみ・10 分）
-    var memo = result && result.adminKey ? { eventId: result.eventId, adminKey: result.adminKey } : {};
+    // 大会作成は、通信が切れて再送されても作った大会を開けるよう、大会 ID を保存する（サーバー内のみ・10 分）
+    var memo = (action === 'createEvent' || action === 'createSampleEvent') && result && result.eventId ? { eventId: result.eventId } : {};
     cache.put(dedupeKey, JSON.stringify(memo), ADMIN_CONFIG.REQUEST_DEDUPE_TTL_SEC);
     return result;
   } finally {

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { setupPair, loadProject, ROOT } from './gas-mock.mjs';
+import { setupPair, loadProject, ROOT, fakeIdToken, GOOGLE_CLIENT_ID } from './gas-mock.mjs';
 
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
@@ -29,17 +29,19 @@ test('閲覧者用プロジェクトには書き込み・初期化・管理用�
   }
 });
 
-test('マニフェスト: 閲覧者用は読み取り専用スコープのみ、運営用はスプレッドシートのみ。どちらも匿名アクセス（認証はアプリ側）', () => {
+test('マニフェスト: 閲覧者用は読み取り専用スコープのみ、運営用はスプレッドシートと外部通信（Google のログイン確認用）のみ。どちらも匿名アクセス（認証はアプリ側）', () => {
   const viewer = JSON.parse(read('dist/viewer/appsscript.json'));
   const admin = JSON.parse(read('dist/admin/appsscript.json'));
   assert.deepEqual(viewer.oauthScopes, ['https://www.googleapis.com/auth/spreadsheets.readonly']);
   assert.deepEqual(viewer.webapp, { executeAs: 'USER_DEPLOYING', access: 'ANYONE_ANONYMOUS' });
   assert.deepEqual(viewer.dependencies.enabledAdvancedServices, [{ userSymbol: 'Sheets', serviceId: 'sheets', version: 'v4' }]);
-  assert.deepEqual(admin.oauthScopes, ['https://www.googleapis.com/auth/spreadsheets']);
+  assert.deepEqual(admin.oauthScopes, ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/script.external_request']);
   assert.deepEqual(admin.webapp, { executeAs: 'USER_DEPLOYING', access: 'ANYONE_ANONYMOUS' });
-  // 運営用は外部への通信・メール・Drive 操作をしない
+  // 運営用はメール・Drive 操作をしない。外部への通信は Google の tokeninfo（ログインの確認）の 1 か所だけ
   const code = read('dist/admin/Code.gs');
-  for (const api of ['UrlFetchApp', 'DriveApp', 'MailApp', 'GmailApp', 'ScriptApp', 'HtmlService']) assert.ok(!code.includes(api), api);
+  for (const api of ['DriveApp', 'MailApp', 'GmailApp', 'ScriptApp', 'HtmlService']) assert.ok(!code.includes(api), api);
+  const fetches = code.match(/UrlFetchApp\.\w+\([^)]*/g) || [];
+  assert.deepEqual(fetches.map((f) => f.replace(/\s+/g, ' ')), ["UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(token"]);
 });
 
 test('ソースに認証情報・スプレッドシート ID・メールアドレスを埋め込んでいない', () => {
@@ -51,29 +53,99 @@ test('ソースに認証情報・スプレッドシート ID・メールアド�
   }
 });
 
-/** 未認証で 2 つの大会を作り、それぞれの運営用の鍵を受け取る */
+const ALICE = 'alice@example.org';
+const BOB = 'bob@example.org';
+
+/** 2 人がそれぞれ Google でログインして大会を作る */
 function twoOrganizers() {
   const p = setupPair();
   p.ok('initializeStorage');
-  const a = p.call('createSampleEvent', { publish: true }, { auth: 'anon' });
-  const b = p.call('createSampleEvent', { publish: true }, { auth: 'anon' });
+  const authA = p.loginAs(ALICE);
+  const authB = p.loginAs(BOB);
+  const a = p.call('createSampleEvent', { publish: true }, { auth: authA });
+  const b = p.call('createSampleEvent', { publish: true }, { auth: authB });
   assert.equal(a.ok, true, JSON.stringify(a.error));
   assert.equal(b.ok, true);
-  const authA = { eventId: a.data.eventId, key: a.data.adminKey };
-  const authB = { eventId: b.data.eventId, key: b.data.adminKey };
   return { p, a: a.data, b: b.data, authA, authB };
 }
 
-test('大会の作成: ログインなしで作れ、運営用の鍵（16 進 64 文字）が 1 回だけ返る。シート・履歴には鍵そのものを残さない', () => {
-  const { p, a, b } = twoOrganizers();
-  assert.match(a.adminKey, /^[a-f0-9]{64}$/);
-  assert.notEqual(a.adminKey, b.adminKey);
-  const dump = p.store.dump();
-  assert.ok(!dump.includes(a.adminKey) && !dump.includes(b.adminKey), '鍵がシートに平文で残っている');
+test('大会の作成: Google でログインした人だけが作れ、作った人が主催者として記録される', () => {
+  const { p, a } = twoOrganizers();
+  assert.equal(a.detail.event.ownerEmail, ALICE);
   const events = p.store.get().getSheetByName('Events').records();
-  assert.ok(events.every((e) => /^[a-f0-9]{64}$/.test(e.admin_key_hash)));
-  // 詳細や一覧の応答にもハッシュを含めない
-  assert.ok(!JSON.stringify(a.detail).includes(events[0].admin_key_hash));
+  assert.deepEqual(events.map((e) => e.owner_email), [ALICE, BOB]);
+  // 未認証では作れない（作成コードの仕組みはない）
+  const input = { name: '大会', bestOf: 5, groupCount: 1 };
+  assert.equal(p.call('createEvent', input, { auth: 'anon' }).error.code, 'AUTH_REQUIRED');
+  assert.equal(p.call('createSampleEvent', {}, { auth: 'anon' }).error.code, 'AUTH_REQUIRED');
+  p.admin.properties.setProperty('CREATE_CODE', 'darts-2026');
+  assert.equal(p.call('createEvent', { ...input, createCode: 'darts-2026' }, { auth: 'anon' }).error.code, 'AUTH_REQUIRED');
+  // 管理者が作った大会は主催者なし
+  assert.equal(p.ok('createEvent', input).detail.event.ownerEmail, '');
+  // セッションはシートにも応答の詳細にも残らない
+  assert.ok(!p.store.dump().includes(p.loginAs(ALICE).session));
+});
+
+test('Google ログインの確認: 署名違い・期限切れ・別アプリ向け・発行元違い・メール未確認・形式違いはすべて拒否する', () => {
+  const p = setupPair();
+  p.ok('initializeStorage');
+  const login = (idToken) => p.call('login', { idToken }, { auth: 'anon' });
+  const ok = login(fakeIdToken(ALICE, p.clock));
+  assert.equal(ok.ok, true);
+  assert.match(ok.data.session, /^[a-f0-9]{64}$/);
+  assert.equal(ok.data.email, ALICE);
+  assert.equal(login(fakeIdToken('Alice@Example.org', p.clock)).data.email, ALICE, 'メールアドレスは小文字にそろえる');
+  const bad = [
+    fakeIdToken(ALICE, p.clock, {}, 'forged-signature'),
+    fakeIdToken(ALICE, p.clock, { exp: String(Math.floor(p.clock.now() / 1000) - 10) }),
+    fakeIdToken(ALICE, p.clock, { aud: 'other-app.apps.googleusercontent.com' }),
+    fakeIdToken(ALICE, p.clock, { iss: 'https://evil.example.org' }),
+    fakeIdToken(ALICE, p.clock, { email_verified: 'false' }),
+    fakeIdToken('not-an-email', p.clock),
+    'not.a-token',
+    'a'.repeat(5000),
+    123,
+  ];
+  for (const t of bad) assert.equal(login(t).error.code, 'AUTH_INVALID', String(t).slice(0, 40));
+  // Google に接続できないときは、ログイン情報の誤りと区別して伝える
+  p.admin.urlFetchFail = true;
+  assert.equal(login(fakeIdToken(ALICE, p.clock)).error.code, 'UNAVAILABLE');
+  p.admin.urlFetchFail = false;
+  // クライアント ID が未設定なら誰もログインできない
+  p.admin.properties.deleteProperty('GOOGLE_CLIENT_ID');
+  assert.equal(login(fakeIdToken(ALICE, p.clock)).error.code, 'AUTH_NOT_CONFIGURED');
+  assert.equal(p.call('bootstrap', {}, { auth: 'anon' }).data.googleLoginReady, false);
+  p.admin.properties.setProperty('GOOGLE_CLIENT_ID', GOOGLE_CLIENT_ID);
+  assert.equal(p.call('bootstrap', {}, { auth: 'anon' }).data.googleLoginReady, true);
+});
+
+test('ログインの回数制限: 全体で 1 分あたり 30 回まで（Google への問い合わせを使い切られないように）', () => {
+  const p = setupPair();
+  p.ok('initializeStorage');
+  for (let i = 0; i < 30; i++) assert.notEqual(p.call('login', { idToken: fakeIdToken(ALICE, p.clock, {}, 'forged-signature') }, { auth: 'anon' }).error.code, 'LIMIT');
+  assert.equal(p.call('login', { idToken: fakeIdToken(ALICE, p.clock) }, { auth: 'anon' }).error.code, 'LIMIT');
+  p.clock.advance(60_000);
+  assert.equal(p.call('login', { idToken: fakeIdToken(ALICE, p.clock) }, { auth: 'anon' }).ok, true);
+});
+
+test('セッション: 6 時間で切れ、ログアウトや偽のセッションでは使えない。ログイン後の操作では Google に問い合わせない', () => {
+  const p = setupPair();
+  p.ok('initializeStorage');
+  const auth = p.loginAs(ALICE);
+  const before = p.admin.fetches.length;
+  const id = p.ok('createEvent', { name: '大会', bestOf: 5, groupCount: 1 }, { auth }).eventId;
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth }).ok, true);
+  assert.equal(p.admin.fetches.length, before, 'セッションで操作するときは tokeninfo を呼ばない');
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth: { session: 'f'.repeat(64) } }).error.code, 'AUTH_EXPIRED');
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth: { session: 'short' } }).error.code, 'AUTH_EXPIRED');
+  p.clock.advance(6 * 3600_000 + 1000);
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth }).error.code, 'AUTH_EXPIRED');
+  const again = p.loginAs(ALICE);
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth: again }).ok, true);
+  assert.equal(p.call('logout', { session: again.session }, { auth: again }).ok, true);
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth: again }).error.code, 'AUTH_EXPIRED');
+  // 期限切れのセッションを送ったままでもログインし直せる
+  assert.equal(p.call('login', { idToken: fakeIdToken(ALICE, p.clock) }, { auth: again }).ok, true);
 });
 
 test('主催者: 自分の大会は操作でき、他の大会は eventId / matchId / playerId / groupId のどれを指定しても操作できない', () => {
@@ -87,11 +159,11 @@ test('主催者: 自分の大会は操作でき、他の大会は eventId / matc
   const om = other.groups[3].matches[0];
   const op = other.players[0];
   const og = other.groups[0];
-  const dump = p.store.dump();
   const attempts = [
     ['eventDetail', { eventId: other.event.id }],
     ['updateEvent', { eventId: other.event.id, rev: other.event.rev, name: '乗っ取り', dateLabel: '', status: 'running', isPublic: true, isFeatured: true, notes: '' }],
-    ['rotateKey', { eventId: other.event.id, rev: other.event.rev }],
+    ['setStaffPassword', { eventId: other.event.id, rev: other.event.rev, password: 'takeover-1234' }],
+    ['setOwner', { eventId: other.event.id, rev: other.event.rev, ownerEmail: ALICE }],
     ['saveMatchResult', { matchId: om.id, rev: om.rev, status: 'final', p1Legs: 3, p2Legs: 0 }],
     ['updatePlayer', { playerId: op.id, rev: op.rev, name: '乗っ取り' }],
     ['deletePlayer', { playerId: op.id, rev: op.rev }],
@@ -109,12 +181,12 @@ test('主催者: 自分の大会は操作でき、他の大会は eventId / matc
     const res = p.call(action, payload, { auth: authA });
     assert.equal(res.ok, false, `${action} ${JSON.stringify(payload)}`);
   }
-  // 他の大会に触れる操作は、自分の大会側の検証で弾かれたものも含め、他の大会のデータを変えていない
   const after = p.call('eventDetail', { eventId: other.event.id });
   assert.equal(after.data.event.name, other.event.name);
+  assert.equal(after.data.event.ownerEmail, BOB);
+  assert.equal(after.data.event.staffPasswordSet, false);
   assert.equal(after.data.players.length, other.players.length);
   assert.equal(after.data.groups[3].matches[0].status, 'scheduled');
-  assert.ok(dump.length > 0);
 });
 
 test('主催者: 管理者向けの操作はできず、一覧には自分の大会しか出ない', () => {
@@ -122,17 +194,20 @@ test('主催者: 管理者向けの操作はできず、一覧には自分の大
   for (const [action, payload] of [['initializeStorage', {}], ['configureStorage', { spreadsheetId: 'x' }], ['setViewerUrl', { url: '' }]]) {
     assert.equal(p.call(action, payload, { auth: authA }).error.code, 'FORBIDDEN', action);
   }
+  const ev = a.detail.event;
+  assert.equal(p.call('setOwner', { eventId: ev.id, rev: ev.rev, ownerEmail: BOB }, { auth: authA }).error.code, 'FORBIDDEN');
   const boot = p.call('bootstrap', {}, { auth: authA }).data;
   assert.deepEqual(Array.from(boot.events, (e) => e.id), [a.eventId]);
-  assert.equal(boot.role.kind, 'organizer');
+  assert.equal(boot.role.kind, 'google');
+  assert.equal(boot.role.email, ALICE);
+  assert.equal(boot.events[0].ownerEmail, undefined, '一覧の主催者メールアドレスは管理者にだけ返す');
   assert.equal(boot.storage.spreadsheetId, undefined, '保存先の ID は管理者以外に返さない');
   // 既定表示（プラットフォーム全体の設定）は主催者には変えられない
-  const ev = a.detail.event;
   const d = p.call('updateEvent', { eventId: ev.id, rev: ev.rev, name: ev.name, dateLabel: '', status: 'running', isPublic: true, isFeatured: true, notes: '' }, { auth: authA }).data.detail;
   assert.equal(d.event.isFeatured, false);
 });
 
-test('未認証: 大会の作成と初期表示以外はできず、初期表示では大会も保存先も見えない', () => {
+test('未認証: 初期表示とログイン以外はできず、初期表示では大会も保存先も見えない', () => {
   const { p, a } = twoOrganizers();
   const boot = p.call('bootstrap', {}, { auth: 'anon' }).data;
   assert.deepEqual(Array.from(boot.events), []);
@@ -142,81 +217,95 @@ test('未認証: 大会の作成と初期表示以外はできず、初期表示
   assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: 'anon' }).error.code, 'AUTH_REQUIRED');
   assert.equal(p.call('saveMatchResult', { matchId: 'MAT-AAAAAAAAAAAA', rev: 1, status: 'live', p1Legs: 0, p2Legs: 0 }, { auth: 'anon' }).error.code, 'AUTH_REQUIRED');
   assert.equal(p.call('initializeStorage', {}, { auth: 'anon' }).error.code, 'FORBIDDEN');
+  // v0.4 までの運営用 URL の鍵は、もう認証に使えない
+  assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: { eventId: a.eventId, key: 'a'.repeat(64) } }).error.code, 'AUTH_REQUIRED');
 });
 
-test('鍵の確認: 違う鍵・形式違い・存在しない大会・別の大会の鍵はすべて同じエラーで拒否する', () => {
-  const { p, a, b, authB } = twoOrganizers();
-  const bad = [
-    { eventId: a.eventId, key: 'f'.repeat(64) },
-    { eventId: a.eventId, key: authB.key },
-    { eventId: 'EVT-AAAAAAAAAAAA', key: a.adminKey },
-    { eventId: a.eventId, key: a.adminKey.toUpperCase() },
-    { eventId: a.eventId, key: a.adminKey.slice(0, 40) },
-    { eventId: a.eventId },
-    { key: a.adminKey },
-    { eventId: "EVT-1' OR '1'='1", key: a.adminKey },
-  ];
-  for (const auth of bad) {
-    const res = p.call('eventDetail', { eventId: a.eventId }, { auth });
-    assert.equal(res.ok, false);
-    assert.equal(res.error.code, 'AUTH_INVALID', JSON.stringify(auth));
-  }
-  assert.ok(b.eventId);
+test('管理パスワード: 主催者が設定し、店舗スタッフはその大会だけを運営できる。パスワードの変更・主催者の情報は扱えない', () => {
+  const { p, a, b, authA, authB } = twoOrganizers();
+  let ev = p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).data.event;
+  assert.equal(p.call('setStaffPassword', { eventId: a.eventId, rev: ev.rev, password: 'short' }, { auth: authA }).error.code, 'VALIDATION');
+  assert.equal(p.call('setStaffPassword', { eventId: a.eventId, rev: ev.rev, password: 'has space 123' }, { auth: authA }).error.code, 'VALIDATION');
+  const set = p.call('setStaffPassword', { eventId: a.eventId, rev: ev.rev, password: 'Shop-A-2026!' }, { auth: authA });
+  assert.equal(set.ok, true);
+  assert.equal(set.data.detail.event.staffPasswordSet, true);
+  // シート・履歴・応答に平文のパスワードを残さない。ハッシュとソルトは履歴にも出さない
+  const dump = p.store.dump();
+  assert.ok(!dump.includes('Shop-A-2026!'));
+  const row = p.store.get().getSheetByName('Events').records().find((e) => e.event_id === a.eventId);
+  assert.match(row.staff_pass_hash, /^[a-f0-9]{64}$/);
+  assert.ok(!JSON.stringify(set.data).includes(row.staff_pass_hash));
+  const history = p.store.get().getSheetByName('History').records().map((h) => h.after_json + h.before_json).join('');
+  assert.ok(!history.includes(row.staff_pass_hash) && !history.includes(row.staff_pass_salt));
+
+  const staff = p.staffLogin(a.eventId, 'Shop-A-2026!');
+  const detail = p.call('eventDetail', { eventId: a.eventId }, { auth: staff });
+  assert.equal(detail.ok, true);
+  assert.equal(detail.data.event.ownerEmail, undefined, 'スタッフには主催者のメールアドレスを見せない');
+  assert.equal(detail.data.event.canChangePassword, false);
+  const m = detail.data.groups[3].matches[0];
+  assert.equal(p.call('saveMatchResult', { matchId: m.id, rev: m.rev, status: 'live', p1Legs: 1, p2Legs: 0 }, { auth: staff }).ok, true);
+  ev = p.call('eventDetail', { eventId: a.eventId }, { auth: staff }).data.event;
+  assert.equal(p.call('setStaffPassword', { eventId: a.eventId, rev: ev.rev, password: 'Changed-by-staff' }, { auth: staff }).error.code, 'FORBIDDEN');
+  assert.equal(p.call('eventDetail', { eventId: b.eventId }, { auth: staff }).error.code, 'NOT_FOUND');
+  assert.equal(p.call('createEvent', { name: 'x', bestOf: 5, groupCount: 1 }, { auth: staff }).error.code, 'AUTH_REQUIRED');
+  const boot = p.call('bootstrap', {}, { auth: staff }).data;
+  assert.equal(boot.role.kind, 'staff');
+  assert.deepEqual(Array.from(boot.events, (e) => e.id), [a.eventId]);
+  // 他の大会のパスワードとしては使えない
+  assert.equal(p.call('staffLogin', { eventId: b.eventId, password: 'Shop-A-2026!' }, { auth: 'anon' }).error.code, 'AUTH_INVALID');
+  // 主催者がパスワードを変えると、古いパスワードのセッションは使えなくなる
+  ev = p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).data.event;
+  assert.equal(p.call('setStaffPassword', { eventId: a.eventId, rev: ev.rev, password: 'Shop-A-2026-v2' }, { auth: authA }).ok, true);
+  assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: staff }).error.code, 'AUTH_EXPIRED');
+  assert.equal(p.call('staffLogin', { eventId: a.eventId, password: 'Shop-A-2026!' }, { auth: 'anon' }).error.code, 'AUTH_INVALID');
+  const staff2 = p.staffLogin(a.eventId, 'Shop-A-2026-v2');
+  // 解除するとパスワードでは開けない
+  ev = p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).data.event;
+  assert.equal(p.call('setStaffPassword', { eventId: a.eventId, rev: ev.rev, password: '' }, { auth: authA }).ok, true);
+  assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: staff2 }).error.code, 'AUTH_EXPIRED');
+  assert.equal(p.call('staffLogin', { eventId: a.eventId, password: 'Shop-A-2026-v2' }, { auth: 'anon' }).error.code, 'AUTH_INVALID');
+  assert.ok(authB);
 });
 
-test('運営用 URL の再発行: 新しい鍵が返り、古い鍵はすぐに使えなくなる（主催者・管理者のどちらからでも）', () => {
+test('管理パスワードの総当たり対策: 同じ大会で 10 回間違えると 10 分間は正しいパスワードでも開けない', () => {
   const { p, a, authA } = twoOrganizers();
   const ev = p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).data.event;
-  const rotated = p.call('rotateKey', { eventId: a.eventId, rev: ev.rev }, { auth: authA });
-  assert.equal(rotated.ok, true);
-  assert.match(rotated.data.adminKey, /^[a-f0-9]{64}$/);
-  assert.notEqual(rotated.data.adminKey, a.adminKey);
-  assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).error.code, 'AUTH_INVALID');
-  const authNew = { eventId: a.eventId, key: rotated.data.adminKey };
-  assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: authNew }).ok, true);
-  // 管理者が再発行（紛失時）
-  const ev2 = p.call('eventDetail', { eventId: a.eventId }).data.event;
-  const byAdmin = p.call('rotateKey', { eventId: a.eventId, rev: ev2.rev });
-  assert.equal(byAdmin.ok, true);
-  assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: authNew }).error.code, 'AUTH_INVALID');
-  // 履歴に鍵を残さない
-  assert.ok(!p.store.dump().includes(byAdmin.data.adminKey));
+  p.call('setStaffPassword', { eventId: a.eventId, rev: ev.rev, password: 'Shop-A-2026!' }, { auth: authA });
+  const tryLogin = (password, eventId = a.eventId) => p.call('staffLogin', { eventId, password }, { auth: 'anon' });
+  for (let i = 0; i < 10; i++) assert.equal(tryLogin('wrong-' + i).error.code, 'AUTH_INVALID');
+  assert.equal(tryLogin('Shop-A-2026!').error.code, 'AUTH_LOCKED');
+  // 存在しない大会・形式違いも同じエラー（大会があるかどうかを推測させない）
+  assert.equal(tryLogin('Shop-A-2026!', 'EVT-AAAAAAAAAAAA').error.code, 'AUTH_INVALID');
+  assert.equal(tryLogin('Shop-A-2026!', "EVT-1' OR '1'='1").error.code, 'AUTH_INVALID');
+  p.clock.advance(10 * 60_000 + 1000);
+  assert.equal(tryLogin('Shop-A-2026!').ok, true);
 });
 
-test('大会作成の通信が切れて再送されても、同じ大会・同じ鍵を返す（大会は 1 つだけ作られる）', () => {
+test('大会作成の通信が切れて再送されても、同じ大会を返す（大会は 1 つだけ作られる）', () => {
   const p = setupPair();
   p.ok('initializeStorage');
+  const auth = p.loginAs(ALICE);
   const requestId = 'create-request-000001';
-  const first = p.call('createEvent', { name: '大会', bestOf: 5, groupCount: 1 }, { auth: 'anon', requestId });
-  const again = p.call('createEvent', { name: '大会', bestOf: 5, groupCount: 1 }, { auth: 'anon', requestId });
+  const first = p.call('createEvent', { name: '大会', bestOf: 5, groupCount: 1 }, { auth, requestId });
+  const again = p.call('createEvent', { name: '大会', bestOf: 5, groupCount: 1 }, { auth, requestId });
   assert.equal(again.data.duplicate, true);
   assert.equal(again.data.eventId, first.data.eventId);
-  assert.equal(again.data.adminKey, first.data.adminKey);
   assert.equal(p.store.get().getSheetByName('Events').records().length, 1);
 });
 
-test('作成コード: 設定されていればコードを知っている人だけが大会を作れる（管理者は不要）', () => {
+test('作成の上限: 1 人あたり 1 時間に 5 件、全体で 10 件まで（管理者は対象外）', () => {
   const p = setupPair();
   p.ok('initializeStorage');
-  p.admin.properties.setProperty('CREATE_CODE', 'darts-2026');
-  const input = { name: '大会', bestOf: 5, groupCount: 1 };
-  assert.equal(p.call('bootstrap', {}, { auth: 'anon' }).data.createCodeRequired, true);
-  assert.equal(p.call('createEvent', input, { auth: 'anon' }).error.code, 'FORBIDDEN');
-  assert.equal(p.call('createEvent', { ...input, createCode: 'wrong' }, { auth: 'anon' }).error.code, 'FORBIDDEN');
-  assert.equal(p.call('createSampleEvent', { createCode: 'wrong' }, { auth: 'anon' }).error.code, 'FORBIDDEN');
-  assert.equal(p.call('createEvent', { ...input, createCode: ' darts-2026 ' }, { auth: 'anon' }).ok, true);
-  assert.equal(p.call('createEvent', input).ok, true, '管理者はコード不要');
-  assert.equal(p.store.get().getSheetByName('Events').records().length, 2);
-});
-
-test('作成の上限: 管理者以外は 1 時間に 10 件まで', () => {
-  const p = setupPair();
-  p.ok('initializeStorage');
-  for (let i = 0; i < 10; i++) assert.equal(p.call('createEvent', { name: `大会${i}`, bestOf: 5, groupCount: 1 }, { auth: 'anon' }).ok, true);
-  assert.equal(p.call('createEvent', { name: '11件目', bestOf: 5, groupCount: 1 }, { auth: 'anon' }).error.code, 'LIMIT');
-  assert.equal(p.call('createEvent', { name: '管理者', bestOf: 5, groupCount: 1 }).ok, true);
+  const users = ['u1', 'u2', 'u3'].map((u) => p.loginAs(u + '@example.org'));
+  const create = (auth, name) => p.call('createEvent', { name, bestOf: 5, groupCount: 1 }, { auth });
+  for (let i = 0; i < 5; i++) assert.equal(create(users[0], `A${i}`).ok, true);
+  assert.equal(create(users[0], 'A6').error.code, 'LIMIT');
+  for (let i = 0; i < 5; i++) assert.equal(create(users[1], `B${i}`).ok, true);
+  assert.equal(create(users[2], 'C1').error.code, 'LIMIT', '全体の上限');
+  assert.equal(create(undefined, '管理者').ok, true);
   p.clock.advance(3600_000);
-  assert.equal(p.call('createEvent', { name: '1時間後', bestOf: 5, groupCount: 1 }, { auth: 'anon' }).ok, true);
+  assert.equal(create(users[0], '1時間後').ok, true);
 });
 
 test('管理者の鍵: 違う鍵は拒否、未設定・短すぎる設定では誰も管理者になれない', () => {
@@ -236,17 +325,19 @@ test('運営用 API の doGet は画面を返さず、案内の JSON だけを�
   assert.equal(JSON.parse(out.text).ok, true);
 });
 
-test('既存の大会（運営用 URL 未発行）は管理者だけが操作でき、管理者が発行できる', () => {
+test('主催者のいない大会（v0.4 以前に作成・管理者が作成）は管理者だけが操作でき、管理者が主催者を設定できる', () => {
   const p = setupPair();
   p.ok('initializeStorage');
   const id = p.ok('createEvent', { name: '旧大会', bestOf: 5, groupCount: 1 }).eventId;
-  // 旧バージョンで作られた大会を再現（鍵のハッシュなし）
-  const sheet = p.store.get().getSheetByName('Events');
-  sheet.rows[1][sheet.rows[0].indexOf('admin_key_hash')] = '';
-  assert.equal(p.call('eventDetail', { eventId: id }, { auth: { eventId: id, key: 'a'.repeat(64) } }).error.code, 'AUTH_INVALID');
+  const alice = p.loginAs(ALICE);
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth: alice }).error.code, 'NOT_FOUND');
   const ev = p.ok('eventDetail', { eventId: id }).event;
-  const issued = p.ok('rotateKey', { eventId: id, rev: ev.rev });
-  assert.equal(p.call('eventDetail', { eventId: id }, { auth: { eventId: id, key: issued.adminKey } }).ok, true);
+  assert.equal(p.call('setOwner', { eventId: id, rev: ev.rev, ownerEmail: 'not-an-email' }).error.code, 'VALIDATION');
+  assert.equal(p.ok('setOwner', { eventId: id, rev: ev.rev, ownerEmail: ' Alice@Example.org ' }).detail.event.ownerEmail, ALICE);
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth: alice }).ok, true);
+  assert.deepEqual(Array.from(p.call('bootstrap', {}, { auth: alice }).data.events, (e) => e.id), [id]);
+  // 管理者の一覧には主催者のメールアドレスが出る
+  assert.equal(p.ok('bootstrap').events[0].ownerEmail, ALICE);
 });
 
 test('閲覧者に返すデータに非公開情報（メモ・操作者・履歴・版番号・内部 ID 以外の管理項目）を含めない', () => {
@@ -261,7 +352,7 @@ test('閲覧者に返すデータに非公開情報（メモ・操作者・履�
   p.ok('republish', { eventId: ev.id });
   const res = p.viewer.run('getPublicSnapshot', {});
   const text = JSON.stringify(res);
-  for (const secret of ['SECRET-MEMO', 'SECRET-PLAYER-NOTE', 'owner@example.com', '"rev"', 'history', 'notes', 'SPREADSHEET', 'spreadsheet', 'is_public', 'external_ref', 'problems']) {
+  for (const secret of ['SECRET-MEMO', 'SECRET-PLAYER-NOTE', 'owner@example.com', '@example.org', 'staff_pass', '"rev"', 'history', 'notes', 'SPREADSHEET', 'spreadsheet', 'is_public', 'external_ref', 'problems']) {
     assert.ok(!text.includes(secret), `公開データに ${secret} が含まれている`);
   }
   // 公開データに含めてよいキーの一覧（これ以外が増えたら見直す）

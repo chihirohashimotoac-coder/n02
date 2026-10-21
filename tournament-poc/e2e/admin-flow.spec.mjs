@@ -1,11 +1,11 @@
-// 運営画面（GitHub Pages の /admin/）: 管理者の初期設定 → 誰でも大会を作成 → 運営用 URL で運営 → 公開 → 閲覧ページに反映
+// 運営画面（GitHub Pages の /admin/）: 管理者の初期設定 → Google でログインして大会を作成・運営 → 公開 → 閲覧ページに反映 → 管理パスワードでスタッフが運営
 import { test, expect } from '@playwright/test';
-import { reset, routeAppsScript, expectNoHorizontalOverflow, publishedSample, ADMIN_KEY } from './helpers.mjs';
+import { reset, routeAppsScript, expectNoHorizontalOverflow, publishedSample, ADMIN_KEY, fakeGoogle, googleLogin, ORGANIZER } from './helpers.mjs';
 
 const SHEET_LINK = 'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcd/edit?usp=sharing';
 const ADMIN_PAGE = '/pages/admin/index.html';
 
-test('管理者の初期設定 → 大会作成（ログインなし）→ 運営用 URL → 選手・グループ・対戦カード → 結果の確定・訂正 → 公開 → 閲覧ページ', async ({ page, context, request }, testInfo) => {
+test('管理者の初期設定 → Google でログインして大会作成 → 選手・グループ・対戦カード → 結果の確定・訂正 → 公開 → 閲覧ページ → 管理パスワードでスタッフが運営', async ({ page, context, browser, request }, testInfo) => {
   await reset(request, { configured: false });
   const seen = await routeAppsScript(page, request);
 
@@ -25,26 +25,25 @@ test('管理者の初期設定 → 大会作成（ログインなし）→ 運�
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await expect(page.getByText('保存しました。').last()).toBeVisible();
 
-  // 2. 主催者: ログインなしで大会を作る（管理者の記憶はこのタブだけなので、別のページで開く）
+  // 2. 主催者: Google でログインして大会を作る（管理者の記憶はこのタブだけなので、別のページで開く）
   const org = await context.newPage();
   await routeAppsScript(org, request, seen);
+  await fakeGoogle(org, request, ORGANIZER);
   await org.goto(ADMIN_PAGE);
   await expect(org.getByRole('heading', { name: '大会を主催する' })).toBeVisible();
+  await expect(org.getByLabel('大会名')).toHaveCount(0); // ログインするまで作成フォームは出ない
+  await googleLogin(org);
+  await expect(org.getByRole('heading', { name: 'あなたの大会' })).toBeVisible();
+  await expect(org.locator('#actor')).toContainText(ORGANIZER);
   await org.getByLabel('大会名').fill('E2E 検証大会');
   await org.getByLabel('開催日（表示用の文字列）').fill('2026/11/03');
   await org.getByLabel('ロビンのグループ数').fill('2');
-  await org.getByRole('button', { name: '作成して運営用 URL を発行' }).click();
+  await org.getByRole('button', { name: '大会を作成', exact: true }).click();
 
-  // 3. 運営用 URL の発行画面（保存したことを確認するまで先へ進めない）
-  await expect(org.getByRole('heading', { name: /運営用 URL/ })).toBeVisible();
-  const url = (await org.locator('#issued-url').textContent()).trim();
-  expect(url).toMatch(/\/pages\/admin\/index\.html#e=EVT-[A-Z0-9]+&k=[a-f0-9]{64}$/);
-  const go = org.getByRole('button', { name: 'この大会の運営画面を開く' });
-  await expect(go).toBeDisabled();
-  await org.getByLabel('URL をブックマーク、またはメモに保存しました').check();
-  await go.click();
+  // 3. 作った大会の運営画面が開く。URL には大会 ID だけが入る（秘密の鍵は入らない）
   await expect(org.getByRole('heading', { name: 'E2E 検証大会' })).toBeVisible();
-  await expect(org).toHaveURL(url);
+  await expect(org).toHaveURL(/\/pages\/admin\/index\.html#e=EVT-[A-Z0-9]+$/);
+  const url = org.url();
 
   // 4. 選手登録
   await org.getByRole('button', { name: '選手', exact: true }).click();
@@ -114,21 +113,48 @@ test('管理者の初期設定 → 大会作成（ログインなし）→ 運�
   await expect(vm.locator('.match__score')).toHaveText('1-3');
   await expect(vm.locator('.match__player--2 .match__name')).toHaveText(p2name);
 
-  // 9. 運営用 URL の再発行: 新しい URL が表示され、古い URL は使えなくなる
+  // 9. 管理パスワード: 主催者が設定し、店舗スタッフは別の端末で URL とパスワードから運営できる
   await org.getByRole('button', { name: '大会設定' }).click();
-  await org.getByRole('button', { name: '再発行する' }).click();
-  await org.getByRole('button', { name: '本当に再発行' }).click();
-  const newUrl = (await org.locator('#issued-url').textContent()).trim();
-  expect(newUrl).not.toBe(url);
-  await expect(org).toHaveURL(newUrl);
-  const stale = await context.newPage();
-  await routeAppsScript(stale, request, seen);
-  await stale.goto(url);
-  await expect(stale.getByRole('heading', { name: 'この運営用 URL は使えません' })).toBeVisible();
+  await expect(org.locator('#event-url')).toHaveText(url);
+  await org.getByLabel('管理パスワード（8〜64 文字・空白なし）').fill('short');
+  await org.getByRole('button', { name: '設定する' }).click();
+  await expect(org.getByText(/8〜64 文字で設定してください/).last()).toBeVisible();
+  await org.getByLabel('管理パスワード（8〜64 文字・空白なし）').fill('Shop-2026-pass');
+  await org.getByRole('button', { name: '設定する' }).click();
+  await expect(org.getByText(/管理パスワード: 設定済み/)).toBeVisible();
+
+  const staffContext = await browser.newContext();
+  const staff = await staffContext.newPage();
+  await routeAppsScript(staff, request, seen);
+  await staff.goto(url);
+  await expect(staff.getByRole('heading', { name: 'この大会の運営画面を開く' })).toBeVisible();
+  await staff.getByLabel('管理パスワード').fill('wrong-password');
+  await staff.getByRole('button', { name: '開く' }).click();
+  await expect(staff.getByText('大会または管理パスワードが違います。')).toBeVisible();
+  await staff.getByLabel('管理パスワード').fill('Shop-2026-pass');
+  await staff.getByRole('button', { name: '開く' }).click();
+  await expect(staff.getByRole('heading', { name: 'E2E 検証大会' })).toBeVisible();
+  await expect(staff.locator('#actor')).toContainText('スタッフ');
+  await staff.getByRole('button', { name: '大会設定' }).click();
+  await expect(staff.getByText('管理パスワードの変更は、大会を作った主催者だけが行えます。')).toBeVisible();
+  // 再読み込みしてもログインを覚えている（大会当日に店舗の端末で開き直せる）
+  await staff.reload();
+  await expect(staff.getByRole('heading', { name: 'E2E 検証大会' })).toBeVisible();
+  // 主催者がパスワードを変えると、スタッフの画面はログインし直しになる
+  await org.getByLabel('新しい管理パスワード（8〜64 文字・空白なし）').fill('Shop-2026-pass-v2');
+  await org.getByRole('button', { name: '変更する' }).click();
+  await expect(org.getByText(/以前のパスワードで開いているスタッフの画面/).last()).toBeVisible();
+  await staff.getByRole('button', { name: '進行状況' }).click();
+  await staff.reload();
+  await expect(staff.getByRole('heading', { name: 'この大会の運営画面を開く' })).toBeVisible();
+  await expect(staff.getByText(/有効期限が切れたか、管理パスワードが変更されました/)).toBeVisible();
+  await staffContext.close();
 
   // 10. 管理者は全大会を一覧できる。通信に Cookie を一切送っていない
   await page.reload();
   await expect(page.getByRole('heading', { name: 'E2E 検証大会' })).toBeVisible();
+  await expect(page.locator('.event-card').first()).toContainText(ORGANIZER);
+  await expect(page.locator('.event-card').first()).toContainText('管理パスワード設定済み');
   expect(seen.length).toBeGreaterThan(10);
   expect(seen.every((s) => s.cookie === '')).toBe(true);
 });
@@ -136,13 +162,14 @@ test('管理者の初期設定 → 大会作成（ログインなし）→ 運�
 test('運営画面: スマートフォン幅でも横スクロールなしで操作できる（サンプル大会・主催者として）', async ({ page, request }, testInfo) => {
   await reset(request, { configured: true });
   await routeAppsScript(page, request);
+  await fakeGoogle(page, request, ORGANIZER);
   // 初期化は管理者の操作
   await request.post('/admin-post', { headers: { 'content-type': 'text/plain' }, data: JSON.stringify({ action: 'initializeStorage', payload: {}, requestId: 'e2e-init-request-0001', auth: { adminKey: ADMIN_KEY } }) });
   await page.goto(ADMIN_PAGE);
   await expectNoHorizontalOverflow(page);
+  await googleLogin(page);
+  await expectNoHorizontalOverflow(page);
   await page.getByRole('button', { name: 'サンプル大会を作成' }).click();
-  await page.getByLabel('URL をブックマーク、またはメモに保存しました').check();
-  await page.getByRole('button', { name: 'この大会の運営画面を開く' }).click();
   await expect(page.getByRole('heading', { name: 'サンプル大会（PoC 検証用）' })).toBeVisible();
   for (const tab of ['進行状況', '試合結果', '選手', '形式', '組み合わせ', '大会設定', '履歴']) {
     await page.getByRole('button', { name: tab, exact: true }).click();
@@ -152,33 +179,33 @@ test('運営画面: スマートフォン幅でも横スクロールなしで操
   await page.screenshot({ path: testInfo.outputPath('admin-matches.png') });
 });
 
-test('作成コードが設定されていれば、コードなしでは大会を作れない', async ({ page, request }) => {
-  await reset(request, { configured: true });
+test('主催者のホーム: 自分が作った大会だけが一覧に出て、ログアウトすると作成フォームも一覧も出ない', async ({ page, request }) => {
+  const sample = await publishedSample(request); // ORGANIZER の大会
   await routeAppsScript(page, request);
-  await request.post('/admin-post', { headers: { 'content-type': 'text/plain' }, data: JSON.stringify({ action: 'initializeStorage', payload: {}, requestId: 'e2e-init-request-0002', auth: { adminKey: ADMIN_KEY } }) });
-  await request.post('/__set-admin-property', { data: { key: 'CREATE_CODE', value: 'darts-2026' } });
+  await fakeGoogle(page, request, 'someone-else@example.org');
   await page.goto(ADMIN_PAGE);
-  await page.getByLabel('大会名').fill('コード確認');
-  await page.getByLabel('作成コード（管理者から教えてもらったもの）').fill('wrong');
-  await page.getByRole('button', { name: '作成して運営用 URL を発行' }).click();
-  await expect(page.getByText(/作成コードが違います/)).toBeVisible();
-  await page.getByLabel('作成コード（管理者から教えてもらったもの）').fill('darts-2026');
-  await page.getByRole('button', { name: '作成して運営用 URL を発行' }).click();
-  await expect(page.locator('#issued-url')).toBeVisible();
+  await googleLogin(page);
+  await expect(page.getByRole('heading', { name: 'あなたの大会' })).toBeVisible();
+  await expect(page.getByText('まだ大会がありません。')).toBeVisible();
+  await expect(page.getByText(sample.event.name)).toHaveCount(0);
+  await page.getByRole('button', { name: 'ログアウト' }).click();
+  await expect(page.getByRole('heading', { name: '大会を主催する' })).toBeVisible();
+  await expect(page.getByLabel('大会名')).toHaveCount(0);
+  await expect(page.locator('#actor')).toHaveText('');
 });
 
 test('トーナメントのみ: 5 名・シード・不戦勝・3 位決定戦 → 結果で勝ち上がり → 閲覧ページに優勝者', async ({ page, context, request }, testInfo) => {
   await reset(request, { configured: true });
   const seen = await routeAppsScript(page, request);
   await request.post('/admin-post', { headers: { 'content-type': 'text/plain' }, data: JSON.stringify({ action: 'initializeStorage', payload: {}, requestId: 'e2e-init-request-0003', auth: { adminKey: ADMIN_KEY } }) });
+  await fakeGoogle(page, request, ORGANIZER);
   await page.goto(ADMIN_PAGE);
+  await googleLogin(page);
   await page.getByLabel('大会名').fill('E2E トーナメント');
   await page.getByLabel(/大会の形式/).selectOption('elimination');
   await page.getByLabel('試合の長さ').selectOption('3');
   await page.getByLabel('トーナメントに 3 位決定戦を入れる').check();
-  await page.getByRole('button', { name: '作成して運営用 URL を発行' }).click();
-  await page.getByLabel('URL をブックマーク、またはメモに保存しました').check();
-  await page.getByRole('button', { name: 'この大会の運営画面を開く' }).click();
+  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'E2E トーナメント' })).toBeVisible();
 
   await page.getByRole('button', { name: '選手', exact: true }).click();
@@ -250,14 +277,14 @@ test('ロビン → A / B トーナメント: 順位を確定して進出 → �
   await reset(request, { configured: true });
   await routeAppsScript(page, request);
   await request.post('/admin-post', { headers: { 'content-type': 'text/plain' }, data: JSON.stringify({ action: 'initializeStorage', payload: {}, requestId: 'e2e-init-request-0004', auth: { adminKey: ADMIN_KEY } }) });
+  await fakeGoogle(page, request, ORGANIZER);
   await page.goto(ADMIN_PAGE);
+  await googleLogin(page);
   await page.getByLabel('大会名').fill('E2E ロビンAB');
   await page.getByLabel(/大会の形式/).selectOption('robin_ab');
   await page.getByLabel('ロビンのグループ数').fill('2');
   await page.getByLabel(/A トーナメントへ進む順位/).fill('1');
-  await page.getByRole('button', { name: '作成して運営用 URL を発行' }).click();
-  await page.getByLabel('URL をブックマーク、またはメモに保存しました').check();
-  await page.getByRole('button', { name: 'この大会の運営画面を開く' }).click();
+  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
 
   await page.getByRole('button', { name: '選手', exact: true }).click();
   await page.getByPlaceholder('1 行に 1 名ずつ入力').fill(['A1', 'A2', 'A3', 'B1', 'B2', 'B3'].join('\n'));
@@ -310,7 +337,9 @@ test('ロビン → A / B トーナメント: 順位を確定して進出 → �
 test('試合結果: 入力途中の結果は他の試合を確定しても消えず、入力済みの複数試合をまとめて確定できる', async ({ page, request }) => {
   const sample = await publishedSample(request);
   await routeAppsScript(page, request);
-  await page.goto(`${ADMIN_PAGE}#e=${sample.event.id}&k=${sample.adminKey}`);
+  await fakeGoogle(page, request, ORGANIZER);
+  await page.goto(`${ADMIN_PAGE}#e=${sample.event.id}`);
+  await googleLogin(page);
   await page.getByRole('button', { name: '試合結果', exact: true }).click();
   await page.getByRole('button', { name: 'グループD', exact: true }).click();
   const ids = sample.groups[3].matches.map((m) => m.id);

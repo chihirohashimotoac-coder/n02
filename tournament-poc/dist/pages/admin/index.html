@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'none'; form-action 'none'" />
-    <meta name="referrer" content="no-referrer" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; base-uri 'none'; form-action 'none'" />
+    <meta name="referrer" content="strict-origin" />
     <title>n02 Tournament 運営</title>
     <link rel="stylesheet" href="admin.css" />
   </head>
@@ -21,6 +21,7 @@
     <main id="app" class="content"></main>
     <div id="toast" class="toast-box" aria-live="polite"></div>
     <div class="busy-indicator" aria-hidden="true">保存中…</div>
+    <script src="https://accounts.google.com/gsi/client" async></script>
     <script src="config.js"></script>
     <script src="qrcode.js"></script>
     <script src="admin.js"></script>

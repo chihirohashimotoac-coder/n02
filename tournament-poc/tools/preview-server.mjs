@@ -9,7 +9,7 @@
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createStore, loadProject, ROOT, SPREADSHEET_ID, ADMIN_KEY } from '../tests/gas-mock.mjs';
+import { createStore, loadProject, ROOT, SPREADSHEET_ID, ADMIN_KEY, GOOGLE_CLIENT_ID, fakeIdToken } from '../tests/gas-mock.mjs';
 
 const PORT = Number(process.env.PORT || 4180);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -23,7 +23,7 @@ function reset({ configured = false } = {}) {
   env = {
     store,
     fault: { viewer: 'ok', admin: 'ok' },
-    admin: loadProject('admin', { store, clock, owner: OWNER, activeUser: OWNER, properties: configured ? { SPREADSHEET_ID, ADMIN_KEY } : { ADMIN_KEY } }),
+    admin: loadProject('admin', { store, clock, owner: OWNER, activeUser: OWNER, properties: configured ? { SPREADSHEET_ID, ADMIN_KEY, GOOGLE_CLIENT_ID } : { ADMIN_KEY, GOOGLE_CLIENT_ID } }),
     viewer: loadProject('viewer', { store, clock, owner: OWNER, activeUser: '', properties: { SPREADSHEET_ID } }),
   };
 }
@@ -93,7 +93,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, 'text/javascript; charset=utf-8', "window.TPOC_CONFIG = { endpoint: 'https://script.google.com/macros/s/PREVIEW/exec' };");
       }
       if (name === 'admin/config.js') {
-        return send(res, 200, 'text/javascript; charset=utf-8', "window.TPOC_ADMIN_CONFIG = { endpoint: 'https://script.google.com/macros/s/PREVIEW-ADMIN/exec' };");
+        return send(res, 200, 'text/javascript; charset=utf-8', `window.TPOC_ADMIN_CONFIG = { endpoint: 'https://script.google.com/macros/s/PREVIEW-ADMIN/exec', googleClientId: '${GOOGLE_CLIENT_ID}' };`);
       }
       const types = {
         'index.html': 'text/html; charset=utf-8',
@@ -174,6 +174,26 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/__expire-viewer-cache') {
       env.viewer.cache.clear();
       return send(res, 200, 'application/json', '{"ok":true}');
+    }
+    // Google Identity Services（accounts.google.com/gsi/client）の代わり。画面テストでブラウザ側から振り替える。
+    // ボタンを押すと、指定したメールアドレスのテスト用 ID トークン（模擬 tokeninfo が本物として扱う形）を渡す
+    if (req.method === 'GET' && url.pathname === '/__fake-gsi.js') {
+      const email = url.searchParams.get('email') || 'organizer@example.org';
+      const token = fakeIdToken(email, null);
+      const script = `window.google = { accounts: { id: {
+  initialize: function (cfg) { window.__gisConfig = cfg; },
+  renderButton: function (box) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'fake-gsi';
+    b.textContent = 'Google でログイン（テスト: ${email}）';
+    b.addEventListener('click', function () { window.__gisConfig.callback({ credential: ${JSON.stringify(token)} }); });
+    box.appendChild(b);
+  },
+  disableAutoSelect: function () {},
+  prompt: function () {}
+} } };`;
+      return send(res, 200, 'text/javascript; charset=utf-8', script);
     }
     if (req.method === 'GET' && url.pathname === '/__stats') {
       return send(res, 200, 'application/json', JSON.stringify({ stats: env.store.stats, dump: JSON.parse(env.store.dump()) }));

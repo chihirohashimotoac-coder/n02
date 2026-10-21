@@ -322,6 +322,8 @@ export function loadProject(app, options = {}) {
     activeUser: options.activeUser === undefined ? 'owner@example.com' : options.activeUser,
     lockBusy: false,
     locks: 0,
+    fetches: [],
+    urlFetchFail: false,
     logs: [],
   };
   project.properties = createProperties(options.properties);
@@ -415,6 +417,28 @@ export function loadProject(app, options = {}) {
         },
       },
     },
+    // Google の tokeninfo（https://oauth2.googleapis.com/tokeninfo?id_token=…）だけを模す。
+    // fakeIdToken() が作るトークンは「ヘッダー.クレーム（base64url の JSON）.署名」で、署名が 'valid-signature' なら本物として扱う
+    UrlFetchApp: {
+      fetch(url, params = {}) {
+        project.fetches.push(url);
+        if (project.urlFetchFail) throw new Error('Address unavailable (simulated)');
+        const m = String(url).match(/^https:\/\/oauth2\.googleapis\.com\/tokeninfo\?id_token=([^&]+)$/);
+        if (!m) throw new Error('unexpected UrlFetchApp.fetch ' + url);
+        if (params.muteHttpExceptions !== true) throw new Error('muteHttpExceptions must be true');
+        const [, body, sig] = decodeURIComponent(m[1]).split('.');
+        let claims = null;
+        try {
+          claims = sig === 'valid-signature' ? JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) : null;
+        } catch {
+          claims = null;
+        }
+        const expired = claims && Number(claims.exp) * 1000 <= clock.now();
+        const code = claims && !expired ? 200 : 400;
+        const text = code === 200 ? JSON.stringify(claims) : JSON.stringify({ error: 'invalid_token', error_description: 'Invalid Value' });
+        return { getResponseCode: () => code, getContentText: () => text };
+      },
+    },
     PropertiesService: { getScriptProperties: () => project.properties },
     CacheService: { getScriptCache: () => project.cache },
     LockService: { getScriptLock: () => createLock(project) },
@@ -495,16 +519,34 @@ export function loadProject(app, options = {}) {
 }
 
 export const ADMIN_KEY = 'test-admin-key-0123456789-abcdefghij';
+export const GOOGLE_CLIENT_ID = '123456789012-testclientid0preview.apps.googleusercontent.com';
+
+/** テスト用の Google ID トークン（UrlFetchApp の模擬 tokeninfo が本物として扱う形）。claims で上書きできる */
+export function fakeIdToken(email, clock, claims = {}, signature = 'valid-signature') {
+  const nowSec = Math.floor((clock ? clock.now() : Date.now()) / 1000);
+  const body = {
+    iss: 'https://accounts.google.com',
+    aud: GOOGLE_CLIENT_ID,
+    sub: 'sub-' + email,
+    email,
+    email_verified: 'true',
+    iat: String(nowSec),
+    exp: String(nowSec + 3600),
+    ...claims,
+  };
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  return `${enc({ alg: 'RS256', typ: 'JWT' })}.${enc(body)}.${signature}`;
+}
 
 /** 運営者用・閲覧者用の 2 プロジェクトを同じスプレッドシートにつないで用意する */
 export function setupPair(options = {}) {
   const store = options.store || createStore();
   const clock = options.clock || createClock();
   if (!store.get()) store.add();
-  const admin = loadProject('admin', { store, clock, properties: { SPREADSHEET_ID, ADMIN_KEY }, ...options.admin });
+  const admin = loadProject('admin', { store, clock, properties: { SPREADSHEET_ID, ADMIN_KEY, GOOGLE_CLIENT_ID }, ...options.admin });
   const viewer = loadProject('viewer', { store, clock, properties: { SPREADSHEET_ID }, activeUser: '', ...options.viewer });
   let n = 0;
-  // extra.auth: 省略 = 管理者 / 'anon' = 未認証 / { eventId, key } = 主催者 / { adminKey } など任意
+  // extra.auth: 省略 = 管理者 / 'anon' = 未認証 / { session } = ログインした主催者・スタッフ / { adminKey } など任意
   const call = (action, payload = {}, extra = {}) => {
     const auth = extra.auth === undefined ? { adminKey: ADMIN_KEY } : extra.auth === 'anon' ? undefined : extra.auth;
     return admin.post({ action, payload, requestId: extra.requestId || `test-request-${String(++n).padStart(8, '0')}`, auth, ...extra.request });
@@ -514,5 +556,9 @@ export function setupPair(options = {}) {
     if (!res.ok) throw new Error(`${action} failed: ${res.error.code} ${res.error.message}`);
     return res.data;
   };
-  return { store, clock, admin, viewer, call, ok };
+  /** Google でログインしてセッションの auth を返す */
+  const loginAs = (email) => ({ session: ok('login', { idToken: fakeIdToken(email, clock) }, { auth: 'anon' }).session });
+  /** 管理パスワードでログインしてセッションの auth を返す */
+  const staffLogin = (eventId, password) => ({ session: ok('staffLogin', { eventId, password }, { auth: 'anon' }).session });
+  return { store, clock, admin, viewer, call, ok, loginAs, staffLogin };
 }

@@ -56,27 +56,38 @@ function buildApp(name, spec) {
  * 通信だけを config.js の endpoint（閲覧者用 Web アプリの ?format=json）への fetch に切り替える。
  * インラインのスクリプトを持たないので、CSP で script-src 'self' に絞れる。
  */
-function toStaticPage(templatePath, css, js, connect) {
+function toStaticPage(templatePath, css, js, connect, opts = {}) {
   // qrcode.js（同梱ライブラリ）は画面のスクリプトより先に読む
+  // opts.google: Google のログインボタン（Google Identity Services）を使う。CSP は Google の案内どおり
+  // https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid#content_security_policy
+  const gsi = opts.google ? ' https://accounts.google.com/gsi/' : '';
   const csp = [
     "default-src 'none'",
-    "script-src 'self'",
-    "style-src 'self'",
+    `script-src 'self'${opts.google ? ' https://accounts.google.com/gsi/client' : ''}`,
+    `style-src 'self'${opts.google ? ' https://accounts.google.com/gsi/style' : ''}`,
     "img-src 'self' data:",
-    `connect-src ${connect}`,
+    `connect-src ${connect}${gsi}`,
+    ...(opts.google ? [`frame-src${gsi}`] : []),
     "base-uri 'none'",
     "form-action 'none'",
   ].join('; ');
+  // Google のログインはページの出どころ（origin）で許可を確かめるので、運営ページは origin だけを送る。
+  // URL の # 以降（大会 ID）は Referer に含まれない。閲覧ページは何も送らない
+  const referrer = opts.google ? 'strict-origin' : 'no-referrer';
   const html = read(templatePath)
     .replace('    <base target="_top" />\n', '')
     .replace(
       '<meta name="viewport" content="width=device-width, initial-scale=1" />',
       '<meta name="viewport" content="width=device-width, initial-scale=1" />\n' +
         `    <meta http-equiv="Content-Security-Policy" content="${csp}" />\n` +
-        '    <meta name="referrer" content="no-referrer" />'
+        `    <meta name="referrer" content="${referrer}" />`
     )
     .replace(/<style>\s*\/\*@@STYLES@@\*\/\s*<\/style>/, `<link rel="stylesheet" href="${css}" />`)
-    .replace(/<script>\s*\/\*@@SCRIPT@@\*\/\s*<\/script>/, `<script src="config.js"></script>\n    <script src="qrcode.js"></script>\n    <script src="${js}"></script>`);
+    .replace(
+      /<script>\s*\/\*@@SCRIPT@@\*\/\s*<\/script>/,
+      (opts.google ? '<script src="https://accounts.google.com/gsi/client" async></script>\n    ' : '') +
+        `<script src="config.js"></script>\n    <script src="qrcode.js"></script>\n    <script src="${js}"></script>`
+    );
   if (html.includes('@@') || html.includes('<base')) throw new Error('pages template not converted: ' + templatePath);
   return html;
 }
@@ -99,7 +110,7 @@ function buildPages() {
     'dist/pages/viewer.js': header + read('viewer/src/client/viewer.js'),
     'dist/pages/config.example.js': read('viewer/src/pages/config.example.js'),
     'dist/pages/README.md': read('viewer/src/pages/README.md'),
-    'dist/pages/admin/index.html': toStaticPage('admin/src/client/index.html', 'admin.css', 'admin.js', connect),
+    'dist/pages/admin/index.html': toStaticPage('admin/src/client/index.html', 'admin.css', 'admin.js', connect, { google: true }),
     'dist/pages/admin/admin.css': header + read('admin/src/client/admin.css'),
     'dist/pages/admin/admin.js': header + read('admin/src/client/admin.js'),
     'dist/pages/admin/config.example.js': read('admin/src/pages/config.example.js'),

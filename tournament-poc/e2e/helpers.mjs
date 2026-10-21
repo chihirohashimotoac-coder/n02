@@ -1,6 +1,6 @@
 // 画面テスト共通の操作
 import { expect } from '@playwright/test';
-import { ADMIN_KEY } from '../tests/gas-mock.mjs';
+import { ADMIN_KEY, fakeIdToken } from '../tests/gas-mock.mjs';
 
 export { ADMIN_KEY };
 export const VIEWER_ENDPOINT = 'https://script.google.com/macros/s/PREVIEW/exec';
@@ -28,13 +28,23 @@ export async function adminCall(request, action, payload = {}, auth) {
   return res.json();
 }
 
-/** 初期化済み・サンプル大会を公開した状態を作り、詳細と運営用の鍵を返す */
+/** Google でログインしたことにしてセッションの auth を返す（API を直接呼ぶテスト用） */
+export async function loginSession(request, email) {
+  const res = await adminCall(request, 'login', { idToken: fakeIdToken(email, null) }, 'anon');
+  expect(res.ok, JSON.stringify(res.error)).toBe(true);
+  return { session: res.data.session };
+}
+
+export const ORGANIZER = 'organizer@example.org';
+
+/** 初期化済み・サンプル大会を公開した状態を作り、詳細と主催者のセッションを返す（主催者は ORGANIZER） */
 export async function publishedSample(request) {
   await reset(request, { configured: true });
   await adminCall(request, 'initializeStorage');
-  const res = await adminCall(request, 'createSampleEvent', { publish: true });
+  const auth = await loginSession(request, ORGANIZER);
+  const res = await adminCall(request, 'createSampleEvent', { publish: true }, auth);
   expect(res.ok).toBe(true);
-  return { ...res.data.detail, adminKey: res.data.adminKey };
+  return { ...res.data.detail, auth };
 }
 
 /**
@@ -63,3 +73,20 @@ export async function expectNoHorizontalOverflow(page) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 }
+
+/**
+ * Google のログインボタン（accounts.google.com/gsi/client）を模擬に振り替える。
+ * ボタンを押すと email の Google アカウントでログインしたことになる（サーバー側は模擬 tokeninfo で確かめる）。
+ */
+export async function fakeGoogle(page, request, email) {
+  await page.route('https://accounts.google.com/gsi/client', async (route) => {
+    const r = await request.get(`/__fake-gsi.js?email=${encodeURIComponent(email)}`);
+    await route.fulfill({ status: 200, contentType: 'text/javascript', body: await r.text() });
+  });
+}
+
+/** 運営ページで Google でログインする（fakeGoogle を設定済みのページで） */
+export async function googleLogin(page) {
+  await page.locator('.fake-gsi').first().click();
+}
+

@@ -340,9 +340,10 @@ test('段階の追加・設定・削除と、その制約', () => {
 
 test('主催者は他の大会の段階を、stageId や eventId との組み合わせで操作できない', () => {
   const p = ready();
-  const a = p.call('createEvent', { name: 'A', template: 'robin', groupCount: 1, rule: { format: 'legs', bestOf: 3 } }, { auth: 'anon' }).data;
-  const b = p.call('createEvent', { name: 'B', template: 'elimination', rule: { format: 'legs', bestOf: 3 } }, { auth: 'anon' }).data;
-  const authA = { eventId: a.eventId, key: a.adminKey };
+  const authA = p.loginAs('a@example.org');
+  const authB = p.loginAs('b@example.org');
+  const a = p.call('createEvent', { name: 'A', template: 'robin', groupCount: 1, rule: { format: 'legs', bestOf: 3 } }, { auth: authA }).data;
+  const b = p.call('createEvent', { name: 'B', template: 'elimination', rule: { format: 'legs', bestOf: 3 } }, { auth: authB }).data;
   const bStage = b.detail.stages[0];
   assert.equal(p.call('updateStage', { stageId: bStage.id, rev: bStage.rev, name: 'x' }, { auth: authA }).error.code, 'NOT_FOUND');
   assert.equal(p.call('deleteStage', { stageId: bStage.id, rev: bStage.rev }, { auth: authA }).error.code, 'NOT_FOUND');

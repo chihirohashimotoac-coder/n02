@@ -1,6 +1,6 @@
 # 引き継ぎ（Handoff）— n02 Tournament / League Manager PoC
 
-最終更新: 2026-10-21 / 対象版: **v0.4.3**（v0.4.2・v0.4.3 は閲覧ページのみの変更。Apps Script は v0.4.1 のまま）
+最終更新: 2026-10-21 / 対象版: **v0.5.0**（Google ログイン・管理パスワード。運営用 Apps Script・運営ページの更新と Google Cloud の設定が必要）
 
 次のセッションは、まずこのファイルと [README.md](../README.md)・[test-plan.md](test-plan.md) を読んでから作業してください。
 
@@ -30,13 +30,13 @@
 運用上の約束:
 - ユーザーへの返答は**日本語**（丁寧語・簡潔・正直）。
 - 外部への操作（push 以外の公開、Google 側の変更、リポジトリ作成など）は**事前に承認を得る**。
-- 管理者の鍵（ADMIN_KEY）・作成コード（CREATE_CODE）・運営用 URL（`#e=…&k=…`）を**会話に貼らないよう**ユーザーに案内済み。こちらからも求めない。
+- 管理者の鍵（ADMIN_KEY）・管理パスワード・（v0.4 までの）作成コードと運営用 URL（`#e=…&k=…`）を**会話に貼らないよう**ユーザーに案内済み。こちらからも求めない。OAuth クライアント ID と大会 ID は秘密ではないので、会話でもらってよい。
 
 ## 3. 構成（v0.4.1）
 
 ```
 閲覧者 ─ GitHub Pages（/）──fetch(Cookie なし)──▶ 閲覧者用 Web アプリ（?format=json, readonly）─┐
-主催者 ─ GitHub Pages（/admin/#e=ID&k=鍵）─POST─▶ 運営用 Web アプリ（doPost, 鍵を毎回検証）──────┼─▶ スプレッドシート（保存専用）
+主催者（Google）・スタッフ（管理パスワード） ─ GitHub Pages（/admin/、/admin/#e=ID）─POST─▶ 運営用 Web アプリ（doPost, セッションを毎回検証）─┼─▶ スプレッドシート（保存専用）
 管理者 ─ GitHub Pages（/admin/#admin）──── ADMIN_KEY ─┘                                          ┘
 ```
 
@@ -49,7 +49,8 @@
 | 保存先 | スプレッドシート「Tournament PoC」（ID はスクリプト プロパティ `SPREADSHEET_ID`。ソースに書かない） |
 | ユーザー向け手順ページ | https://claude.ai/artifact/KekprKNKYKrHwd1MuaVke5 （コピーボタン付き。更新のたびに作り直している） |
 
-- 運営用: `appsscript.json` のスコープは `spreadsheets` のみ、実行「自分」・アクセス「全員」。スクリプト プロパティ `SPREADSHEET_ID` `ADMIN_KEY` `CREATE_CODE`（任意）`VIEWER_URL`。
+- 運営用: `appsscript.json` のスコープは `spreadsheets` と `script.external_request`（v0.5.0〜。tokeninfo でログイン確認）、実行「自分」・アクセス「全員」。スクリプト プロパティ `SPREADSHEET_ID` `ADMIN_KEY` `GOOGLE_CLIENT_ID`（v0.5.0〜必須）`VIEWER_URL`。`CREATE_CODE` は v0.5.0 で廃止。
+- Google Cloud: OAuth クライアント ID（ウェブ アプリケーション、承認済みの JavaScript 生成元 `https://chihirohashimotoac-coder.github.io`）。同じ ID を `GOOGLE_CLIENT_ID` と Pages の `admin/config.js` の `googleClientId` に書く（秘密ではない）。
 - 閲覧者用: スコープ `spreadsheets.readonly`、高度なサービス Sheets API（`SpreadsheetApp.openById` は readonly では使えないため）。**v0.2.0 以降コード変更なし**。
 - Apps Script の画面（HtmlService）は複数 Google アカウントのブラウザで開けないため、画面はすべて GitHub Pages。
 
@@ -57,8 +58,9 @@
 
 | 項目 | 状態 |
 | --- | --- |
-| ソース（n02 ブランチ） | v0.4.2 をコミット・push 済み（`aabd439`。v0.4.1 は `c7d1fd6`） |
-| GitHub Pages | v0.4.2 を push 済み（`e1ee333`。`viewer.css`・`viewer.js` のみ差し替え、pages build and deployment は成功）。Pages 側の `README.md` には `admin/` の行が手で足されており `dist/pages/README.md` と 1 行違う（上書きしていない） |
+| ソース（n02 ブランチ） | v0.5.0 をコミット・push 済み（v0.4.3 は `5a8dbc8`、v0.4.1 は `c7d1fd6`） |
+| v0.5.0 の反映 | **未反映**。順番: ①ユーザーが Google Cloud で OAuth クライアント ID を作る → ②運営用 Apps Script に v0.5.0 を貼り付け・`GOOGLE_CLIENT_ID` を設定・承認し直し・新バージョンでデプロイ・管理者画面で「初期化する」→ ③こちらで Pages の `admin/` 一式と `admin/config.js`（`googleClientId` を追加）を push。②の前に③を出すと運営画面のログインが「不明な操作です。」になる |
+| GitHub Pages | v0.4.3 を push 済み（`fd90803`）。v0.4.2 は `e1ee333`（`viewer.css`・`viewer.js` のみ差し替え、pages build and deployment は成功）。Pages 側の `README.md` には `admin/` の行が手で足されており `dist/pages/README.md` と 1 行違う（上書きしていない） |
 | 運営用 Apps Script のコード | ユーザーが v0.4.1 を貼り付け済み。Drive コネクタで読み出し、**ビルドと完全一致**を確認 |
 | 運営用のデプロイ（新バージョン） | **動作確認済み**（2026-10-21）。ユーザーが「まとめて確定」で「2 試合の結果を確定しました。」と表示されたと報告 → v0.4.1 の `saveMatchResults` が実環境で動いている。閲覧ページにも反映された（R-17 合格） |
 | 閲覧者用 Apps Script | 変更不要（v0.2.0 のまま）。v0.4.2 で `dist/viewer/Index.html` の CSS も変わるが、Apps Script 版の画面は QR を出さないので貼り替え不要 |
@@ -68,6 +70,7 @@
 - v0.2.0: 閲覧ページを GitHub Pages に（複数アカウント問題の回避）
 - v0.3.0: 誰でも主催・大会ごとの秘密の運営用 URL（ログインなし）
 - v0.4.0: 大会形式を主催者が組める（段階・ロビン/リーグ/トーナメント・A/B 進出・順位の決め方・2 回総当たり・節名・段階/回戦ごとの Best of・セット制・3 位決定戦・シード・不戦勝）
+- v0.5.0: 大会の作成・運営を Google ログイン（作った本人）＋大会ごとの管理パスワード（店舗スタッフ）に変更。運営用 URL（鍵）と作成コードを廃止。運営用 Apps Script はスコープに `script.external_request` を追加（tokeninfo でログイン確認）、スクリプト プロパティ `GOOGLE_CLIENT_ID` が必須。運営ページの `admin/config.js` に `googleClientId` が必須
 - v0.4.3: 閲覧ページのトーナメントを、回戦ごとの列に試合を並べて線でつなぐトーナメント表に変更（ロビンは変更なし）。公開データの round・order で配置するのでサーバーの変更なし。Pages のみの変更
 - v0.4.2: 閲覧ページの QR を内容の右余白に収まる大きさで表示（内容は動かさない・余白がなければ出さない）。Pages のみの変更
 - v0.4.1: 結果の「まとめて確定」（全件検証してから保存）・入力途中の値の保持・閲覧ページの QR コード（広い画面で右下に固定、スマホはボタンで拡大、`?qr=0/1`）・運営画面の QR（PNG 保存）
@@ -104,7 +107,8 @@ Drive コネクタでできること・できないこと（確認済み）:
 実環境で未検証（[test-plan.md](test-plan.md) の確認項目）:
 - R-14 の残り: 閲覧者用 Apps Script の「実行数」でのクォータ系エラーの確認、段階 4（50 人一斉アクセス・任意）、実機・店内回線での確認（[load-test.md](load-test.md)。GitHub Actions の「負荷テスト（閲覧ページ）」で実行できる）
 - 2 大会の同時進行
-- R-06（置き換え後: 別の大会の ID に差し替えた運営用 URL では操作できない）、R-09〜R-13
+- R-09〜R-13（R-06 は v0.5.0 で R-20「他人のアカウントでは開けない」に置き換え）
+- R-19〜R-22（v0.5.0 の Google ログイン・管理パスワード。Google 側は模擬でしか確認していない）
 - R-15・R-16（v0.4.0 の形式機能はユーザーが「全て問題なく出来ました」と報告済み。項目ごとの結果は未記録）
 
 実環境で合格済み: R-01〜R-05（v0.1〜v0.3）、R-07（置き換え。保存版コードとスコープで確認）・R-08・R-17・R-18（2026-10-21。R-18 は v0.4.2 の QR 配置を含む）、R-14（2026-10-21。GitHub Actions から 50 画面 × 15 分で成功率 99.6%・p95 1.4 秒・反映 約 75〜90 秒）
