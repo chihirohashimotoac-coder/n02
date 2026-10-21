@@ -26,6 +26,8 @@ import { loadAwardDisplay, saveAwardDisplay } from '../storage/awardSettings';
 import { selectX01Stats } from '../domain/x01Stats';
 import { X01StatsDetailTable, X01StatsSidePanel } from './X01StatsPanels';
 import { sidePanelId, STATS_DIALOG_ID, useX01StatsLayout } from './x01StatsLayout';
+import RemainingOdometer from './common/RemainingOdometer';
+import { detectX01Roll, useRemainingRolls } from './common/remainingRoll';
 
 interface Props {
   state: X01MatchState;
@@ -80,6 +82,8 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
   // as soon as it happens. One selector feeds the columns, the dialog and the footer's 3DA.
   const basicStats = useMemo(() => selectX01Stats(state, 'basic'), [state]);
   const detailStats = useMemo(() => selectX01Stats(state, 'details'), [state]);
+  // The big remaining numbers roll into a committed visit; display-only, read from the state alone.
+  const remainingRolls = useRemainingRolls(state, detectX01Roll);
 
   const activePlayer = state.players[state.active];
   // A round-limit leg must be resolved before anything else, so that prompt is derived from
@@ -672,7 +676,9 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         <div className="n01-left-table">
           {([0, 1] as const).map((index) => (
             <div key={index} className={state.active === index ? 'active' : ''}>
-              <strong>{state.players[index].remaining}</strong>
+              <strong>
+                <RemainingOdometer value={state.players[index].remaining} roll={remainingRolls[index]} />
+              </strong>
               {routes[index] ? (
                 <span className="checkout-route">{routes[index]!.map(dartLabel).join(' - ')}</span>
               ) : (
