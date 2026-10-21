@@ -9,8 +9,9 @@ n02 から外部リンクで使う「トーナメント・ロビン・リーグ�
 
 > 作業を引き継ぐ場合は、まず [docs/HANDOFF.md](docs/HANDOFF.md) を読んでください。
 
-> 現時点の位置づけ: ローカルの模擬環境（Apps Script のサービスを Node.js で模したもの）では、自動テストで動作を確認済みです。
-> **Google の実環境（Apps Script へのデプロイ・実機・50 人同時閲覧）では未検証**です。確認手順は [docs/deploy.md](docs/deploy.md)・[docs/test-plan.md](docs/test-plan.md)・[docs/load-test.md](docs/load-test.md) にあります。
+> 現時点の位置づけ（v0.6.0）: ローカルの模擬環境（Apps Script のサービスを Node.js で模したもの）の自動テストに加え、
+> Google の実環境（Apps Script・GitHub Pages）にも反映し、主な確認項目（閲覧・運営・Google ログイン・管理パスワード・50 画面の負荷テスト・大会の削除など）は合格しています。
+> 未確認の項目は [docs/test-plan.md](docs/test-plan.md) と [docs/HANDOFF.md](docs/HANDOFF.md) の「未検証・残タスク」を参照してください。
 
 ---
 
