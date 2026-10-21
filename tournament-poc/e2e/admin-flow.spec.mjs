@@ -228,9 +228,20 @@ test('トーナメントのみ: 5 名・シード・不戦勝・3 位決定戦 �
   await viewer.goto(`/pages/index.html?event=${eventId}`);
   await expect(viewer.getByRole('heading', { level: 1 })).toHaveText('E2E トーナメント');
   await expect(viewer.locator('.bracket__round')).toHaveCount(3);
-  await expect(viewer.locator('.match--final')).toHaveCount(5);
+  await expect(viewer.locator('.bmatch--final')).toHaveCount(5);
   await expect(viewer.locator('.champion')).toContainText('シード1');
-  await expect(viewer.locator('.matches--third .match')).toHaveCount(1);
+  await expect(viewer.locator('.matches--third .bmatch')).toHaveCount(1);
+  // トーナメント表: 1 回戦は 4 枠のうち 2 枠目（4 位 vs 5 位）だけ。勝者は準決勝 1 試合目に上がり、線でつながる
+  await expect(viewer.locator('.bracket__round').first().locator('.bracket__slot')).toHaveCount(4);
+  await expect(viewer.locator('.bracket__round').first().locator('.bracket__slot').nth(1)).toContainText('シード4');
+  await expect(viewer.locator('.bracket__round').nth(1).locator('.bracket__slot.is-fed')).toHaveCount(1);
+  // 決勝は準決勝 2 試合の上下の中央に来る
+  const semis = await viewer.locator('.bracket__round').nth(1).locator('.bmatch').evaluateAll((els) => els.map((e) => e.getBoundingClientRect()));
+  const fin = await viewer.locator('.bracket__round').nth(2).locator('.bmatch').boundingBox();
+  const mid = (semis[0].top + semis[0].height / 2 + semis[1].top + semis[1].height / 2) / 2;
+  expect(Math.abs(fin.y + fin.height / 2 - mid)).toBeLessThan(2);
+  // 優勝者の段が強調される
+  await expect(viewer.locator('.bracket__round').nth(2).locator('.bmatch__row.is-winner')).toContainText('シード1');
   await expectNoHorizontalOverflow(viewer);
   await viewer.screenshot({ path: testInfo.outputPath('viewer-bracket.png'), fullPage: true });
 });

@@ -22,6 +22,7 @@
   --error-bg: #fbe3e3;
   --error-ink: #7a1414;
   --radius: 12px;
+  --bracket-line: #a9a597;
   color-scheme: light;
 }
 
@@ -47,6 +48,7 @@
     --warn-ink: #ffe3a3;
     --error-bg: #3b1d1d;
     --error-ink: #ffc0c0;
+    --bracket-line: #56625d;
     color-scheme: dark;
   }
 }
@@ -531,26 +533,100 @@ body {
   color: var(--surface);
 }
 
+/*
+ * トーナメント表: 回戦ごとの列（グリッド）に試合を枠の位置で並べ、勝ち上がりを線でつなぐ。
+ * 各列の枠は同じ高さを分け合う（flex: 1）ので、回戦が進むごとに枠の高さが 2 倍になり、
+ * 試合はちょうど前の回戦の 2 試合の中央に来る。表が画面に収まらないときは、表の中だけ横にスクロールする。
+ */
 .bracket {
-  display: grid;
-  gap: 16px;
+  --col: 168px;
+  --gap: 28px;
+  --line-w: 2px;
   min-width: 0;
 }
 
-.bracket__round {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  min-width: 0;
+.bracket__scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 10px 2px 8px;
+}
+
+.bracket__scroll:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.bracket__grid {
   display: grid;
-  gap: 8px;
-  align-content: start;
+  grid-template-rows: auto 1fr auto;
+  column-gap: var(--gap);
+  row-gap: 4px;
+}
+
+.bracket__grid--1 {
+  grid-template-columns: repeat(1, minmax(var(--col), 280px));
+}
+
+.bracket__grid--2 {
+  grid-template-columns: repeat(2, minmax(var(--col), 280px));
+}
+
+.bracket__grid--3 {
+  grid-template-columns: repeat(3, minmax(var(--col), 280px));
+}
+
+.bracket__grid--4 {
+  grid-template-columns: repeat(4, minmax(var(--col), 280px));
+}
+
+.bracket__grid--5 {
+  grid-template-columns: repeat(5, minmax(var(--col), 280px));
+}
+
+.bracket__grid--6 {
+  grid-template-columns: repeat(6, minmax(var(--col), 280px));
+}
+
+.bracket__grid--7 {
+  grid-template-columns: repeat(7, minmax(var(--col), 280px));
+}
+
+.bracket__col--1 {
+  grid-column: 1;
+}
+
+.bracket__col--2 {
+  grid-column: 2;
+}
+
+.bracket__col--3 {
+  grid-column: 3;
+}
+
+.bracket__col--4 {
+  grid-column: 4;
+}
+
+.bracket__col--5 {
+  grid-column: 5;
+}
+
+.bracket__col--6 {
+  grid-column: 6;
+}
+
+.bracket__col--7 {
+  grid-column: 7;
 }
 
 .bracket__title {
+  grid-row: 1;
   margin: 0;
-  font-size: 16px;
+  padding: 0 2px 4px;
+  border-bottom: 2px solid var(--line);
+  font-size: 15px;
+  white-space: nowrap;
 }
 
 .bracket__bestof {
@@ -559,51 +635,213 @@ body {
   color: var(--ink-2);
 }
 
+.bracket__round {
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bracket__slot {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  position: relative;
+  padding: 8px 0;
+}
+
+.bracket__slot > .bmatch {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 勝ち上がりの線: 試合の右に横線 → 2 枠ごとに縦線でまとめる → 次の回戦の試合の左に横線 */
+.bracket__slot:not(.is-empty)::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: calc(var(--gap) / 2);
+  margin-top: calc(var(--line-w) / -2);
+  border-top: var(--line-w) solid var(--bracket-line);
+}
+
+.bracket__slot:not(.is-empty)::before {
+  content: '';
+  position: absolute;
+  left: calc(100% + var(--gap) / 2 - var(--line-w) / 2);
+  border-left: var(--line-w) solid var(--bracket-line);
+}
+
+.bracket__slot:nth-child(odd)::before {
+  top: calc(50% - var(--line-w) / 2);
+  bottom: 0;
+}
+
+.bracket__slot:nth-child(even)::before {
+  top: 0;
+  bottom: calc(50% - var(--line-w) / 2);
+}
+
+.bracket__round.is-last .bracket__slot::before,
+.bracket__round.is-last .bracket__slot::after {
+  content: none;
+}
+
+.bracket__slot.is-fed > .bmatch::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: calc(var(--gap) / 2 + 1px);
+  margin-top: calc(var(--line-w) / -2);
+  border-top: var(--line-w) solid var(--bracket-line);
+}
+
+.bracket__third {
+  grid-row: 3;
+  margin-top: 18px;
+}
+
+.bracket__third .bracket__title {
+  border-bottom-style: dashed;
+}
+
 .matches--third {
-  border-top: 1px dashed var(--line);
-  padding-top: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.bracket .match {
-  /* トーナメントは幅が狭いので、常に「回戦・状態」→「対戦」の 2 行にする */
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  grid-template-areas:
-    'round round status'
-    'p1 score p2';
-  row-gap: 4px;
+/* 試合カード: 上下 2 段（選手名・取得数）。勝者の段を強調する */
+.bmatch {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
 }
 
-.bracket .match__round {
-  grid-area: round;
-  visibility: hidden;
+.bmatch__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 8px;
+  font-size: 14px;
 }
 
-.matches--third .match__round {
-  visibility: visible;
+.bmatch__row:first-of-type {
+  border-radius: 7px 7px 0 0;
 }
 
-.bracket .match__player--1 {
-  grid-area: p1;
+.bmatch__row:last-of-type {
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 7px 7px;
 }
 
-.bracket .match__score {
-  grid-area: score;
+.bmatch__seed {
+  flex: none;
+  min-width: 1.6em;
+  padding: 0 3px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
 }
 
-.bracket .match__player--2 {
-  grid-area: p2;
+.bmatch__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.bracket .status {
-  grid-area: status;
+.bmatch__legs {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
 }
 
-/* 広い画面: トーナメントの各回戦を横に並べる */
-@media (min-width: 1000px) {
+.bmatch__score {
+  flex: none;
+  min-width: 1.2em;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bmatch__row.is-winner {
+  background: var(--final-bg);
+}
+
+.bmatch__row.is-winner .bmatch__name,
+.bmatch__row.is-winner .bmatch__score {
+  font-weight: 700;
+  color: var(--final);
+}
+
+.bmatch__row.is-loser {
+  color: var(--ink-2);
+}
+
+.bmatch__row.is-tbd .bmatch__name {
+  font-style: italic;
+  color: var(--ink-2);
+}
+
+/* スマートフォン用の .status { grid-area } を受けないよう、詳細度を上げて上書きする */
+.bmatch .bmatch__status {
+  grid-area: auto;
+  position: absolute;
+  top: -11px;
+  right: 6px;
+  z-index: 1;
+  padding: 1px 7px;
+  font-size: 11px;
+}
+
+.bmatch--live {
+  border-color: var(--live);
+  box-shadow: 0 0 0 1px var(--live);
+}
+
+.bmatch--check {
+  border-color: var(--check);
+}
+
+.bmatch--pending {
+  opacity: 0.85;
+}
+
+.bracket__hint {
+  display: none;
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.bracket.is-scrollable .bracket__hint {
+  display: block;
+}
+
+@media (max-width: 560px) {
   .bracket {
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(340px, 1fr);
-    overflow-x: auto;
+    --col: 148px;
+    --gap: 22px;
+  }
+
+  .bmatch__row {
+    font-size: 13px;
+    padding: 5px 6px;
   }
 }
 

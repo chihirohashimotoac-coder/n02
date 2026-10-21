@@ -279,3 +279,28 @@ test('fetch の通信: Cookie を送らず ?format=json を読み、HTTP エラ�
   assert.equal(calls[1].url, 'https://script.google.com/macros/s/ABC/exec?format=json');
   assert.match((await run({})).fail, /Unexpected token/);
 });
+
+test('トーナメント表の配置: 試合は order の枠に置き、不戦勝の枠は空き・線の要否・3 位決定戦を分ける', () => {
+  const { bracketLayout } = ctx.TPViewer;
+  // vm の別コンテキストの配列なので、比較の前に普通の値にする
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  const m = (round, order, label, p1 = 'a', p2 = 'b') => ({ id: `${round}-${order}-${label}`, round, order, label, p1: { id: p1 }, p2: { id: p2 } });
+  // 5 名 → 8 枠: 1 回戦は 2 枠目（4 位 vs 5 位）だけ、準決勝 2・決勝・3 位決定戦
+  const layout = bracketLayout([
+    { round: 3, label: '決勝', matches: [m(3, 1, '決勝', '', ''), m(3, 2, '3位決定戦', '', '')] },
+    { round: 1, label: '準々決勝', matches: [m(1, 2, '準々決勝')] },
+    { round: 2, label: '準決勝', matches: [m(2, 1, '準決勝', 'p1', ''), m(2, 2, '準決勝', 'p2', 'p3')] },
+  ]);
+  assert.deepEqual(plain(layout.columns.map((c) => [c.label, c.slots.length])), [['準々決勝', 4], ['準決勝', 2], ['決勝', 1]]);
+  assert.deepEqual(plain(layout.columns[0].slots.map((x) => (x ? x.order : null))), [null, 2, null, null]);
+  // 準決勝 1 は 1 回戦から勝者が上がってくる（線を引く）、準決勝 2 は不戦勝どうしなので線なし
+  assert.deepEqual(plain(layout.columns[1].fed), [true, false]);
+  assert.deepEqual(plain(layout.columns[2].fed), [true]);
+  assert.deepEqual(plain(layout.third.map((x) => x.label)), ['3位決定戦']);
+
+  // order が欠けている・重なるときは出現順に詰める
+  const broken = bracketLayout([{ round: 1, label: '決勝', matches: [m(1, 5, '決勝'), m(1, 5, '決勝')] }]);
+  assert.equal(broken.columns[0].slots.filter(Boolean).length, 2);
+  assert.deepEqual(plain(bracketLayout([]).columns), []);
+});
+

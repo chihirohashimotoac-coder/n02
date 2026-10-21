@@ -322,30 +322,143 @@
     return el('div', { className: 'groups' }, nodes);
   }
 
+  var THIRD_PLACE_LABEL = '3位決定戦';
+
+  /**
+   * トーナメント表の配置（DOM に依存しないので単体テストできる）。
+   * 最後の回戦を R とすると、回戦 r の枠は 2^(R−r) 個。試合は order（1 から）の枠に置く。
+   * 1 回戦の不戦勝の枠は空き（null）になり、線を引かない。order が欠けている・重なるときは出現順に詰める。
+   * 戻り値: { columns: [{ round, label, bestOf, slots: [match|null], fed: [bool] }], third: [match] }
+   */
+  function bracketLayout(rounds) {
+    var main = [];
+    var third = [];
+    (rounds || []).forEach(function (r) {
+      var ms = (r.matches || []).filter(function (m) {
+        if (m.label === THIRD_PLACE_LABEL) third.push(m);
+        return m.label !== THIRD_PLACE_LABEL;
+      });
+      if (ms.length) main.push({ round: Number(r.round) || 0, label: r.label || '', matches: ms });
+    });
+    main.sort(function (a, b) {
+      return a.round - b.round;
+    });
+    var columns = main.map(function (r, i) {
+      var count = Math.max(Math.pow(2, main.length - 1 - i), r.matches.length);
+      var slots = [];
+      for (var k = 0; k < count; k++) slots.push(null);
+      var placed = r.matches.every(function (m) {
+        var k = Number(m.order) - 1;
+        if (!(k >= 0 && k < count) || Math.floor(k) !== k || slots[k]) return false;
+        slots[k] = m;
+        return true;
+      });
+      if (!placed) {
+        slots = slots.map(function () {
+          return null;
+        });
+        r.matches.forEach(function (m, k) {
+          slots[k] = m;
+        });
+      }
+      var bestOf = r.matches[0] && r.matches[0].bestOf;
+      return { round: r.round, label: r.label, bestOf: bestOf || null, slots: slots, fed: [] };
+    });
+    // 前の回戦から勝者が上がってくる枠か（線を引くかどうか）
+    columns.forEach(function (c, i) {
+      c.fed = c.slots.map(function (m, k) {
+        var prev = columns[i - 1];
+        return !!(m && prev && (prev.slots[2 * k] || prev.slots[2 * k + 1]));
+      });
+    });
+    return { columns: columns, third: third };
+  }
+
+  function bracketMatch(m, seedById) {
+    var final = m.status === 'final';
+    var showScore = m.status === 'live' || final;
+    var sets = isSetMatch(m);
+    var row = function (p) {
+      var win = final && !!m.winnerId && m.winnerId === p.id;
+      var lose = final && !!m.winnerId && !win;
+      var score = sets ? p.sets : p.legs;
+      var seed = p.id && seedById[p.id];
+      return el('div', { className: 'bmatch__row' + (win ? ' is-winner' : '') + (lose ? ' is-loser' : '') + (p.id ? '' : ' is-tbd') }, [
+        seed ? el('span', { className: 'bmatch__seed', text: String(seed), 'aria-label': 'シード ' + seed }) : null,
+        el('span', { className: 'bmatch__name', text: p.id ? p.name : '未定', title: p.id ? p.name : null }),
+        win ? el('span', { className: 'visually-hidden', text: '（勝者）' }) : null,
+        sets && showScore && p.legs !== null && p.legs !== undefined ? el('span', { className: 'bmatch__legs', text: legsText(p.legs), 'aria-label': 'Leg 合計 ' + legsText(p.legs) }) : null,
+        el('span', { className: 'bmatch__score', text: showScore ? legsText(score) : '' }),
+      ]);
+    };
+    var showStatus = m.status === 'live' || m.status === 'check';
+    return el('div', { className: 'bmatch bmatch--' + m.status, 'data-match-id': m.id }, [
+      showStatus ? el('span', { className: 'bmatch__status status status--' + m.status, text: STATUS_LABEL[m.status] }) : el('span', { className: 'visually-hidden', text: STATUS_LABEL[m.status] || '' }),
+      row(m.p1),
+      row(m.p2),
+    ]);
+  }
+
+  function roundTitle(label, bestOf, extra) {
+    return el('h3', { className: 'bracket__title' + (extra ? ' ' + extra : '') }, [label, bestOf ? el('span', { className: 'bracket__bestof', text: ' Bo' + bestOf }) : null]);
+  }
+
+  /**
+   * トーナメント表: 回戦ごとの列に試合を枠の位置で並べ、勝ち上がりを線でつなぐ。
+   * 列数が多く画面に収まらないとき（スマートフォンなど）は、表の中だけ横にスクロールする。
+   */
   function renderBracket(stage) {
-    var rounds = stage.rounds || [];
-    if (!rounds.length) return el('p', { className: 'empty', text: '組み合わせはまだ決まっていません。' });
-    return el(
-      'div',
-      { className: 'bracket' },
-      rounds.map(function (r) {
-        var main = r.matches.filter(function (m) {
-          return m.label !== '3位決定戦';
-        });
-        var third = r.matches.filter(function (m) {
-          return m.label === '3位決定戦';
-        });
-        var bestOf = main[0] && main[0].bestOf;
-        return el('section', { className: 'bracket__round', 'aria-label': r.label }, [
-          el('h3', { className: 'bracket__title' }, [
-            r.label,
-            bestOf ? el('span', { className: 'bracket__bestof', text: ' Bo' + bestOf }) : null,
-          ]),
-          el('ol', { className: 'matches' }, main.map(renderMatch)),
-          third.length ? el('ol', { className: 'matches matches--third', 'aria-label': '3位決定戦' }, third.map(renderMatch)) : null,
-        ]);
-      })
-    );
+    var layout = bracketLayout(stage.rounds);
+    if (!layout.columns.length) return el('p', { className: 'empty', text: '組み合わせはまだ決まっていません。' });
+    var seedById = {};
+    (stage.entrants || []).forEach(function (e) {
+      if (e.seed) seedById[e.id] = e.seed;
+    });
+    var n = layout.columns.length;
+    var items = [];
+    layout.columns.forEach(function (c, i) {
+      var col = ' bracket__col--' + (i + 1);
+      items.push(roundTitle(c.label, c.bestOf, 'bracket__cell' + col));
+      items.push(
+        el(
+          'ol',
+          { className: 'bracket__round bracket__cell' + col + (i === n - 1 ? ' is-last' : ''), 'aria-label': c.label },
+          c.slots.map(function (m, k) {
+            return el('li', { className: 'bracket__slot' + (m ? '' : ' is-empty') + (c.fed[k] ? ' is-fed' : '') }, [m ? bracketMatch(m, seedById) : null]);
+          })
+        )
+      );
+    });
+    if (layout.third.length) {
+      var col = ' bracket__col--' + n;
+      items.push(
+        el('div', { className: 'bracket__third bracket__cell' + col }, [
+          roundTitle(THIRD_PLACE_LABEL, layout.third[0].bestOf),
+          el(
+            'ol',
+            { className: 'matches--third', 'aria-label': THIRD_PLACE_LABEL },
+            layout.third.map(function (m) {
+              return el('li', null, [bracketMatch(m, seedById)]);
+            })
+          ),
+        ])
+      );
+    }
+    return el('div', { className: 'bracket' }, [
+      el('div', { className: 'bracket__scroll', 'data-stage': stage.id, tabindex: '0', 'aria-label': 'トーナメント表' }, [
+        el('div', { className: 'bracket__grid bracket__grid--' + Math.min(n, 7) }, items),
+      ]),
+      el('p', { className: 'bracket__hint', text: '表は横にスクロールできます' }),
+    ]);
+  }
+
+  /** 横にはみ出しているトーナメント表にだけ「横にスクロールできます」を出す */
+  function updateBracketHints(root) {
+    if (!root || !root.querySelectorAll) return;
+    Array.prototype.forEach.call(root.querySelectorAll('.bracket'), function (b) {
+      var sc = b.querySelector('.bracket__scroll');
+      b.classList.toggle('is-scrollable', !!sc && sc.scrollWidth > sc.clientWidth + 1);
+    });
   }
 
   function renderStage(stage, groupFilter) {
@@ -388,6 +501,11 @@
   function renderEvent(root, data, filter) {
     var f = typeof filter === 'string' ? { stage: 'all', group: filter } : filter || {};
     var stages = eventStages(data);
+    // 自動更新で描き直しても、トーナメント表の横スクロールの位置を保つ
+    var scrolled = {};
+    Array.prototype.forEach.call(root.querySelectorAll ? root.querySelectorAll('.bracket__scroll') : [], function (sc) {
+      scrolled[sc.getAttribute('data-stage')] = sc.scrollLeft;
+    });
     root.textContent = '';
     var visible = stages.filter(function (s) {
       return !f.stage || f.stage === 'all' || s.id === f.stage;
@@ -399,6 +517,11 @@
     visible.forEach(function (s) {
       root.appendChild(renderStage(s, f.group));
     });
+    Array.prototype.forEach.call(root.querySelectorAll ? root.querySelectorAll('.bracket__scroll') : [], function (sc) {
+      var left = scrolled[sc.getAttribute('data-stage')];
+      if (left) sc.scrollLeft = left;
+    });
+    updateBracketHints(root);
   }
 
   /* ---------- QR コード ---------- */
@@ -695,6 +818,9 @@
       win.addEventListener('online', function () {
         poller.onOnline();
       });
+      win.addEventListener('resize', function () {
+        updateBracketHints(ui.groups);
+      });
       poller.setHidden(doc.visibilityState === 'hidden');
       poller.start();
       win.setInterval(tick, 1000);
@@ -765,6 +891,7 @@
     createFetchTransport: createFetchTransport,
     createPoller: createPoller,
     renderEvent: renderEvent,
+    bracketLayout: bracketLayout,
     shareUrl: shareUrl,
     formatTime: formatTime,
     STATUS_LABEL: STATUS_LABEL,
