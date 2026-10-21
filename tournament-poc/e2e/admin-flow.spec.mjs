@@ -195,6 +195,21 @@ test('主催者のホーム: 自分が作った大会だけが一覧に出て、
   await expect(page.locator('#actor')).toHaveText('');
 });
 
+/**
+ * 試合結果の入力欄に Leg 数を入れて「確定」し、その試合が確定済みになるまで待つ。
+ * 「結果を確定しました。」のトーストは前の試合のものが数秒残るので、保存の完了の目印にはしない
+ * （遅い環境では、保存が終わる前に次の試合の入力に進んでしまう）。
+ */
+async function confirmMatch(page, card, p1, p2) {
+  const id = await card.getAttribute('data-match-id');
+  const fixed = page.locator(`.match-editor[data-match-id="${id}"]`);
+  await fixed.locator('input').nth(0).fill(p1);
+  await fixed.locator('input').nth(1).fill(p2);
+  await fixed.getByRole('button', { name: '確定' }).click();
+  // 確定した試合は「未確定」の一覧から消える（または確定済みの表示になる）
+  await expect(page.locator(`.match-editor[data-match-id="${id}"]:not(.match-editor--final)`)).toHaveCount(0);
+}
+
 test('トーナメントのみ: 5 名・シード・不戦勝・3 位決定戦 → 結果で勝ち上がり → 閲覧ページに優勝者', async ({ page, context, request }, testInfo) => {
   await reset(request, { configured: true });
   const seen = await routeAppsScript(page, request);
@@ -231,18 +246,11 @@ test('トーナメントのみ: 5 名・シード・不戦勝・3 位決定戦 �
   await page.getByRole('button', { name: '試合結果', exact: true }).click();
   const first = page.locator('.match-editor:not(.match-editor--pending)').first();
   await expect(first).toContainText('シード4');
-  await first.locator('input').nth(0).fill('2');
-  await first.locator('input').nth(1).fill('0');
-  await first.getByRole('button', { name: '確定' }).click();
-  await expect(page.getByText('結果を確定しました。').last()).toBeVisible();
+  await confirmMatch(page, first, '2', '0');
 
   // 準決勝 2 試合・3 位決定戦・決勝を順に入力（未定の試合は入力欄が出ない）
   for (let i = 0; i < 4; i++) {
-    const card = page.locator('.match-editor:not(.match-editor--pending):not(.match-editor--final)').first();
-    await card.locator('input').nth(0).fill('2');
-    await card.locator('input').nth(1).fill('1');
-    await card.getByRole('button', { name: '確定' }).click();
-    await expect(page.getByText('結果を確定しました。').last()).toBeVisible();
+    await confirmMatch(page, page.locator('.match-editor:not(.match-editor--pending):not(.match-editor--final)').first(), '2', '1');
   }
 
   await page.getByRole('button', { name: '大会設定' }).click();
@@ -311,11 +319,7 @@ test('ロビン → A / B トーナメント: 順位を確定して進出 → �
   // 全試合を「上の選手が 3-0」で確定する
   await page.getByRole('button', { name: '試合結果', exact: true }).click();
   for (let i = 0; i < 6; i++) {
-    const card = page.locator('.match-editor:not(.match-editor--final):not(.match-editor--pending)').first();
-    await card.locator('input').nth(0).fill('3');
-    await card.locator('input').nth(1).fill('0');
-    await card.getByRole('button', { name: '確定' }).click();
-    await expect(page.getByText('結果を確定しました。').last()).toBeVisible();
+    await confirmMatch(page, page.locator('.match-editor:not(.match-editor--final):not(.match-editor--pending)').first(), '3', '0');
   }
 
   await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
