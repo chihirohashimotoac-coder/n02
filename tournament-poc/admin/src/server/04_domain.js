@@ -750,6 +750,8 @@ function buildEventView_(bundle, includePrivate) {
       name: bundle.event.name,
       dateLabel: bundle.event.date_label,
       status: bundle.event.status,
+      // 登録選手の人数（名前やメモは含まない。ポータルの一覧に出す）
+      playerCount: bundle.players.length,
     },
     rule: ruleView_(bundle.rule),
     stages: stages,

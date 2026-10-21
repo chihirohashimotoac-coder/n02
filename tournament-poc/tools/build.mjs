@@ -26,7 +26,12 @@ function buildApp(name, spec) {
   const header =
     `// ==== n02 Tournament PoC ${spec.label} Web アプリ / Code.gs ====\n` +
     `// このファイルは tools/build.mjs が ${serverDir}/*.js から生成したものです。直接編集しないでください。\n`;
-  const code = header + files.map((f) => `\n// ---- ${f} ----\n` + read(`${serverDir}/${f}`)).join('');
+  // shared/ は運営用・閲覧者用の両方に入れる（大会一覧の要約など、公開データの形を読むだけの処理）
+  const shared = ['shared/summary.js'];
+  const code =
+    header +
+    files.map((f) => `\n// ---- ${f} ----\n` + read(`${serverDir}/${f}`)).join('') +
+    shared.map((f) => `\n// ---- ${f} ----\n` + read(f)).join('');
   if (!spec.html) {
     return {
       [`dist/${name}/Code.gs`]: code,

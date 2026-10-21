@@ -3,7 +3,7 @@
 /**
  * 操作の一覧。
  * - scope: public = 誰でも（未認証可）/ login = ログイン（送られた auth は見ない）/
- *          create = 大会の作成（Google ログインした人と管理者）/ platform = 管理者のみ /
+ *          create = 大会の作成（Google ログインした人と管理者）/ google = Google でログインした人のみ / platform = 管理者のみ /
  *          event = その大会を運営できる人（作った本人・その大会の管理パスワードでログインした人・管理者）のみ
  * - mutating=true の操作は、スクリプトロックの中で実行し、二重送信を requestId で弾き、最後に公開データを同期する
  * - needsStorage=false の操作は保存先が未設定・未初期化でも実行できる
@@ -14,6 +14,7 @@ function adminActions_() {
     login: { fn: actionLogin_, scope: 'login', mutating: false, needsStorage: false },
     staffLogin: { fn: actionStaffLogin_, scope: 'login', mutating: false },
     logout: { fn: actionLogout_, scope: 'login', mutating: false, needsStorage: false },
+    myEvents: { fn: actionMyEvents_, scope: 'google', mutating: false },
     eventDetail: { fn: actionEventDetail_, scope: 'event', mutating: false },
     configureStorage: { fn: actionConfigureStorage_, scope: 'platform', mutating: true, needsStorage: false },
     initializeStorage: { fn: actionInitializeStorage_, scope: 'platform', mutating: true, needsStorage: false },
@@ -96,6 +97,9 @@ function handleAdminRequest_(request, startedAt) {
     // ログインの操作では、送られてきた（期限切れかもしれない）セッションを見ない
     var user = spec.scope === 'login' ? authenticate_(getCtx, null) : authenticate_(getCtx, request.auth);
     if (spec.scope === 'platform') assertPlatformAdmin_(user);
+    if (spec.scope === 'google' && user.kind !== 'google') {
+      throw appError_('AUTH_REQUIRED', 'Google でログインしてください。');
+    }
     if (spec.scope === 'event' && user.kind === 'anonymous') {
       throw appError_('AUTH_REQUIRED', 'Google でログインするか、管理パスワードを入力してください。');
     }

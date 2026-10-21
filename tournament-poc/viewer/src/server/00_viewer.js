@@ -4,7 +4,7 @@
  * このプロジェクトは読み取り専用。
  * - OAuth スコープは spreadsheets.readonly のみ（appsscript.json で固定）。書き込み API を呼ぶ権限そのものを持たない
  * - 読み込みは Sheets API（高度なサービス「Google Sheets API」）の values.get。SpreadsheetApp は使わない
- * - google.script.run から呼べる関数は doGet と getPublicSnapshot の 2 つだけ
+ * - google.script.run から呼べる関数は doGet と getPublicSnapshot の 2 つだけ（一覧は doGet の ?format=list のみ）
  * - 読むのは運営者用アプリが作った PublicSnapshots シート（公開してよい項目だけの JSON）だけ
  *
  * 読み込み負荷対策:
@@ -14,7 +14,7 @@
  */
 
 var VIEWER_CONFIG = Object.freeze({
-  APP_VERSION: '0.2.0',
+  APP_VERSION: '0.7.0',
   CACHE_TTL_SEC: 20,
   STALE_TTL_SEC: 21600, // CacheService の上限（6 時間）
   NONE_TTL_SEC: 20,
@@ -29,6 +29,10 @@ var VIEWER_CONFIG = Object.freeze({
 
 var VIEWER_EVENT_ID_PATTERN_ = /^EVT-[A-Z0-9]{4,32}$/;
 var DEFAULT_KEY_ = '_default';
+// 公開中の大会の一覧（ポータル用）。大会 ID の形（EVT-…）とは重ならない
+var LIST_KEY_ = '_list';
+// 一覧に載せる大会の上限（運営用アプリの MAX_EVENTS_TOTAL と同じ。キャッシュ 1 件の大きさを抑える）
+var LIST_MAX_EVENTS_ = 200;
 
 /**
  * ?format=json のときは画面ではなく公開データ（getPublicSnapshot と同じ内容）を JSON で返す。
@@ -39,6 +43,10 @@ var DEFAULT_KEY_ = '_default';
  */
 function doGet(e) {
   var p = (e && e.parameter) || {};
+  if (p.format === 'list') {
+    var list = getPublicList_({ knownVersion: p.known || '' });
+    return ContentService.createTextOutput(JSON.stringify(list)).setMimeType(ContentService.MimeType.JSON);
+  }
   if (p.format === 'json') {
     var res = getPublicSnapshot({ eventId: p.event || '', knownVersion: p.known || '' });
     return ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON);
@@ -97,6 +105,57 @@ function getPublicSnapshot(request) {
     console.error('getPublicSnapshot failed', err && err.stack ? err.stack : err);
     return { ok: false, error: { code: 'UNAVAILABLE', message: 'データを取得できませんでした。' }, servedAt: servedAt, refresh: refresh };
   }
+}
+
+/**
+ * 公開中の大会の一覧（ポータル「トーナメント・リーグ」用）。?format=list で返す。
+ * 公開データ（PublicSnapshots）から作った要約だけを返す。非公開の大会は PublicSnapshots に行がないので載らない。
+ * 1 回のシート読み込みで全大会分を作り、各大会のデータと一緒にキャッシュする（大会ごとの問い合わせは発生しない）。
+ * 戻り値 = { ok, version, servedAt, stale, notModified?, data?: { events: [...] }, refresh } | { ok:false, error, refresh }
+ */
+function getPublicList_(request) {
+  var refresh = { intervalSec: VIEWER_CONFIG.REFRESH_INTERVAL_SEC, jitterSec: VIEWER_CONFIG.REFRESH_JITTER_SEC };
+  var servedAt = new Date().toISOString();
+  try {
+    var req = request && typeof request === 'object' ? request : {};
+    var knownVersion = typeof req.knownVersion === 'string' ? req.knownVersion.slice(0, 64) : '';
+    var entry = loadEntry_(LIST_KEY_);
+    if (!entry || entry.none) entry = { version: 'empty', json: '{"events":[]}' };
+    var res = { ok: true, version: entry.version, servedAt: servedAt, stale: !!entry.stale, cache: entry.source, refresh: refresh };
+    if (knownVersion && knownVersion === entry.version) res.notModified = true;
+    else res.data = JSON.parse(entry.json);
+    return res;
+  } catch (err) {
+    console.error('getPublicList failed', err && err.stack ? err.stack : err);
+    return { ok: false, error: { code: 'UNAVAILABLE', message: '大会の一覧を取得できませんでした。' }, servedAt: servedAt, refresh: refresh };
+  }
+}
+
+/** 公開データの JSON から一覧の要約を作る。壊れた・形の違うデータは載せない */
+function buildListEntry_(entries) {
+  var events = [];
+  entries.forEach(function (e) {
+    if (events.length >= LIST_MAX_EVENTS_) return;
+    try {
+      var view = JSON.parse(e.json);
+      if (!view || !view.event || view.event.id !== e.eventId) return;
+      events.push(summarizeEventView_(view, e.publishedAt));
+    } catch (err) {
+      console.warn('list summary failed', e.eventId, err && err.message);
+    }
+  });
+  var json = JSON.stringify({ events: events });
+  return { version: md5HexViewer_(json), publishedAt: '', json: json };
+}
+
+function md5HexViewer_(text) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, text, Utilities.Charset.UTF_8);
+  var out = '';
+  for (var i = 0; i < bytes.length; i++) {
+    var b = (bytes[i] + 256) % 256;
+    out += (b < 16 ? '0' : '') + b.toString(16);
+  }
+  return out;
 }
 
 /** キャッシュに入れる値: { version, publishedAt, json } または { none: true } */
@@ -178,6 +237,7 @@ function refreshFromSheet_(cache) {
   });
   var def = defaultEntry || newest;
   fresh[DEFAULT_KEY_] = def ? { version: def.version, publishedAt: def.publishedAt, json: def.json } : { none: true };
+  fresh[LIST_KEY_] = buildListEntry_(entries);
 
   Object.keys(fresh).forEach(function (k) {
     var value = JSON.stringify(fresh[k]);

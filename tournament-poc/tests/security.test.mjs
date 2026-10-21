@@ -428,7 +428,7 @@ test('閲覧者に返すデータに非公開情報（メモ・操作者・履�
   // 公開データに含めてよいキーの一覧（これ以外が増えたら見直す）
   const ALLOWED = new Set([
     'advanced', 'bestOf', 'champion', 'check', 'complete', 'cycles', 'dataUpdatedAt', 'dateLabel', 'entrants', 'event', 'final', 'format', 'groups',
-    'id', 'label', 'legs', 'legsAgainst', 'legsFor', 'legsToWin', 'live', 'lost', 'matches', 'name', 'order', 'p1', 'p2', 'pending', 'played',
+    'id', 'label', 'legs', 'legsAgainst', 'legsFor', 'legsToWin', 'live', 'lost', 'matches', 'name', 'order', 'p1', 'p2', 'pending', 'played', 'playerCount',
     'playerId', 'players', 'progress', 'provisional', 'rank', 'round', 'roundBestOf', 'rounds', 'rule', 'scheduled', 'schema', 'seed', 'setBestOf',
     'sets', 'setsAgainst', 'setsFor', 'setsToWin', 'source', 'stage', 'stages', 'standings', 'status', 'summary', 'thirdPlace', 'tiebreakers',
     'tied', 'total', 'type', 'winnerId', 'won',

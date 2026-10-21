@@ -69,6 +69,31 @@ function actionBootstrap_(ctx) {
   };
 }
 
+/**
+ * ポータルの「作成した大会」: Google でログインした本人が作った大会だけを、公開・非公開・状態を問わず返す。
+ * 絞り込みはサーバーのセッション（ログインで確かめたメールアドレス）と各大会の owner_email で行い、
+ * 送られてきたメールアドレスや大会 ID は使わない。返すのは一覧の要約（公開データと同じ範囲）と公開状態だけ。
+ */
+function actionMyEvents_(ctx) {
+  var user = ctx.user;
+  var events = ctx.table('Events');
+  var mine = events.rows
+    .filter(function (e) {
+      return !events.duplicates[e.event_id] && user.kind === 'google' && canManageEvent_(user, e);
+    })
+    .sort(function (a, b) {
+      return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+    });
+  var list = mine.slice(0, ADMIN_CONFIG.MAX_MY_EVENTS).map(function (e) {
+    var s = summarizeEventView_(buildEventView_(collectEvent_(ctx, e.event_id), false), '');
+    if (String(e.updated_at || '') > s.updatedAt) s.updatedAt = String(e.updated_at || '');
+    s.isPublic = !!e.is_public;
+    s.isSample = !!e.is_sample;
+    return s;
+  });
+  return { email: user.email, events: list, truncated: mine.length > list.length };
+}
+
 function actionEventDetail_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   return eventDetail_(ctx, eventId);

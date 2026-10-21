@@ -8,7 +8,7 @@
  * このプロジェクトは読み取り専用。
  * - OAuth スコープは spreadsheets.readonly のみ（appsscript.json で固定）。書き込み API を呼ぶ権限そのものを持たない
  * - 読み込みは Sheets API（高度なサービス「Google Sheets API」）の values.get。SpreadsheetApp は使わない
- * - google.script.run から呼べる関数は doGet と getPublicSnapshot の 2 つだけ
+ * - google.script.run から呼べる関数は doGet と getPublicSnapshot の 2 つだけ（一覧は doGet の ?format=list のみ）
  * - 読むのは運営者用アプリが作った PublicSnapshots シート（公開してよい項目だけの JSON）だけ
  *
  * 読み込み負荷対策:
@@ -18,7 +18,7 @@
  */
 
 var VIEWER_CONFIG = Object.freeze({
-  APP_VERSION: '0.2.0',
+  APP_VERSION: '0.7.0',
   CACHE_TTL_SEC: 20,
   STALE_TTL_SEC: 21600, // CacheService の上限（6 時間）
   NONE_TTL_SEC: 20,
@@ -33,6 +33,10 @@ var VIEWER_CONFIG = Object.freeze({
 
 var VIEWER_EVENT_ID_PATTERN_ = /^EVT-[A-Z0-9]{4,32}$/;
 var DEFAULT_KEY_ = '_default';
+// 公開中の大会の一覧（ポータル用）。大会 ID の形（EVT-…）とは重ならない
+var LIST_KEY_ = '_list';
+// 一覧に載せる大会の上限（運営用アプリの MAX_EVENTS_TOTAL と同じ。キャッシュ 1 件の大きさを抑える）
+var LIST_MAX_EVENTS_ = 200;
 
 /**
  * ?format=json のときは画面ではなく公開データ（getPublicSnapshot と同じ内容）を JSON で返す。
@@ -43,6 +47,10 @@ var DEFAULT_KEY_ = '_default';
  */
 function doGet(e) {
   var p = (e && e.parameter) || {};
+  if (p.format === 'list') {
+    var list = getPublicList_({ knownVersion: p.known || '' });
+    return ContentService.createTextOutput(JSON.stringify(list)).setMimeType(ContentService.MimeType.JSON);
+  }
   if (p.format === 'json') {
     var res = getPublicSnapshot({ eventId: p.event || '', knownVersion: p.known || '' });
     return ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON);
@@ -101,6 +109,57 @@ function getPublicSnapshot(request) {
     console.error('getPublicSnapshot failed', err && err.stack ? err.stack : err);
     return { ok: false, error: { code: 'UNAVAILABLE', message: 'データを取得できませんでした。' }, servedAt: servedAt, refresh: refresh };
   }
+}
+
+/**
+ * 公開中の大会の一覧（ポータル「トーナメント・リーグ」用）。?format=list で返す。
+ * 公開データ（PublicSnapshots）から作った要約だけを返す。非公開の大会は PublicSnapshots に行がないので載らない。
+ * 1 回のシート読み込みで全大会分を作り、各大会のデータと一緒にキャッシュする（大会ごとの問い合わせは発生しない）。
+ * 戻り値 = { ok, version, servedAt, stale, notModified?, data?: { events: [...] }, refresh } | { ok:false, error, refresh }
+ */
+function getPublicList_(request) {
+  var refresh = { intervalSec: VIEWER_CONFIG.REFRESH_INTERVAL_SEC, jitterSec: VIEWER_CONFIG.REFRESH_JITTER_SEC };
+  var servedAt = new Date().toISOString();
+  try {
+    var req = request && typeof request === 'object' ? request : {};
+    var knownVersion = typeof req.knownVersion === 'string' ? req.knownVersion.slice(0, 64) : '';
+    var entry = loadEntry_(LIST_KEY_);
+    if (!entry || entry.none) entry = { version: 'empty', json: '{"events":[]}' };
+    var res = { ok: true, version: entry.version, servedAt: servedAt, stale: !!entry.stale, cache: entry.source, refresh: refresh };
+    if (knownVersion && knownVersion === entry.version) res.notModified = true;
+    else res.data = JSON.parse(entry.json);
+    return res;
+  } catch (err) {
+    console.error('getPublicList failed', err && err.stack ? err.stack : err);
+    return { ok: false, error: { code: 'UNAVAILABLE', message: '大会の一覧を取得できませんでした。' }, servedAt: servedAt, refresh: refresh };
+  }
+}
+
+/** 公開データの JSON から一覧の要約を作る。壊れた・形の違うデータは載せない */
+function buildListEntry_(entries) {
+  var events = [];
+  entries.forEach(function (e) {
+    if (events.length >= LIST_MAX_EVENTS_) return;
+    try {
+      var view = JSON.parse(e.json);
+      if (!view || !view.event || view.event.id !== e.eventId) return;
+      events.push(summarizeEventView_(view, e.publishedAt));
+    } catch (err) {
+      console.warn('list summary failed', e.eventId, err && err.message);
+    }
+  });
+  var json = JSON.stringify({ events: events });
+  return { version: md5HexViewer_(json), publishedAt: '', json: json };
+}
+
+function md5HexViewer_(text) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, text, Utilities.Charset.UTF_8);
+  var out = '';
+  for (var i = 0; i < bytes.length; i++) {
+    var b = (bytes[i] + 256) % 256;
+    out += (b < 16 ? '0' : '') + b.toString(16);
+  }
+  return out;
 }
 
 /** キャッシュに入れる値: { version, publishedAt, json } または { none: true } */
@@ -182,6 +241,7 @@ function refreshFromSheet_(cache) {
   });
   var def = defaultEntry || newest;
   fresh[DEFAULT_KEY_] = def ? { version: def.version, publishedAt: def.publishedAt, json: def.json } : { none: true };
+  fresh[LIST_KEY_] = buildListEntry_(entries);
 
   Object.keys(fresh).forEach(function (k) {
     var value = JSON.stringify(fresh[k]);
@@ -263,4 +323,146 @@ function readPublishedEntries_() {
     });
   }
   return out;
+}
+
+// ---- shared/summary.js ----
+/* 大会一覧の要約（ポータル「トーナメント・リーグ」に出す 1 大会分の情報）
+ *
+ * 運営用・閲覧者用の両方の Code.gs に入る（tools/build.mjs が末尾に付ける）。
+ * 入力は公開データと同じ形（運営用の buildEventView_(bundle, false)、閲覧者用は PublicSnapshots の JSON）なので、
+ * 公開データに含まれない項目（選手メモ・主催者・パスワードなど）はここに来ない。
+ *
+ * 進捗率は「確定した試合 ÷ 全試合」。まだ対戦カード・トーナメント表を作っていない段階があるときは、
+ * その段階の試合数を出場者から見積もって分母に足し、見積もれない段階があれば 100% にはしない
+ * （全試合確定の判定と同じく「試合のない段階がないこと」を完了の条件にする）。
+ */
+
+var SUMMARY_STAGE_LABEL_ = Object.freeze({
+  round_robin: 'ロビン',
+  league: 'リーグ',
+  single_elimination: 'トーナメント',
+});
+
+/** 対戦カードを作る前の段階の試合数の見積もり。見積もれないときは null */
+function estimateStageMatches_(stage) {
+  if (stage.type === 'single_elimination') {
+    var n = (stage.entrants || []).length;
+    if (n < 2) return null;
+    return n - 1 + (stage.thirdPlace && n >= 4 ? 1 : 0);
+  }
+  var cycles = stage.cycles === 2 ? 2 : 1;
+  var sum = 0;
+  (stage.groups || []).forEach(function (g) {
+    var k = (g.players || []).length;
+    if (k >= 2) sum += ((k * (k - 1)) / 2) * cycles;
+  });
+  return sum > 0 ? sum : null;
+}
+
+/** 大会の形式: 段階の種類から「ロビン」「リーグ」「トーナメント」「複合」を決める */
+function summaryFormat_(stages) {
+  var flow = [];
+  stages.forEach(function (st) {
+    var label = SUMMARY_STAGE_LABEL_[st.type] || '';
+    if (label && flow[flow.length - 1] !== label) flow.push(label);
+  });
+  var kinds = {};
+  stages.forEach(function (st) {
+    if (SUMMARY_STAGE_LABEL_[st.type]) kinds[st.type] = true;
+  });
+  var types = Object.keys(kinds);
+  if (!types.length) return { kind: 'none', label: '未設定', flow: '' };
+  if (types.length > 1) return { kind: 'mixed', label: '複合', flow: flow.join(' → ') };
+  var only = types[0];
+  return {
+    kind: only === 'single_elimination' ? 'tournament' : only === 'league' ? 'league' : 'robin',
+    label: SUMMARY_STAGE_LABEL_[only],
+    flow: flow.join(' → '),
+  };
+}
+
+/**
+ * view: 公開データの形の大会（{ event, stages, dataUpdatedAt }）
+ * publishedAt: 公開データを書いた時刻（閲覧者用のみ。更新時刻が読めない古いデータの代わり）
+ */
+function summarizeEventView_(view, publishedAt) {
+  var ev = (view && view.event) || {};
+  var stages = ((view && view.stages) || []).slice().sort(function (a, b) {
+    return (a.order || 0) - (b.order || 0);
+  });
+  var total = 0;
+  var final = 0;
+  var live = 0;
+  var estimated = 0;
+  var unknown = false;
+  var list = stages.map(function (st) {
+    var p = st.progress || {};
+    var t = Number(p.total) || 0;
+    var f = Number(p.final) || 0;
+    var l = Number(p.live) || 0;
+    var generated = t > 0;
+    var est = generated ? 0 : estimateStageMatches_(st);
+    if (est === null) {
+      unknown = true;
+      est = 0;
+    }
+    total += t;
+    final += f;
+    live += l;
+    estimated += est;
+    return {
+      name: String(st.name || ''),
+      type: String(st.type || ''),
+      total: t,
+      final: f,
+      live: l,
+      generated: generated,
+      estimated: generated ? 0 : est,
+      complete: generated && f === t,
+    };
+  });
+  var complete = list.length > 0 && list.every(function (s) {
+    return s.complete;
+  });
+  var denom = total + estimated;
+  var percent = denom > 0 ? Math.floor((final * 100) / denom) : 0;
+  if (!complete && percent >= 100) percent = 99;
+  if (complete) percent = 100;
+
+  var current = null;
+  for (var i = 0; i < list.length; i++) {
+    if (!list[i].complete) {
+      current = { name: list[i].name, type: list[i].type, state: list[i].generated ? (list[i].final || list[i].live ? 'running' : 'ready') : 'ungenerated' };
+      break;
+    }
+  }
+  if (!current && list.length) {
+    var last = list[list.length - 1];
+    current = { name: last.name, type: last.type, state: 'done' };
+  }
+
+  return {
+    id: String(ev.id || ''),
+    name: String(ev.name || ''),
+    dateLabel: String(ev.dateLabel || ''),
+    status: String(ev.status || ''),
+    format: summaryFormat_(stages),
+    // 古い公開データ（v0.6.0 以前に作られたもの）には人数がない。ないものは null（画面では「—」）
+    playerCount: typeof ev.playerCount === 'number' ? ev.playerCount : null,
+    matchCount: total,
+    finalCount: final,
+    liveCount: live,
+    progress: {
+      percent: percent,
+      complete: complete,
+      pendingStages: list.filter(function (s) {
+        return !s.generated;
+      }).length,
+      estimated: estimated,
+      partial: unknown,
+    },
+    stages: list,
+    currentStage: current,
+    updatedAt: String((view && view.dataUpdatedAt) || publishedAt || ''),
+  };
 }

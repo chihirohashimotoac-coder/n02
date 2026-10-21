@@ -10,7 +10,7 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.6.0',
+  APP_VERSION: '0.7.0',
   SCHEMA_VERSION: 1,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
@@ -39,6 +39,8 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_STAGES: 8,
   MAX_ELIMINATION_ENTRANTS: 128,
   MAX_REQUEST_CHARS: 100000,
+  // ポータルの「作成した大会」に返す大会の上限（新しい順）
+  MAX_MY_EVENTS: 100,
 });
 
 /** 試合状態（シートにはコード値で保存し、画面で日本語に変換する） */
