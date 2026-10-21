@@ -101,7 +101,7 @@ Drive コネクタでできること・できないこと（確認済み）:
 ## 7. 未検証・残タスク
 
 実環境で未検証（[test-plan.md](test-plan.md) の確認項目）:
-- R-14 50 人同時閲覧（[load-test.md](load-test.md)。ユーザーの選択で GitHub Actions で実行する（4-1.）。公開先リポジトリに `.github/workflows/loadtest.yml`・`tools/loadtest.mjs` を置いた）
+- R-14 50 人同時閲覧（[load-test.md](load-test.md)。ユーザーの選択で GitHub Actions で実行する（4-1.）。公開先リポジトリに `.github/workflows/loadtest.yml`・`tools/loadtest.mjs` を置いた（`a271e65`）。2026-10-21 に 2 画面・1 分の試運転が成功（実環境の Apps Script から取得 3 / 3 回、p95 2.3 秒）。本試験（段階 1〜4）はユーザーが Run workflow で実行する）
 - 2 大会の同時進行
 - R-06（置き換え後: 別の大会の ID に差し替えた運営用 URL では操作できない）、R-09〜R-13
 - R-15・R-16（v0.4.0 の形式機能はユーザーが「全て問題なく出来ました」と報告済み。項目ごとの結果は未記録）
