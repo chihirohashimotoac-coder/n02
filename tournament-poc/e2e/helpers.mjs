@@ -78,10 +78,15 @@ export async function expectNoHorizontalOverflow(page) {
  * Google のログインボタン（accounts.google.com/gsi/client）を模擬に振り替える。
  * ボタンを押すと email の Google アカウントでログインしたことになる（サーバー側は模擬 tokeninfo で確かめる）。
  */
-export async function fakeGoogle(page, request, email) {
+export async function fakeGoogle(page, request, email, options = {}) {
   await page.route('https://accounts.google.com/gsi/client', async (route) => {
     const r = await request.get(`/__fake-gsi.js?email=${encodeURIComponent(email)}`);
     await route.fulfill({ status: 200, contentType: 'text/javascript', body: await r.text() });
+  });
+  // ボタン用のスタイル（画面はこれを読み込み終えてからボタンを描く）
+  await page.route('https://accounts.google.com/gsi/style', async (route) => {
+    if (options.styleDelayMs) await new Promise((r) => setTimeout(r, options.styleDelayMs));
+    await route.fulfill({ status: 200, contentType: 'text/css', body: '/* gsi style (test) */' });
   });
 }
 

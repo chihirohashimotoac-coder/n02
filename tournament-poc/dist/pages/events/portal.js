@@ -470,10 +470,43 @@
       var started = Date.now();
       (function poll() {
         var id = win.google && win.google.accounts && win.google.accounts.id;
-        if (id) return done(id);
+        if (id)
+          return whenGoogleStyleReady(function () {
+            done(id);
+          });
         if (Date.now() - started > 15000) return fail();
         win.setTimeout(poll, 100);
       })();
+    }
+
+    /**
+     * Google のボタン用のスタイル（accounts.google.com/gsi/style）を読み込み終えてから cb を呼ぶ。
+     * renderButton はスタイルより先に下書きのボタンを描くため、読み込み前だと大きな G のロゴが一瞬崩れて見える。
+     * 読み込めない・時間がかかるとき（3 秒）は、そのまま進める（ボタンは Google 側の iframe で表示される）。
+     */
+    var gsiStyle = { ready: false, waiting: null };
+    function whenGoogleStyleReady(cb) {
+      if (gsiStyle.ready) return cb();
+      if (gsiStyle.waiting) return gsiStyle.waiting.push(cb);
+      gsiStyle.waiting = [cb];
+      var finish = function () {
+        if (gsiStyle.ready) return;
+        gsiStyle.ready = true;
+        gsiStyle.waiting.splice(0).forEach(function (f) {
+          f();
+        });
+      };
+      var link = doc.querySelector('link[href^="https://accounts.google.com/gsi/style"]');
+      if (link && link.sheet) return finish();
+      if (!link) {
+        link = doc.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://accounts.google.com/gsi/style';
+        doc.head.appendChild(link);
+      }
+      link.addEventListener('load', finish);
+      link.addEventListener('error', finish);
+      win.setTimeout(finish, 3000);
     }
 
     function googleButton(opts) {

@@ -151,3 +151,26 @@ test('閲覧ページ（スマートフォン）: 一番上から下へ引っぱ
   await expect(page.locator('.ux-toast')).toContainText('最新の状態です。');
   expect(seen.length).toBeGreaterThan(before);
 });
+
+test('ポータル: Google のボタンは専用のスタイルを読み込んでから描き、ダークモードでも周りに白い枠を出さない', async ({ page, request }) => {
+  await publishedSample(request);
+  await routeAppsScript(page, request);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await fakeGoogle(page, request, ORGANIZER, { styleDelayMs: 1500 });
+  const styleRequested = page.waitForRequest('https://accounts.google.com/gsi/style');
+  // load を待つとスタイルの読み込みまで待ってしまうので、HTML を読んだところで進める
+  await page.goto('/pages/events/', { waitUntil: 'domcontentloaded' });
+  await styleRequested;
+  // スタイルを読み込むまではボタンを描かない（読み込み前に描くと大きな G のロゴが崩れて出る）
+  await page.waitForTimeout(300);
+  expect(await page.locator('.plate .fake-gsi').count()).toBe(0);
+  await expect(page.locator('.plate .fake-gsi')).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('.row__open')).toHaveCount(1);
+  // Google の iframe と配色をそろえる（dark のままだと iframe に白い背景が敷かれる）
+  const box = page.locator('.plate .gsi__button');
+  expect(await box.evaluate((e) => getComputedStyle(e).colorScheme)).toBe('light');
+  // 見出しは 1 行のまま（ボタンが崩れて描かれても押し広げない高さ）
+  const h = await box.boundingBox();
+  expect(h.height).toBeLessThanOrEqual(36);
+  await expectNoHorizontalOverflow(page);
+});
