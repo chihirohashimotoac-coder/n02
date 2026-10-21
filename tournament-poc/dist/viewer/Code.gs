@@ -686,6 +686,19 @@ var SUMMARY_STAGE_LABEL_ = Object.freeze({
   round_robin: 'ロビン',
   league: 'リーグ',
   single_elimination: 'トーナメント',
+  double_elimination: 'ダブルエリミネーション',
+  swiss: 'スイス式',
+  series: 'ポイントシリーズ',
+});
+
+/** 段階の種類 → 一覧の大分類（shared/formats.js の FORMAT_CATEGORY_LABEL） */
+var SUMMARY_STAGE_KIND_ = Object.freeze({
+  round_robin: 'robin',
+  league: 'league',
+  single_elimination: 'tournament',
+  double_elimination: 'tournament',
+  swiss: 'swiss',
+  series: 'series',
 });
 
 /** 対戦カードを作る前の段階の試合数の見積もり。見積もれないときは null */
@@ -694,6 +707,19 @@ function estimateStageMatches_(stage) {
     var n = (stage.entrants || []).length;
     if (n < 2) return null;
     return n - 1 + (stage.thirdPlace && n >= 4 ? 1 : 0);
+  }
+  if (stage.type === 'double_elimination') {
+    var de = (stage.entrants || []).length;
+    return de >= 2 ? 2 * de - 2 : null;
+  }
+  if (stage.type === 'swiss') {
+    var sw = (stage.groups && stage.groups[0] ? stage.groups[0].players : []).length;
+    var rounds = stage.swiss ? stage.swiss.rounds : 0;
+    return sw >= 2 && rounds ? rounds * Math.floor(sw / 2) : null;
+  }
+  if (stage.type === 'series') {
+    var roster = (stage.roster || []).length;
+    return roster >= 2 && stage.planned ? stage.planned * (roster - 1) : null;
   }
   var cycles = stage.cycles === 2 ? 2 : 1;
   var sum = 0;
@@ -704,8 +730,12 @@ function estimateStageMatches_(stage) {
   return sum > 0 ? sum : null;
 }
 
-/** 大会の形式: 段階の種類から「ロビン」「リーグ」「トーナメント」「複合」を決める */
-function summaryFormat_(stages) {
+/**
+ * 大会の形式: 実際の段階の種類から決める（作成後に「形式」タブで段階を変えられるので、作成時のひな形の名前は使わない）。
+ * シリーズ・スイス式を含む大会はその分類、それ以外は「ロビン」「リーグ」「トーナメント」「複合」。
+ * formatId は作成時のひな形（v0.8 以降）。参考として返すだけ
+ */
+function summaryFormat_(stages, formatId) {
   var flow = [];
   stages.forEach(function (st) {
     var label = SUMMARY_STAGE_LABEL_[st.type] || '';
@@ -716,14 +746,14 @@ function summaryFormat_(stages) {
     if (SUMMARY_STAGE_LABEL_[st.type]) kinds[st.type] = true;
   });
   var types = Object.keys(kinds);
-  if (!types.length) return { kind: 'none', label: '未設定', flow: '' };
-  if (types.length > 1) return { kind: 'mixed', label: '複合', flow: flow.join(' → ') };
-  var only = types[0];
-  return {
-    kind: only === 'single_elimination' ? 'tournament' : only === 'league' ? 'league' : 'robin',
-    label: SUMMARY_STAGE_LABEL_[only],
-    flow: flow.join(' → '),
-  };
+  var out;
+  if (!types.length) out = { kind: 'none', label: '未設定', flow: '' };
+  else if (kinds.series) out = { kind: 'series', label: 'ポイントシリーズ', flow: flow.join(' → ') };
+  else if (kinds.swiss) out = { kind: 'swiss', label: 'スイス式', flow: flow.join(' → ') };
+  else if (types.length > 1) out = { kind: 'mixed', label: '複合', flow: flow.join(' → ') };
+  else out = { kind: SUMMARY_STAGE_KIND_[types[0]] || 'robin', label: SUMMARY_STAGE_LABEL_[types[0]], flow: flow.join(' → ') };
+  if (formatId) out.id = formatId;
+  return out;
 }
 
 /**
@@ -746,10 +776,14 @@ function summarizeEventView_(view, publishedAt) {
     var f = Number(p.final) || 0;
     var l = Number(p.live) || 0;
     var generated = t > 0;
-    var est = generated ? 0 : estimateStageMatches_(st);
+    // スイス式・シリーズは 1 回戦・1 節ずつ組むので、組んでいない回戦・節の分を見積もって足す
+    var stepwise = st.type === 'swiss' || st.type === 'series';
+    var est = generated && !stepwise ? 0 : estimateStageMatches_(st);
     if (est === null) {
-      unknown = true;
+      unknown = !generated;
       est = 0;
+    } else if (stepwise) {
+      est = Math.max(0, est - t);
     }
     total += t;
     final += f;
@@ -762,8 +796,9 @@ function summarizeEventView_(view, publishedAt) {
       final: f,
       live: l,
       generated: generated,
-      estimated: generated ? 0 : est,
-      complete: generated && f === t,
+      estimated: generated && !stepwise ? 0 : est,
+      // v0.8 の公開データには段階の完了（未実施の節・回戦・リセットの決勝を含む）がある。古いデータは試合数で判定
+      complete: typeof st.complete === 'boolean' ? st.complete : generated && f === t,
     };
   });
   var complete = list.length > 0 && list.every(function (s) {
@@ -791,7 +826,7 @@ function summarizeEventView_(view, publishedAt) {
     name: String(ev.name || ''),
     dateLabel: String(ev.dateLabel || ''),
     status: String(ev.status || ''),
-    format: summaryFormat_(stages),
+    format: summaryFormat_(stages, ev.format),
     // 古い公開データ（v0.6.0 以前に作られたもの）には人数がない。ないものは null（画面では「—」）
     playerCount: typeof ev.playerCount === 'number' ? ev.playerCount : null,
     matchCount: total,

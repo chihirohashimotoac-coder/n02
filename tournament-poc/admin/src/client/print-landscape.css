@@ -1,0 +1,2 @@
+/* 運営画面の印刷を A4 横にする（印刷のときだけ有効にする）。このファイルは tools/build.mjs が admin/ に置く */
+@page { size: A4 landscape; margin: 12mm; }

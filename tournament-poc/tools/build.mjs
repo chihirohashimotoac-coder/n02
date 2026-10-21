@@ -100,12 +100,16 @@ function toStaticPage(templatePath, css, js, connect, opts = {}) {
     )
     .replace(
       /<style>\s*\/\*@@STYLES@@\*\/\s*<\/style>/,
-      (opts.css || []).map((c) => `<link rel="stylesheet" href="${c}" />\n    `).join('') + `<link rel="stylesheet" href="${css}" />`
+      (opts.css || []).map((c) => `<link rel="stylesheet" href="${c}" />\n    `).join('') +
+        `<link rel="stylesheet" href="${css}" />` +
+        (opts.printLandscape ? `\n    <link rel="stylesheet" id="print-landscape" href="print-landscape.css" media="print" disabled />` : '')
     )
     .replace(
       /<script>\s*\/\*@@SCRIPT@@\*\/\s*<\/script>/,
       (opts.google ? '<script src="https://accounts.google.com/gsi/client" async></script>\n    ' : '') +
-        `<script src="config.js"></script>\n    <script src="qrcode.js"></script>\n    <script src="${js}"></script>` +
+        `<script src="config.js"></script>\n    <script src="qrcode.js"></script>` +
+        (opts.before || []).map((j) => `\n    <script src="${j}"></script>`).join('') +
+        `\n    <script src="${js}"></script>` +
         (opts.js || []).map((j) => `\n    <script src="${j}"></script>`).join('')
     );
   if (html.includes('@@') || html.includes('<base')) throw new Error('pages template not converted: ' + templatePath);
@@ -144,7 +148,7 @@ function portalPage(connect) {
     .replace(
       '<!--@@SCRIPTS@@-->',
       '<script src="https://accounts.google.com/gsi/client" async></script>\n' +
-        '    <script src="../config.js"></script>\n    <script src="../admin/config.js"></script>\n    <script src="../ux-kit.js"></script>\n    <script src="portal.js"></script>'
+        '    <script src="../config.js"></script>\n    <script src="../admin/config.js"></script>\n    <script src="../formats.js"></script>\n    <script src="../ux-kit.js"></script>\n    <script src="portal.js"></script>'
     );
   if (html.includes('@@')) throw new Error('portal template not converted');
   return html;
@@ -170,7 +174,10 @@ function buildPages() {
     'dist/pages/viewer.js': header + read('viewer/src/client/viewer.js'),
     'dist/pages/config.example.js': read('viewer/src/pages/config.example.js'),
     'dist/pages/README.md': read('viewer/src/pages/README.md'),
-    'dist/pages/admin/index.html': toStaticPage('admin/src/client/index.html', 'admin.css', 'admin.js', connect, { google: true }),
+    'dist/pages/formats.js': header + read('shared/formats.js'),
+    'dist/pages/admin/index.html': toStaticPage('admin/src/client/index.html', 'admin.css', 'admin.js', connect, { google: true, before: ['../formats.js', 'admin-io.js'], printLandscape: true }),
+    'dist/pages/admin/admin-io.js': header + read('admin/src/client/admin-io.js'),
+    'dist/pages/admin/print-landscape.css': header + read('admin/src/client/print-landscape.css'),
     'dist/pages/admin/admin.css': header + read('admin/src/client/admin.css'),
     'dist/pages/admin/admin.js': header + read('admin/src/client/admin.js'),
     'dist/pages/admin/config.example.js': read('admin/src/pages/config.example.js'),

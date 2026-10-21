@@ -234,3 +234,57 @@ body.is-busy .busy-indicator { display: block; }
 .panel .row + h3 { margin-top: 20px; }
 .finish-hint { display: grid; gap: 8px; justify-items: start; margin: 8px 0; }
 .danger-zone { border-color: var(--danger); }
+
+/* v0.8: 作成欄の形式の説明・予定試合数の見積もり */
+.format-info { display: grid; gap: 2px; padding: 8px 12px; border-left: 4px solid var(--brand); background: var(--surface-2); border-radius: 0 8px 8px 0; }
+.format-info__flow { margin: 0; font-weight: 700; }
+.estimate-panel { display: grid; gap: 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; }
+.estimate__total { margin: 0; font-weight: 700; }
+.fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; min-width: 0; }
+.fieldset legend { font-size: 13px; font-weight: 600; color: var(--ink-2); padding: 0 4px; }
+.check--inline { display: inline-flex; gap: 4px; margin-right: 6px; }
+.check--inline input { width: 18px; height: 18px; }
+
+/* v0.8: 試合の予定・延期・特殊な結果 */
+.match-editor__schedule { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; }
+.schedule-editor, .special-result { display: grid; gap: 8px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; }
+.schedule-editor .field { flex: 1 1 9em; }
+.postpone { padding-top: 8px; border-top: 1px solid var(--line); }
+.match-editor--bye { opacity: .8; }
+.status--void, .status--bye { background: var(--sched-bg); color: var(--ink-2); }
+
+/* v0.8: 選手（所属・Rt・シード・メモ）・CSV 登録・棄権 */
+.player-row--v8 { grid-template-columns: minmax(0, 1fr); }
+.player-row__fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) 5.5em 5.5em minmax(0, 2fr); gap: 6px; }
+@media (max-width: 720px) { .player-row__fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (min-width: 720px) { .player-row--v8 { grid-template-columns: minmax(0, 1fr); } .player-row--v8 .btn-row { grid-column: 1 / -1; } }
+.withdraw-panel { display: grid; gap: 8px; }
+.withdraw-panel h4 { margin: 0; }
+.table tr.row--error td { color: var(--danger); }
+.table tr.row--warn td { color: var(--live); }
+
+/* v0.8: 組み合わせ（抽選の結果・スイス式・シリーズ） */
+.draw-report { padding: 8px 10px 8px 1.6em; background: var(--surface-2); border-radius: 8px; }
+.swiss-log summary { cursor: pointer; font-size: 14px; }
+.night-card { border-left: 4px solid var(--line); }
+h4 { margin: 8px 0 4px; font-size: 15px; }
+.schedule-table td { white-space: nowrap; }
+.schedule-table td:nth-child(4) { white-space: normal; min-width: 12em; }
+
+/* v0.8: 印刷（F03）。印刷するのは #print-root だけ。ボタン・メニューは出さない */
+.print-root { display: none; }
+@page { size: A4 portrait; margin: 12mm; }
+@media print {
+  body { background: #fff; color: #000; font-size: 11pt; }
+  body.is-printing > *:not(.print-root) { display: none !important; }
+  body.is-printing .print-root { display: block; }
+  body:not(.is-printing) .topbar, body:not(.is-printing) .tabs, body:not(.is-printing) .btn, body:not(.is-printing) .batch-bar, body:not(.is-printing) .toast-box, body:not(.is-printing) .busy-indicator { display: none !important; }
+  .print-head h1 { font-size: 16pt; margin: 0 0 2mm; }
+  .print-head p { margin: 0 0 4mm; font-size: 9pt; }
+  .print-stage { font-size: 13pt; margin: 5mm 0 2mm; break-after: avoid; page-break-after: avoid; }
+  .print-table { width: 100%; border-collapse: collapse; margin: 0 0 5mm; font-size: 10pt; }
+  .print-table thead { display: table-header-group; }
+  .print-table th, .print-table td { border: 0.3mm solid #555; padding: 1.2mm 2mm; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+  .print-table__title { background: #eee; font-size: 10.5pt; }
+  .print-table tr { break-inside: avoid; page-break-inside: avoid; }
+}

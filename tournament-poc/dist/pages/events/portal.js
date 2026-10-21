@@ -28,6 +28,8 @@
     { id: 'robin', label: 'ロビン' },
     { id: 'league', label: 'リーグ' },
     { id: 'mixed', label: '複合' },
+    { id: 'swiss', label: 'スイス式' },
+    { id: 'series', label: 'シリーズ' },
   ];
   var DEFAULT_N02_URL = 'https://chihirohashimotoac-coder.github.io/n02/';
   var EVENT_ID_PATTERN = /^EVT-[A-Z0-9]{4,32}$/;
@@ -249,7 +251,7 @@
     var f = format || { kind: 'none', label: '未設定', flow: '' };
     return el(doc, 'span', { className: 'format' }, [
       el(doc, 'span', { className: 'format__kind', text: f.label }),
-      f.kind === 'mixed' && f.flow ? el(doc, 'span', { className: 'format__flow', text: f.flow }) : null,
+      (f.kind === 'mixed' || f.kind === 'series' || f.kind === 'swiss') && f.flow && f.flow !== f.label ? el(doc, 'span', { className: 'format__flow', text: f.flow }) : null,
     ]);
   }
 
