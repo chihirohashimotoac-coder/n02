@@ -230,3 +230,4 @@ body.is-busy .busy-indicator { display: block; }
 .notice { padding: 8px 12px; border-radius: 8px; background: var(--warn-bg, #fff4d6); color: var(--warn-ink, #5c4300); }
 .panel .row + h3 { margin-top: 20px; }
 .finish-hint { display: grid; gap: 8px; justify-items: start; margin: 8px 0; }
+.danger-zone { border-color: var(--danger); }

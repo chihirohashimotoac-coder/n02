@@ -2115,6 +2115,7 @@
         accessPanel.appendChild(el('p', { className: 'muted small', text: '管理パスワードの変更は、大会を作った主催者だけが行えます。' }));
       }
       var panels = [eventForm, accessPanel];
+      if (ev.canChangePassword) panels.push(renderDeletePanel(ev));
       if (state.boot && state.boot.role.isPlatformAdmin) {
         var owner = el('input', { className: 'input', id: 'owner-email', type: 'email', value: ev.ownerEmail || '', placeholder: '主催者の Google アカウントのメールアドレス' });
         panels.push(
@@ -2132,6 +2133,66 @@
         );
       }
       return el('div', { className: 'stack' }, panels);
+    }
+
+    /** ファイルとして保存させる（ダウンロード） */
+    function saveFile(blob, name) {
+      var a = el('a', { href: URL.createObjectURL(blob), download: name });
+      doc.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () {
+        URL.revokeObjectURL(a.href);
+      }, 10000);
+    }
+
+    /**
+     * 大会の削除（アーカイブ）。大会を作った本人と管理者だけ。
+     * ①大会の全データをファイルに保存 → ②大会名を入力 → ③削除。保存しない場合は、そのことを明示的に選ぶ
+     */
+    function renderDeletePanel(ev) {
+      var exported = false;
+      var confirmName = el('input', { className: 'input', id: 'delete-confirm', autocomplete: 'off', placeholder: ev.name });
+      var skipSave = el('input', { type: 'checkbox', id: 'delete-skip-save' });
+      var deleteButton = el('button', { className: 'btn btn--danger', type: 'button', 'data-mut': true, 'data-locked': '1', disabled: true, text: 'この大会を削除する' });
+      var saveButton = el('button', { className: 'btn', type: 'button', text: '① 大会のデータを保存（JSON ファイル）' });
+      var sync = function () {
+        var ready = confirmName.value.replace(/\s+/g, ' ').trim() === ev.name && (exported || skipSave.checked);
+        deleteButton.setAttribute('data-locked', ready ? '0' : '1');
+        deleteButton.disabled = state.busy || !ready;
+      };
+      confirmName.addEventListener('input', sync);
+      skipSave.addEventListener('change', sync);
+      saveButton.addEventListener('click', function () {
+        saveButton.disabled = true;
+        api
+          .query('exportEvent', { eventId: ev.id })
+          .then(function (data) {
+            var day = String(data.exportedAt || '').slice(0, 10).replace(/-/g, '');
+            saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'n02-tournament-' + ev.id + '-' + day + '.json');
+            exported = true;
+            saveButton.textContent = '保存しました（もう一度保存する）';
+            toast('ok', '大会のデータをファイルに保存しました。保存先のフォルダを確認してください。');
+            sync();
+          })
+          .catch(handleError)
+          .then(function () {
+            saveButton.disabled = false;
+          });
+      });
+      deleteButton.addEventListener('click', function () {
+        mutate('deleteEvent', { eventId: ev.id, rev: ev.rev, confirmName: confirmName.value }, '大会「' + ev.name + '」を削除しました。').then(function (data) {
+          if (data && data.deletedEventId) goHome();
+        });
+      });
+      return el('section', { className: 'panel danger-zone' }, [
+        el('h3', { text: '大会の削除' }),
+        el('p', { className: 'muted small', text: 'この大会のデータ（選手・組み合わせ・試合結果・変更履歴・閲覧ページ）をスプレッドシートから消します。元に戻せません。消す前に、データをファイルに保存しておくことをおすすめします（保存したファイルから大会を復元する機能はありません。記録として残す用です）。' }),
+        el('div', { className: 'btn-row' }, [saveButton]),
+        el('label', { className: 'check' }, [skipSave, ' 保存せずに削除する']),
+        field('② 確認のため、大会名「' + ev.name + '」を入力', confirmName),
+        el('div', { className: 'btn-row' }, [deleteButton]),
+      ]);
     }
 
     function renderHistory() {

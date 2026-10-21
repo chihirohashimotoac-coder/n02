@@ -1,5 +1,6 @@
 // 運営画面（GitHub Pages の /admin/）: 管理者の初期設定 → Google でログインして大会を作成・運営 → 公開 → 閲覧ページに反映 → 管理パスワードでスタッフが運営
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { reset, routeAppsScript, expectNoHorizontalOverflow, publishedSample, ADMIN_KEY, fakeGoogle, googleLogin, ORGANIZER } from './helpers.mjs';
 
 const SHEET_LINK = 'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcd/edit?usp=sharing';
@@ -378,3 +379,31 @@ test('試合結果: 入力途中の結果は他の試合を確定しても消え
   await expect(card(3).locator('.status')).toHaveText('未開始');
   await expectNoHorizontalOverflow(page);
 });
+
+test('大会の削除: データを JSON で保存し、大会名を入力すると削除でき、一覧から消える（スタッフ・閲覧ページは単体テスト）', async ({ page, request }) => {
+  const sample = await publishedSample(request);
+  await routeAppsScript(page, request);
+  await fakeGoogle(page, request, ORGANIZER);
+  await page.goto(`${ADMIN_PAGE}#e=${sample.event.id}`);
+  await googleLogin(page);
+  await page.getByRole('button', { name: '大会設定' }).click();
+  const del = page.getByRole('button', { name: 'この大会を削除する' });
+  await expect(del).toBeDisabled();
+  // ① 保存: ファイル名に大会 ID、中身は全シートの行と結果
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /大会のデータを保存/ }).click()]);
+  expect(download.suggestedFilename()).toMatch(new RegExp(`^n02-tournament-${sample.event.id}-\\d{8}\\.json$`));
+  const archive = JSON.parse(readFileSync(await download.path(), 'utf8'));
+  expect(archive.format).toBe('n02-tournament-archive');
+  expect(archive.tables.Matches).toHaveLength(24);
+  // ② 大会名を入れるまで削除できない
+  await expect(del).toBeDisabled();
+  await page.getByLabel(/確認のため、大会名/).fill('ちがう名前');
+  await expect(del).toBeDisabled();
+  await page.getByLabel(/確認のため、大会名/).fill(sample.event.name);
+  await expect(del).toBeEnabled();
+  await del.click();
+  await expect(page.getByText(`大会「${sample.event.name}」を削除しました。`).last()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'あなたの大会' })).toBeVisible();
+  await expect(page.getByText('まだ大会がありません。')).toBeVisible();
+});
+

@@ -151,7 +151,10 @@ function appendRecords_(table, records) {
   sheet.getRange(start, 1, values.length, table.width).setValues(values);
 }
 
-/** 行番号の大きい順に消す（先に上を消すと下の行番号がずれるため）。 */
+/**
+ * 行を消す。行番号の大きい順に、連続した行はまとめて消す（先に上を消すと下の行番号がずれるため）。
+ * 見出し以外の行をすべて消すとスプレッドシートがエラーにするので、その場合は先に空の行を 1 行足しておく。
+ */
 function deleteRecords_(table, records) {
   var rows = records
     .map(function (r) {
@@ -160,9 +163,20 @@ function deleteRecords_(table, records) {
     .sort(function (a, b) {
       return b - a;
     });
-  rows.forEach(function (row) {
-    table.sheet.deleteRow(row);
-  });
+  if (!rows.length) return;
+  var sheet = table.sheet;
+  if (rows.length >= sheet.getMaxRows() - 1) sheet.insertRowsAfter(sheet.getMaxRows(), 1);
+  var i = 0;
+  while (i < rows.length) {
+    var end = rows[i];
+    var start = end;
+    while (i + 1 < rows.length && rows[i + 1] === start - 1) {
+      i++;
+      start = rows[i];
+    }
+    sheet.deleteRows(start, end - start + 1);
+    i++;
+  }
 }
 
 function applyTextFormats_(sheet, def, index, fromRow, count) {

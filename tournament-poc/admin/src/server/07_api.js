@@ -22,6 +22,8 @@ function adminActions_() {
     createSampleEvent: { fn: actionCreateSampleEvent_, scope: 'create', mutating: true },
     setStaffPassword: { fn: actionSetStaffPassword_, scope: 'event', mutating: true },
     setOwner: { fn: actionSetOwner_, scope: 'event', mutating: true },
+    exportEvent: { fn: actionExportEvent_, scope: 'event', mutating: false },
+    deleteEvent: { fn: actionDeleteEvent_, scope: 'event', mutating: true },
     updateEvent: { fn: actionUpdateEvent_, scope: 'event', mutating: true },
     updateRule: { fn: actionUpdateRule_, scope: 'event', mutating: true },
     addPlayers: { fn: actionAddPlayers_, scope: 'event', mutating: true },

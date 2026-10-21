@@ -268,6 +268,76 @@ test('管理パスワード: 主催者が設定し、店舗スタッフはその
   assert.ok(authB);
 });
 
+test('大会の削除: 本人と管理者だけが、データを保存してから大会名を入力して削除でき、全シートからその大会の行だけが消える', () => {
+  const { p, a, b, authA, authB } = twoOrganizers();
+  let ev = p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).data.event;
+  p.call('setStaffPassword', { eventId: a.eventId, rev: ev.rev, password: 'Shop-A-2026!' }, { auth: authA });
+  const staff = p.staffLogin(a.eventId, 'Shop-A-2026!');
+  ev = p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).data.event;
+  const book = p.store.get();
+  const countRows = (eventId) => Object.fromEntries(book.getSheets().filter((sh) => sh.getName() !== 'シート1').map((sh) => [sh.getName(), sh.records().filter((r) => r.event_id === eventId).length]));
+  const beforeB = countRows(b.eventId);
+
+  // 保存（アーカイブ）: 全シートの行と結果が入り、パスワードのハッシュ・ソルトは入らない
+  const archive = p.call('exportEvent', { eventId: a.eventId }, { auth: authA });
+  assert.equal(archive.ok, true);
+  assert.equal(archive.data.format, 'n02-tournament-archive');
+  assert.equal(archive.data.event.event_id, a.eventId);
+  assert.equal(archive.data.tables.Players.length, 16);
+  assert.equal(archive.data.tables.Matches.length, 24);
+  assert.ok(archive.data.tables.History.length > 0);
+  assert.equal(archive.data.results.event.name, a.detail.event.name);
+  const text = JSON.stringify(archive.data);
+  assert.ok(!text.includes('staff_pass_hash') && !text.includes('staff_pass_salt') && !text.includes('admin_key_hash'));
+
+  // スタッフ・他の主催者・未ログインは保存も削除もできない
+  const del = (auth, extra = {}) => p.call('deleteEvent', { eventId: a.eventId, rev: ev.rev, confirmName: a.detail.event.name, ...extra }, { auth });
+  assert.equal(p.call('exportEvent', { eventId: a.eventId }, { auth: staff }).error.code, 'FORBIDDEN');
+  assert.equal(del(staff).error.code, 'FORBIDDEN');
+  assert.equal(del(authB).error.code, 'NOT_FOUND');
+  assert.equal(del('anon').error.code, 'AUTH_REQUIRED');
+  // 大会名が違えば消さない
+  assert.equal(del(authA, { confirmName: 'ちがう名前' }).error.code, 'VALIDATION');
+  assert.equal(del(authA, { confirmName: undefined }).error.code, 'VALIDATION');
+  assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).ok, true);
+
+  const done = del(authA);
+  assert.equal(done.ok, true, JSON.stringify(done.error));
+  assert.equal(done.data.deletedEventId, a.eventId);
+  assert.deepEqual(Object.values(countRows(a.eventId)).filter((n) => n > 0), [], 'どのシートにも行が残らない');
+  assert.deepEqual(countRows(b.eventId), beforeB, '他の大会の行は変わらない');
+  // 一覧・詳細・閲覧ページ・スタッフのログインから消える
+  assert.deepEqual(Array.from(p.call('bootstrap', {}, { auth: authA }).data.events), []);
+  assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).error.code, 'NOT_FOUND');
+  assert.equal(p.call('eventDetail', { eventId: a.eventId }, { auth: staff }).error.code, 'AUTH_EXPIRED');
+  p.clock.advance(60_000);
+  assert.equal(p.viewer.run('getPublicSnapshot', { eventId: a.eventId }).error.code, 'NO_PUBLIC_EVENT');
+  assert.equal(p.viewer.run('getPublicSnapshot', { eventId: b.eventId }).ok, true);
+  // 削除したことだけを履歴（大会に属さない行）に残す
+  const log = book.getSheetByName('History').records().filter((h) => h.action === 'event.delete');
+  assert.equal(log.length, 1);
+  assert.equal(log[0].event_id, '');
+  assert.match(log[0].after_json, new RegExp(a.eventId));
+  // 同じ操作を再送しても二重に動かない・管理者は他人の大会も削除できる
+  const evB = p.ok('eventDetail', { eventId: b.eventId }).event;
+  assert.equal(p.call('deleteEvent', { eventId: b.eventId, rev: evB.rev, confirmName: ' ' + evB.name + ' ' }).ok, true);
+  assert.equal(p.store.get().getSheetByName('Events').records().length, 0);
+  assert.ok(authB);
+});
+
+test('大会の削除: 見出し以外のすべての行を消す場合（シートの空き行がない）でも削除できる', () => {
+  const p = setupPair();
+  p.ok('initializeStorage');
+  const auth = p.loginAs(ALICE);
+  const id = p.ok('createEvent', { name: '満杯', bestOf: 5, groupCount: 1 }, { auth }).eventId;
+  // 空き行のないシートを再現（History の最大行数 = 使っている行数）
+  const hist = p.store.get().getSheetByName('History');
+  hist.maxRows = hist.getLastRow();
+  const ev = p.ok('eventDetail', { eventId: id }, { auth }).event;
+  assert.equal(p.call('deleteEvent', { eventId: id, rev: ev.rev, confirmName: '満杯' }, { auth }).ok, true);
+  assert.equal(hist.records().filter((h) => h.event_id === id).length, 0);
+});
+
 test('管理パスワードの総当たり対策: 同じ大会で 10 回間違えると 10 分間は正しいパスワードでも開けない', () => {
   const { p, a, authA } = twoOrganizers();
   const ev = p.call('eventDetail', { eventId: a.eventId }, { auth: authA }).data.event;

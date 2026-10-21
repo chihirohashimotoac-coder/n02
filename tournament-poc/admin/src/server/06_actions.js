@@ -416,7 +416,7 @@ function actionLogout_(ctx, payload) {
 
 /** 管理パスワードの設定・変更・解除（大会を作った本人と管理者だけ。変えると古いパスワードのセッションは切れる） */
 function actionSetStaffPassword_(ctx, payload) {
-  if (ctx.user.kind === 'staff') throw appError_('FORBIDDEN', '管理パスワードの変更は、大会を作った本人（Google ログイン）か管理者だけが行えます。');
+  assertNotStaff_(ctx, '管理パスワードの変更');
   var eventId = requireId_(payload.eventId, '大会');
   var events = ctx.table('Events');
   var event = findRecord_(events, eventId, '大会');
@@ -1509,6 +1509,87 @@ function actionRepublish_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   findRecord_(ctx.table('Events'), eventId, '大会');
   return { eventId: eventId, forceRepublish: true };
+}
+
+/* ---------- 大会の削除（アーカイブ） ---------- */
+
+/** 大会に属する行を持つシート（Events・PublicSnapshots 以外） */
+var EVENT_CHILD_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History'];
+
+/** 削除・パスワードなどの設定は、大会を作った本人と管理者だけ（店舗スタッフは不可） */
+function assertNotStaff_(ctx, what) {
+  if (ctx.user.kind === 'staff') throw appError_('FORBIDDEN', what + 'は、大会を作った本人（Google ログイン）か管理者だけが行えます。');
+}
+
+/**
+ * 大会の全データ（保存用）。各シートの行をそのまま入れ、閲覧ページと同じ形の結果（順位表・トーナメント表）も添える。
+ * 管理パスワードのハッシュ・ソルトなどの秘密は含めない。
+ */
+function eventArchive_(ctx, eventId) {
+  var event = findRecord_(ctx.table('Events'), eventId, '大会');
+  var tables = {};
+  EVENT_CHILD_TABLES_.forEach(function (name) {
+    tables[name] = ctx.table(name).rows
+      .filter(function (r) {
+        return r.event_id === eventId;
+      })
+      .map(plain_);
+  });
+  return {
+    format: 'n02-tournament-archive',
+    formatVersion: 1,
+    appVersion: ADMIN_CONFIG.APP_VERSION,
+    exportedAt: ctx.now,
+    exportedBy: ctx.user ? ctx.user.label : '',
+    event: eventForLog_(event),
+    tables: tables,
+    results: buildPublicSnapshot_(collectEvent_(ctx, eventId)),
+  };
+}
+
+function actionExportEvent_(ctx, payload) {
+  assertNotStaff_(ctx, '大会データの保存');
+  return eventArchive_(ctx, requireId_(payload.eventId, '大会'));
+}
+
+/**
+ * 大会の削除。確認のため大会名の入力が必要。
+ * 途中で止まっても再実行できるよう、公開データ → 大会に属する行 → 大会の行 の順に消す（大会の行が残っていれば、もう一度削除できる）。
+ * 削除したことは履歴（大会に属さない行）に残すが、大会の中身は残さない。
+ */
+function actionDeleteEvent_(ctx, payload) {
+  assertNotStaff_(ctx, '大会の削除');
+  var eventId = requireId_(payload.eventId, '大会');
+  var events = ctx.table('Events');
+  var event = findRecord_(events, eventId, '大会');
+  assertRev_(event, requireRev_(payload.rev), '大会');
+  var typed = typeof payload.confirmName === 'string' ? payload.confirmName.normalize('NFC').replace(/\s+/g, ' ').trim() : '';
+  if (typed !== event.name) throw appError_('VALIDATION', '確認のため、大会名「' + event.name + '」を正しく入力してください。');
+
+  var counts = {};
+  ['PublicSnapshots'].concat(EVENT_CHILD_TABLES_).forEach(function (name) {
+    var table = ctx.table(name);
+    var rows = table.rows.filter(function (r) {
+      return r.event_id === eventId;
+    });
+    counts[name] = rows.length;
+    deleteRecords_(table, rows);
+    ctx.invalidate(name);
+  });
+  deleteRecords_(events, events.rows.filter(function (e) {
+    return e.event_id === eventId;
+  }));
+  ctx.invalidate();
+  recordHistory_(ctx, 'event.delete', 'Event', eventId, '', null, {
+    eventId: eventId,
+    name: event.name,
+    ownerEmail: event.owner_email,
+    createdAt: event.created_at,
+    deletedRows: counts,
+    by: ctx.user.label,
+  });
+  // eventId を返すと、削除後に公開データの同期・詳細の再読み込みが走るので、別の名前で返す
+  return { deletedEventId: eventId, deletedName: event.name };
 }
 
 /* ---------- サンプル ---------- */

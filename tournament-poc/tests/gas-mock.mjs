@@ -144,6 +144,16 @@ class FakeSheet {
     this.maxCols += n;
     return this;
   }
+  deleteRows(r, n) {
+    if (this.book.store.failWrites) throw new Error('Service Spreadsheets failed (simulated)');
+    // 実際のスプレッドシートと同じく、固定行以外をすべて消そうとするとエラーにする
+    if (n >= this.maxRows - 1) throw new Error('Sorry, it is not possible to delete all non-frozen rows.');
+    this.book.store.stats.writes++;
+    this.rows.splice(r - 1, n);
+    this.formats.splice(r - 1, n);
+    this.maxRows -= n;
+    return this;
+  }
   deleteRow(r) {
     if (this.book.store.failWrites) throw new Error('Service Spreadsheets failed (simulated)');
     this.book.store.stats.writes++;
