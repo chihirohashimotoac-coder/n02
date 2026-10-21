@@ -5,14 +5,17 @@ import { join } from 'node:path';
 import { createStore, createClock, loadProject, setupPair, ROOT, SPREADSHEET_ID, ADMIN_KEY, GOOGLE_CLIENT_ID, fakeIdToken } from './gas-mock.mjs';
 
 const OLD_CODE = join(ROOT, 'tests', 'fixtures', 'admin-v0.7.1.gs');
+// 本番で動いている版（2026-10-21 時点の HANDOFF: 運営用 v0.6.0・閲覧者用 v0.2.0）
+const PROD_ADMIN = join(ROOT, 'tests', 'fixtures', 'admin-v0.6.0.gs');
+const PROD_VIEWER = join(ROOT, 'tests', 'fixtures', 'viewer-v0.2.0.gs');
 
 /** v0.7.1 のコード（本番で動いている版）で大会を作り、結果を入れた保存先を用意する */
-function legacyWorld() {
+function legacyWorld(codePath = OLD_CODE) {
   const store = createStore();
   const clock = createClock();
   store.add();
   const props = { SPREADSHEET_ID, ADMIN_KEY, GOOGLE_CLIENT_ID };
-  const old = loadProject('admin', { store, clock, properties: props, codePath: OLD_CODE });
+  const old = loadProject('admin', { store, clock, properties: props, codePath });
   let n = 0;
   const call = (project, action, payload = {}, auth = { adminKey: ADMIN_KEY }) => project.post({ action, payload, requestId: `legacy-request-${String(++n).padStart(8, '0')}`, auth: auth || undefined });
   const ok = (project, action, payload, auth) => {
@@ -104,6 +107,65 @@ test('移行: v0.7.1 で作った保存先を新しい版で開くと、閲覧�
   assert.equal(w.store.get().sheets.filter((s) => s.name.startsWith('bak-')).length, names.filter((x) => x.startsWith('bak-')).length);
   // 既存大会の設定（自動終了など新機能の初期値）で状態を書き換えていない
   assert.equal(w.ok(next, 'eventDetail', { eventId: w.sampleId }).event.status, before.sample.event.status);
+});
+
+test('ロールバック: 移行後に v0.7.1 のコードへ戻しても、既存の大会を読み書きでき、v0.8 の列・シートを壊さない', () => {
+  const w = legacyWorld();
+  const props = w.old.properties.getProperties();
+  const next = loadProject('admin', { store: w.store, clock: w.clock, properties: props, cache: w.old.cache });
+  w.ok(next, 'migrateStorage');
+  // v0.8 で新しい形式の大会を 1 つ作っておく
+  const de = w.ok(next, 'createEvent', { name: '新形式', template: 'double_elimination', rule: { format: 'legs', bestOf: 3 } }, w.session).eventId;
+  w.ok(next, 'importPlayers', { eventId: de, players: [{ name: 'あ', affiliation: '東' }, { name: 'い', affiliation: '西' }, { name: 'う' }] }, w.session);
+  const newBefore = essentials(w.ok(next, 'eventDetail', { eventId: de }));
+  // 旧版のコードに戻す（デプロイを前のバージョンに戻した状態。スクリプト プロパティは移行後のまま）
+  const old = loadProject('admin', { store: w.store, clock: w.clock, properties: next.properties.getProperties(), cache: next.cache, codePath: OLD_CODE });
+  const ko = w.ok(old, 'eventDetail', { eventId: w.koId }, w.session);
+  assert.equal(ko.event.name, '旧トーナメント');
+  const m = ko.stages[0].rounds.flatMap((r) => r.matches).find((x) => x.status === 'scheduled' && x.p1.id && x.p2.id);
+  w.ok(old, 'saveMatchResult', { matchId: m.id, rev: m.rev, status: 'final', p1Legs: 2, p2Legs: 0 }, w.session);
+  w.ok(old, 'addPlayers', { eventId: w.sampleId, names: ['戻した後の追加'] }, w.session);
+  // もう一度 v0.8 に進めると、旧版で書いた内容も v0.8 の列（所属など）もそのまま読める
+  const again = loadProject('admin', { store: w.store, clock: w.clock, properties: old.properties.getProperties(), cache: old.cache });
+  assert.equal(w.ok(again, 'bootstrap').storage.migrationRequired, false);
+  assert.ok(w.ok(again, 'eventDetail', { eventId: w.koId }).stages[0].rounds.flatMap((r) => r.matches).some((x) => x.id === m.id && x.status === 'final'));
+  const back = w.ok(again, 'eventDetail', { eventId: de });
+  assert.deepEqual(essentials(back), newBefore);
+  assert.deepEqual(back.players.map((p) => p.affiliation || ''), ['東', '西', '']);
+});
+
+test('本番の版（運営用 v0.6.0・閲覧者用 v0.2.0）から: 反映の順（運営用 → 移行 → 閲覧者用）の各時点で公開データを読め、運営用を v0.6.0 に戻しても動く', () => {
+  const w = legacyWorld(PROD_ADMIN);
+  const viewerOld = () => loadProject('viewer', { store: w.store, clock: w.clock, properties: { SPREADSHEET_ID }, activeUser: '', codePath: PROD_VIEWER });
+  const snap = (viewer) => {
+    w.clock.advance(21000);
+    const r = viewer.run('getPublicSnapshot', { eventId: w.sampleId });
+    assert.equal(r.ok, true, JSON.stringify(r.error));
+    return r.data;
+  };
+  const before = snap(viewerOld());
+  // 1. 運営用だけ新しい版（移行前）: 閲覧者用 v0.2.0 はそのまま読める。書き込みは止まる
+  const next = loadProject('admin', { store: w.store, clock: w.clock, properties: w.old.properties.getProperties(), cache: w.old.cache });
+  assert.equal(w.ok(next, 'bootstrap').storage.migrationRequired, true);
+  assert.equal(snap(viewerOld()).event.name, before.event.name);
+  // 2. 移行: 閲覧者用 v0.2.0 のままでも公開データを読める（移行で公開データを作り直しても形は互換）
+  w.ok(next, 'migrateStorage');
+  const mid = snap(viewerOld());
+  assert.equal(mid.event.name, before.event.name);
+  assert.deepEqual(mid.stages.map((s) => s.type), before.stages.map((s) => s.type));
+  assert.deepEqual(mid.stages[0].groups.map((g) => g.matches.map((m) => [m.id, m.status, m.winnerId])), before.stages[0].groups.map((g) => g.matches.map((m) => [m.id, m.status, m.winnerId])));
+  // 3. 閲覧者用も新しい版
+  const viewerNew = loadProject('viewer', { store: w.store, clock: w.clock, properties: { SPREADSHEET_ID }, activeUser: '' });
+  assert.equal(snap(viewerNew).event.name, before.event.name);
+  w.ok(next, 'addPlayers', { eventId: w.sampleId, names: ['v0.8 で追加'] }, w.session);
+  // 4. 運営用を v0.6.0 に戻す（デプロイの版を戻した状態）: 読み書きでき、閲覧者用（新旧どちら）も読める
+  const back = loadProject('admin', { store: w.store, clock: w.clock, properties: next.properties.getProperties(), cache: next.cache, codePath: PROD_ADMIN });
+  const d = w.ok(back, 'eventDetail', { eventId: w.koId }, w.session);
+  const m = d.stages[0].rounds.flatMap((r) => r.matches).find((x) => x.status === 'scheduled' && x.p1.id && x.p2.id);
+  w.ok(back, 'saveMatchResult', { matchId: m.id, rev: m.rev, status: 'final', p1Legs: 2, p2Legs: 0 }, w.session);
+  assert.ok(w.ok(back, 'eventDetail', { eventId: w.sampleId }, w.session).players.some((p) => p.name === 'v0.8 で追加'));
+  assert.equal(snap(viewerOld()).event.name, before.event.name);
+  assert.equal(snap(viewerNew).event.name, before.event.name);
 });
 
 test('移行: 旧画面の「初期化する」を押しても、バックアップ付きの移行として実行される', () => {
