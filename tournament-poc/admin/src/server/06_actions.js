@@ -205,13 +205,20 @@ function parseGroupCount_(value) {
   return n;
 }
 
-/** 画面から送られたルール。{ format: 'legs' | 'sets', bestOf, setBestOf, provisional } */
+/** 画面から送られたルール。{ format: 'legs' | 'sets' | 'fixed', bestOf, setBestOf, provisional }（fixed の bestOf は Leg 数） */
 function parseRuleInput_(input) {
   var src = input && typeof input === 'object' ? input : {};
-  var format = src.format === 'sets' ? 'sets' : 'legs';
+  var format = src.format === 'sets' ? 'sets' : src.format === 'fixed' ? 'fixed' : 'legs';
+  var bestOf;
+  if (format === 'fixed') {
+    bestOf = typeof src.bestOf === 'number' ? src.bestOf : parseNonNegativeInt_(src.bestOf);
+    if (!isValidFixedLegs_(bestOf)) throw appError_('VALIDATION', '固定 Leg 数は 1〜' + ADMIN_CONFIG.BEST_OF_MAX + ' で指定してください。');
+  } else {
+    bestOf = parseBestOf_(src.bestOf, format === 'sets' ? 'セット数の Best of' : 'Best of');
+  }
   return {
     format: format,
-    bestOf: parseBestOf_(src.bestOf, format === 'sets' ? 'セット数の Best of' : 'Best of'),
+    bestOf: bestOf,
     setBestOf: format === 'sets' ? parseBestOf_(src.setBestOf, '1 セットの Best of') : null,
     provisional: src.provisional === undefined ? true : requireBool_(src.provisional, '暫定ルール'),
   };
@@ -221,12 +228,14 @@ function ruleName_(spec, provisional) {
   var base =
     spec.format === 'sets'
       ? 'Best of ' + spec.bestOf + ' セット（各セット Best of ' + spec.setBestOf + ' Legs）'
-      : 'Best of ' + spec.bestOf + ' Legs';
+      : spec.format === 'fixed'
+        ? '固定 ' + spec.bestOf + ' Legs（引き分けあり）'
+        : 'Best of ' + spec.bestOf + ' Legs';
   return base + (provisional ? '（暫定）' : '');
 }
 
 function applyRule_(rule, spec, now) {
-  rule.format = spec.format === 'sets' ? RULE_FORMAT.BEST_OF_SETS : RULE_FORMAT.BEST_OF_LEGS;
+  rule.format = spec.format === 'sets' ? RULE_FORMAT.BEST_OF_SETS : spec.format === 'fixed' ? RULE_FORMAT.FIXED_LEGS : RULE_FORMAT.BEST_OF_LEGS;
   rule.best_of = spec.bestOf;
   rule.set_best_of = spec.format === 'sets' ? spec.setBestOf : null;
   rule.is_provisional = spec.provisional;
@@ -237,7 +246,8 @@ function applyRule_(rule, spec, now) {
 
 function ruleSpecOf_(rule) {
   var sets = rule.format === RULE_FORMAT.BEST_OF_SETS;
-  return { format: sets ? 'sets' : 'legs', bestOf: rule.best_of, setBestOf: sets ? rule.set_best_of : null, provisional: rule.is_provisional };
+  var fixed = rule.format === RULE_FORMAT.FIXED_LEGS;
+  return { format: sets ? 'sets' : fixed ? 'fixed' : 'legs', bestOf: rule.best_of, setBestOf: sets ? rule.set_best_of : null, provisional: rule.is_provisional };
 }
 
 function newRuleRecord_(ctx, eventId, spec, taken) {
@@ -250,12 +260,11 @@ function newRuleRecord_(ctx, eventId, spec, taken) {
 
 /* ---------- 段階の作成 ---------- */
 
-var TEMPLATES_ = {
-  robin: 'ロビンのみ',
-  robin_ab: 'ロビン → A / B トーナメント',
-  elimination: 'トーナメントのみ',
-  league: 'リーグ',
-};
+/** 作成時のひな形（定義は shared/formats.js。ここは ID の一覧と、段階の組み立て） */
+var TEMPLATES_ = {};
+TOURNAMENT_FORMATS.forEach(function (f) {
+  TEMPLATES_[f.id] = f.label;
+});
 
 function newStageRecord_(ctx, eventId, input, taken) {
   var id = newId_('STG', taken);
@@ -275,7 +284,16 @@ function newStageRecord_(ctx, eventId, input, taken) {
   };
 }
 
-function newGroupRecords_(ctx, eventId, stageId, count, taken, startIndex, league) {
+/** グループの既定の名前（ロビン: グループA… / リーグ: リーグ・ディビジョン1… / シリーズ: 第1節… / スイス式: スイス式） */
+function defaultGroupName_(type, index, count) {
+  if (type === STAGE_TYPE.LEAGUE) return count > 1 ? 'ディビジョン' + (index + 1) : 'リーグ';
+  if (type === STAGE_TYPE.SERIES) return '第' + (index + 1) + '節';
+  if (type === STAGE_TYPE.SWISS) return 'スイス式';
+  return groupLabel_(index);
+}
+
+function newGroupRecords_(ctx, eventId, stageId, count, taken, startIndex, typeOrLeague, total) {
+  var type = typeOrLeague === true ? STAGE_TYPE.LEAGUE : typeOrLeague === false || !typeOrLeague ? STAGE_TYPE.ROUND_ROBIN : typeOrLeague;
   var out = [];
   for (var i = 0; i < count; i++) {
     var gid = newId_('GRP', taken);
@@ -284,8 +302,9 @@ function newGroupRecords_(ctx, eventId, stageId, count, taken, startIndex, leagu
       group_id: gid,
       event_id: eventId,
       stage_id: stageId,
-      name: league ? 'リーグ' : groupLabel_((startIndex || 0) + i),
+      name: defaultGroupName_(type, (startIndex || 0) + i, total || count),
       order: (startIndex || 0) + i + 1,
+      meta_json: '',
       rev: 1,
       created_at: ctx.now,
       updated_at: ctx.now,
@@ -296,7 +315,8 @@ function newGroupRecords_(ctx, eventId, stageId, count, taken, startIndex, leagu
 
 /**
  * 大会・段階・ルール・グループをひな形どおりに作る。
- * input = { name, dateLabel, organizerName, rule, template, groupCount, advanceCount, thirdPlace, cycles, isSample }
+ * input = { name, dateLabel, organizerName, rule, template, groupCount, advanceCount, groupCount2, advanceCount2, thirdPlace, cycles,
+ *           divisions, playoff, points, nights, nightPoints, swissRounds, grandFinal, isSample }
  */
 function createEventRecords_(ctx, input) {
   var events = ctx.table('Events');
@@ -315,25 +335,88 @@ function createEventRecords_(ctx, input) {
     stages.push(stage);
     return stage;
   };
-  var groupConfig = { cycles: input.cycles === 2 ? 2 : 1, tiebreakers: DEFAULT_TIEBREAKERS_.slice() };
+  var addGroups = function (stage, count) {
+    groups = groups.concat(newGroupRecords_(ctx, eventId, stage.stage_id, count, groupTaken, 0, stage.type, count));
+  };
+  var setConfig = function (stage, cfg) {
+    stage.config_json = JSON.stringify(cfg);
+  };
+  var robinConfig = function () {
+    return { cycles: input.cycles === 2 ? 2 : 1, tiebreakers: DEFAULT_TIEBREAKERS_.slice() };
+  };
+  var koConfig = function () {
+    return { thirdPlace: !!input.thirdPlace, avoidSameGroup: true };
+  };
+  // v0.7 までのひな形（robin / robin_ab / elimination / league の 1 ディビジョン）は、作る段階と設定を変えない
+  var legacyGroupConfig = robinConfig();
   if (template === 'elimination') {
     addStage('トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, { thirdPlace: !!input.thirdPlace });
-  } else if (template === 'league') {
-    var league = addStage('リーグ', STAGE_TYPE.LEAGUE, groupConfig);
-    groups = groups.concat(newGroupRecords_(ctx, eventId, league.stage_id, 1, groupTaken, 0, true));
-  } else {
-    var robin = addStage(template === 'robin_ab' ? '予選ロビン' : 'ロビン', STAGE_TYPE.ROUND_ROBIN, groupConfig);
-    groups = groups.concat(newGroupRecords_(ctx, eventId, robin.stage_id, input.groupCount, groupTaken, 0, false));
+  } else if (template === 'robin' || template === 'robin_ab') {
+    var robin = addStage(template === 'robin_ab' ? '予選ロビン' : 'ロビン', STAGE_TYPE.ROUND_ROBIN, legacyGroupConfig);
+    addGroups(robin, input.groupCount);
     if (template === 'robin_ab') {
       var a = addStage('A トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, { thirdPlace: !!input.thirdPlace });
       var b = addStage('B トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, { thirdPlace: !!input.thirdPlace });
       var k = input.advanceCount || 2;
-      groupConfig.advancement = [
+      legacyGroupConfig.advancement = [
         { fromRank: 1, toRank: k, targetStageId: a.stage_id },
         { fromRank: k + 1, toRank: 99, targetStageId: b.stage_id },
       ];
-      robin.config_json = JSON.stringify(groupConfig);
+      setConfig(robin, legacyGroupConfig);
     }
+  } else if (template === 'robin_ko') {
+    var pre = addStage('予選ロビン', STAGE_TYPE.ROUND_ROBIN, robinConfig());
+    addGroups(pre, input.groupCount);
+    var fin = addStage('決勝トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, koConfig());
+    var c1 = robinConfig();
+    c1.advancement = [{ fromRank: 1, toRank: input.advanceCount || 2, targetStageId: fin.stage_id }];
+    setConfig(pre, c1);
+  } else if (template === 'double_elimination') {
+    addStage('ダブルエリミネーション', STAGE_TYPE.DOUBLE_ELIMINATION, { grandFinal: input.grandFinal === 'single' ? 'single' : 'reset' });
+  } else if (template === 'league' || template === 'league_playoff') {
+    var D = input.divisions || 1;
+    // v0.8 で作るリーグは勝ち点（勝・分・負）で順位を決める（アプリの既定値 2・1・0。主催者が変えられる）
+    var lc = { cycles: input.cycles === 2 ? 2 : 1, points: input.points, tiebreakers: DEFAULT_POINTS_TIEBREAKERS_.slice() };
+    var league = addStage('リーグ', STAGE_TYPE.LEAGUE, lc);
+    addGroups(league, D);
+    if (template === 'league_playoff') {
+      var po = addStage('プレーオフ', STAGE_TYPE.SINGLE_ELIMINATION, koConfig());
+      lc.advancement = [{ fromRank: 1, toRank: Math.max(1, Math.ceil((input.playoff || 4) / D)), targetStageId: po.stage_id }];
+      setConfig(league, lc);
+    }
+  } else if (template === 'multi_robin_ko') {
+    var r1 = addStage('予選ロビン', STAGE_TYPE.ROUND_ROBIN, robinConfig());
+    addGroups(r1, input.groupCount);
+    var r2 = addStage('2 次ロビン', STAGE_TYPE.ROUND_ROBIN, robinConfig());
+    addGroups(r2, input.groupCount2 || 2);
+    var f2 = addStage('決勝トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, koConfig());
+    var a1 = robinConfig();
+    a1.advancement = [{ fromRank: 1, toRank: input.advanceCount || 2, targetStageId: r2.stage_id }];
+    setConfig(r1, a1);
+    var a2 = robinConfig();
+    a2.advancement = [{ fromRank: 1, toRank: input.advanceCount2 || 2, targetStageId: f2.stage_id }];
+    setConfig(r2, a2);
+  } else if (template === 'series_playoff') {
+    var series = addStage('ポイントシリーズ', STAGE_TYPE.SERIES, { nights: input.nights || 16, nightPoints: input.nightPoints || [5, 3, 2, 0], tiebreakers: DEFAULT_SERIES_TIEBREAKERS_.slice() });
+    addGroups(series, input.nights || 16);
+    var spo = addStage('プレーオフ', STAGE_TYPE.SINGLE_ELIMINATION, { thirdPlace: !!input.thirdPlace });
+    setConfig(series, { nights: input.nights || 16, nightPoints: input.nightPoints || [5, 3, 2, 0], tiebreakers: DEFAULT_SERIES_TIEBREAKERS_.slice(), advancement: [{ fromRank: 1, toRank: input.playoff || 4, targetStageId: spo.stage_id }] });
+  } else if (template === 'swiss') {
+    var sc = { rounds: input.swissRounds || 5, points: input.points, tiebreakers: DEFAULT_SWISS_TIEBREAKERS_.slice() };
+    var sw = addStage('スイス式', STAGE_TYPE.SWISS, sc);
+    addGroups(sw, 1);
+    if (input.playoff >= 2) {
+      var spo2 = addStage('決勝トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, { thirdPlace: !!input.thirdPlace });
+      sc.advancement = [{ fromRank: 1, toRank: input.playoff, targetStageId: spo2.stage_id }];
+      setConfig(sw, sc);
+    }
+  }
+  if (input.rule.format === 'fixed') {
+    stages.forEach(function (st) {
+      if (isBracketStage_(st)) {
+        throw appError_('VALIDATION', '固定 Leg 数（引き分けあり）は勝ち抜き戦の段階（' + st.name + '）では使えません。Leg 制・セット制を選ぶか、勝ち抜き戦のない形式にしてください。');
+      }
+    });
   }
   var event = {
     event_id: eventId,
@@ -352,6 +435,8 @@ function createEventRecords_(ctx, input) {
     staff_pass_salt: '',
     staff_pass_set_at: '',
     notes: '',
+    // v0.8 で作る大会: 形式を記録し、全段階が終わったら自動で「終了」にする（既存の大会には付けない）
+    config_json: JSON.stringify({ template: template, autoFinish: true, timezone: EVENT_TIMEZONE_DEFAULT_ }),
     rev: 1,
     created_at: ctx.now,
     updated_at: ctx.now,
@@ -360,7 +445,6 @@ function createEventRecords_(ctx, input) {
   appendRecords_(ctx.table('Rules'), rules);
   appendRecords_(ctx.table('Stages'), stages);
   appendRecords_(ctx.table('Groups'), groups);
-  ctx.invalidate();
   recordHistory_(ctx, 'event.create', 'Event', eventId, eventId, null, {
     event: eventForLog_(event),
     template: template,
@@ -414,10 +498,47 @@ function parseAdvanceCount_(value) {
   return n;
 }
 
+function parseSmallInt_(value, label, min, max, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  var n = typeof value === 'number' ? value : parseNonNegativeInt_(value);
+  if (n === null || !(n >= min && n <= max) || Math.floor(n) !== n) throw appError_('VALIDATION', label + ' は ' + min + '〜' + max + ' で指定してください。');
+  return n;
+}
+
+/** 勝・分・負の点 { win, draw, loss }（-99〜99 の整数。勝ち ≧ 引き分け ≧ 負け） */
+function parsePoints_(value, fallback) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'object' || Array.isArray(value)) throw appError_('VALIDATION', '勝ち点の指定が不正です。');
+  var read = function (k, label) {
+    var v = value[k];
+    var n = typeof v === 'number' ? v : typeof v === 'string' && /^-?\d{1,2}$/.test(v.trim()) ? Number(v.trim()) : NaN;
+    if (!(n >= -99 && n <= 99) || Math.floor(n) !== n) throw appError_('VALIDATION', label + 'の点は -99〜99 の整数で指定してください。');
+    return n;
+  };
+  var p = { win: read('win', '勝ち'), draw: read('draw', '引き分け'), loss: read('loss', '負け') };
+  if (!(p.win >= p.draw && p.draw >= p.loss)) throw appError_('VALIDATION', '勝ち点は 勝ち ≧ 引き分け ≧ 負け にしてください。');
+  return p;
+}
+
+function parseNightPoints_(value, fallback) {
+  if (value === undefined || value === null) return fallback;
+  if (!Array.isArray(value) || value.length < 2 || value.length > 8) throw appError_('VALIDATION', '節の順位ポイントは 2〜8 段階で指定してください（優勝・準優勝・準決勝敗退…）。');
+  var out = value.map(function (v, i) {
+    var n = typeof v === 'number' ? v : parseNonNegativeInt_(v);
+    if (n === null || n > 999) throw appError_('VALIDATION', '節の順位ポイント（' + (i + 1) + '番目）は 0〜999 の整数で指定してください。');
+    return n;
+  });
+  for (var i = 1; i < out.length; i++) {
+    if (out[i] > out[i - 1]) throw appError_('VALIDATION', '節の順位ポイントは、上の順位ほど高く（同じでもよい）してください。');
+  }
+  return out;
+}
+
 function actionCreateEvent_(ctx, payload) {
   assertCreateAllowed_(ctx);
   var template = TEMPLATES_[payload.template] ? payload.template : 'robin';
-  var needsGroups = template === 'robin' || template === 'robin_ab';
+  var needsGroups = template === 'robin' || template === 'robin_ab' || template === 'robin_ko' || template === 'multi_robin_ko';
+  var hasPlayoff = template === 'league_playoff' || template === 'series_playoff';
   var created = createEventRecords_(ctx, {
     organizerName: cleanText_(payload.organizerName, '主催者名', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
     name: cleanText_(payload.name, '大会名', ADMIN_CONFIG.MAX_EVENT_NAME_LENGTH),
@@ -425,11 +546,21 @@ function actionCreateEvent_(ctx, payload) {
     rule: parseRuleInput_(payload.rule || { format: 'legs', bestOf: payload.bestOf, provisional: payload.provisional }),
     template: template,
     groupCount: needsGroups ? parseGroupCount_(payload.groupCount) : 0,
-    advanceCount: template === 'robin_ab' ? parseAdvanceCount_(payload.advanceCount) : 0,
+    advanceCount: template === 'robin_ab' || template === 'robin_ko' || template === 'multi_robin_ko' ? parseAdvanceCount_(payload.advanceCount) : 0,
+    groupCount2: template === 'multi_robin_ko' ? parseGroupCount_(payload.groupCount2 === undefined ? 2 : payload.groupCount2) : 0,
+    advanceCount2: template === 'multi_robin_ko' ? parseAdvanceCount_(payload.advanceCount2) : 0,
     thirdPlace: payload.thirdPlace === true,
     cycles: payload.cycles === 2 ? 2 : 1,
+    divisions: template === 'league' || template === 'league_playoff' ? parseSmallInt_(payload.divisions, 'ディビジョン数', 1, ADMIN_CONFIG.MAX_GROUPS, 1) : 1,
+    playoff: hasPlayoff ? parseSmallInt_(payload.playoff, 'プレーオフの人数', 2, 64, 4) : template === 'swiss' ? parseSmallInt_(payload.playoff, '決勝トーナメントの人数', 0, 64, 0) : 0,
+    points: parsePoints_(payload.points, { win: 2, draw: 1, loss: 0 }),
+    nights: template === 'series_playoff' ? parseSmallInt_(payload.nights, '節の数', 1, ADMIN_CONFIG.MAX_SERIES_NIGHTS, 16) : 0,
+    nightPoints: template === 'series_playoff' ? parseNightPoints_(payload.nightPoints, [5, 3, 2, 0]) : null,
+    swissRounds: template === 'swiss' ? parseSmallInt_(payload.swissRounds, '回戦数', 1, ADMIN_CONFIG.MAX_SWISS_ROUNDS, 5) : 0,
+    grandFinal: payload.grandFinal === 'single' ? 'single' : 'reset',
     ownerEmail: creatorEmail_(ctx),
   });
+  if (template === 'swiss' && created.stages.length === 1 && payload.playoff === 1) throw appError_('VALIDATION', '決勝トーナメントの人数は 0（なし）か 2 以上にしてください。');
   return { eventId: created.event.event_id };
 }
 
