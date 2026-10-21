@@ -1,29 +1,24 @@
 /*
- * The way into the tournament & league portal from the top screen. Deliberately not a mode tile: a
- * slim horizontal strip of its own under the top bar, with a bracket mark and a chevron, so it cannot
- * be read as one more game mode and the mode grid itself is unchanged.
+ * The way into the tournament & league portal from the top screen. It sits in a 「大会」 section of
+ * its own below the mode selection, and is deliberately not a mode tile: a horizontal link with a
+ * bracket mark and a chevron on a dashed, recessed ground, so it cannot be read as one more game
+ * mode and the mode grid itself is unchanged.
  */
-.tournament-strip {
-  width: min(1480px, 100% - 48px);
-  margin: 26px auto -12px;
-}
 .tournament-link {
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 64px;
-  padding: 12px 20px;
-  border: 1px solid var(--line);
-  border-left: 6px solid var(--tungsten, #1a1f22);
-  border-radius: 14px;
-  background: var(--surface);
+  min-height: 60px;
+  padding: 12px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: var(--canvas);
   color: var(--ink);
   text-decoration: none;
   -webkit-tap-highlight-color: transparent;
 }
 .tournament-link:hover {
   border-color: var(--green);
-  border-left-color: var(--tungsten, #1a1f22);
 }
 .tournament-link:hover .tournament-link__text strong {
   text-decoration: underline;
@@ -56,13 +51,4 @@
   flex: none;
   margin-left: auto;
   color: var(--muted);
-}
-@media (width<=720px) {
-  .tournament-strip {
-    width: min(100% - 24px, 620px);
-    margin: 14px auto -2px;
-  }
-  .tournament-link {
-    padding: 10px 14px;
-  }
 }

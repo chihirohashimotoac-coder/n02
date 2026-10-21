@@ -67,7 +67,7 @@
 - 運営用 Apps Script: 操作 `myEvents`（scope `google`）。公開データに `event.playerCount` を追加
 - 要約の計算は `shared/summary.js`（両方の Code.gs の末尾に入る）
 - 運営画面: `#new`（作成欄へ移る）、上部にポータルへのリンク
-- n02 本体: `src/components/tournament/TournamentPortalLink.tsx`・`src/styles/tournament-link.css`。トップ画面のヘッダー直下に専用の帯。リンク先は `VITE_TOURNAMENT_PORTAL_URL`（既定は本番の `…/n02-tournament-viewer/events/`）
+- n02 本体: `src/components/tournament/TournamentPortalLink.tsx`・`src/styles/tournament-link.css`。トップ画面のモード選択の下に「大会」セクション（ユーザーが案 C を選択）。リンク先は `VITE_TOURNAMENT_PORTAL_URL`（既定は本番の `…/n02-tournament-viewer/events/`）
 - 確認用プレビュー: `node tools/preview-site/build-preview-site.mjs <出力先>`。実物の Code.gs をブラウザ内の模擬環境で動かす静的サイト（Google 非接続）。claude.ai の Artifact に公開済み: https://claude.ai/artifact/XcYhUQcBWLY7tJ6hUmzZeN
 - 反映手順は [deploy.md](deploy.md) の「v0.7.0 に更新するとき」（Apps Script を先に、Pages を後に）
 
