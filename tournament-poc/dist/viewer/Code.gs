@@ -18,15 +18,17 @@
  */
 
 var VIEWER_CONFIG = Object.freeze({
-  APP_VERSION: '0.7.1',
+  APP_VERSION: '0.8.0',
   CACHE_TTL_SEC: 20,
   STALE_TTL_SEC: 21600, // CacheService の上限（6 時間）
   NONE_TTL_SEC: 20,
   LOCK_WAIT_MS: 3000,
   REFRESH_INTERVAL_SEC: 60,
   REFRESH_JITTER_SEC: 10,
-  // CacheService の 1 値あたりの上限は 100KB。余裕を持たせる
-  MAX_CACHE_CHARS: 90000,
+  // CacheService の 1 値あたりの上限は 100KB（バイト）。日本語は 1 文字 3 バイトになるので、
+  // 1 つの値は 30,000 文字までに分けて入れる（v0.8。以前は 90,000 文字を超える大会をキャッシュしなかった）
+  MAX_CACHE_CHARS: 30000,
+  MAX_CACHE_PARTS: 20,
   SHEET_NAME: 'PublicSnapshots',
   CACHE_PREFIX: 'pub:v1:',
 });
@@ -40,6 +42,10 @@ var LIST_MAX_EVENTS_ = 200;
 // シートを読めないときに返す予備の内容（stale:…）と、予備を持っている大会の一覧のキー
 var STALE_PREFIX_ = 'stale:';
 var STALE_IDS_KEY_ = '_ids';
+// 本番反映のときに、反映した正本のコミット（SHA）に置き換わる
+var VIEWER_RELEASE_ID_ = 'manual';
+// 大きな値を分けて入れたときの目印（{ "__parts": n }）と、各部分のキーの付け方（キー + "#" + 番号）
+var PART_SEPARATOR_ = '#';
 
 /**
  * ?format=json のときは画面ではなく公開データ（getPublicSnapshot と同じ内容）を JSON で返す。
@@ -50,6 +56,11 @@ var STALE_IDS_KEY_ = '_ids';
  */
 function doGet(e) {
   var p = (e && e.parameter) || {};
+  if (p.format === 'version') {
+    // 本番反映の確認用（どの版のコードが動いているか。秘密の情報は含まない）
+    var info = { ok: true, app: 'n02-tournament-viewer', version: VIEWER_CONFIG.APP_VERSION, release: VIEWER_RELEASE_ID_ };
+    return ContentService.createTextOutput(JSON.stringify(info)).setMimeType(ContentService.MimeType.JSON);
+  }
   if (p.format === 'list') {
     var list = getPublicList_({ knownVersion: p.known || '' });
     return ContentService.createTextOutput(JSON.stringify(list)).setMimeType(ContentService.MimeType.JSON);
@@ -227,10 +238,37 @@ function readCache_(cache, fullKey) {
   var raw = cache.get(fullKey);
   if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    var value = JSON.parse(raw);
+    if (value && typeof value.__parts === 'number') {
+      var keys = [];
+      for (var i = 1; i <= value.__parts; i++) keys.push(fullKey + PART_SEPARATOR_ + i);
+      var parts = cache.getAll(keys);
+      var text = '';
+      for (var j = 0; j < keys.length; j++) {
+        if (typeof parts[keys[j]] !== 'string') return null; // 一部が消えていたら、無いものとして読み直す
+        text += parts[keys[j]];
+      }
+      return JSON.parse(text);
+    }
+    return value;
   } catch (e) {
     return null;
   }
+}
+
+/** キャッシュに入れる値を 1 つ足す。大きい値は分けて入れる（入れられない大きさなら入れない） */
+function addCacheValue_(bag, fullKey, value) {
+  if (value.length <= VIEWER_CONFIG.MAX_CACHE_CHARS) {
+    bag[fullKey] = value;
+    return true;
+  }
+  var count = Math.ceil(value.length / VIEWER_CONFIG.MAX_CACHE_CHARS);
+  if (count > VIEWER_CONFIG.MAX_CACHE_PARTS) return false;
+  bag[fullKey] = JSON.stringify({ __parts: count });
+  for (var i = 0; i < count; i++) {
+    bag[fullKey + PART_SEPARATOR_ + (i + 1)] = value.slice(i * VIEWER_CONFIG.MAX_CACHE_CHARS, (i + 1) * VIEWER_CONFIG.MAX_CACHE_CHARS);
+  }
+  return true;
 }
 
 /**
@@ -255,26 +293,32 @@ function refreshFromSheet_(cache) {
 
   Object.keys(fresh).forEach(function (k) {
     var value = JSON.stringify(fresh[k]);
-    if (value.length > VIEWER_CONFIG.MAX_CACHE_CHARS) {
+    if (!addCacheValue_(freshValues, VIEWER_CONFIG.CACHE_PREFIX + k, value)) {
       console.warn('snapshot too large for cache', k, value.length);
       return;
     }
-    freshValues[VIEWER_CONFIG.CACHE_PREFIX + k] = value;
-    if (!fresh[k].none) staleValues[VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_ + k] = value;
+    if (!fresh[k].none) addCacheValue_(staleValues, VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_ + k, value);
   });
   // 公開をやめた・削除した大会の予備（stale）を消す。残すと、シートを読めないときに非公開の大会を返してしまう
   var staleIdsKey = VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_ + STALE_IDS_KEY_;
   var previousIds = readCache_(cache, staleIdsKey);
   if (!Array.isArray(previousIds)) previousIds = [];
-  var currentIds = Object.keys(staleValues).map(function (fullKey) {
-    return fullKey.slice((VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_).length);
-  });
-  var gone = previousIds
+  var currentIds = Object.keys(staleValues)
+    .filter(function (fullKey) {
+      return fullKey.indexOf(PART_SEPARATOR_) === -1;
+    })
+    .map(function (fullKey) {
+      return fullKey.slice((VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_).length);
+    });
+  var gone = [];
+  previousIds
     .filter(function (k) {
       return currentIds.indexOf(k) < 0;
     })
-    .map(function (k) {
-      return VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_ + k;
+    .forEach(function (k) {
+      var key = VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_ + k;
+      gone.push(key);
+      for (var i = 1; i <= VIEWER_CONFIG.MAX_CACHE_PARTS; i++) gone.push(key + PART_SEPARATOR_ + i);
     });
   if (gone.length) cache.removeAll(gone);
   staleValues[staleIdsKey] = JSON.stringify(currentIds);

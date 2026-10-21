@@ -14,8 +14,9 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.7.1',
-  SCHEMA_VERSION: 1,
+  APP_VERSION: '0.8.0',
+  // 1 = v0.7 まで。2 = v0.8（大会設定・所属/Rt・試合の予定/特殊な結果・共同主催者など。列とシートの追加だけ）
+  SCHEMA_VERSION: 2,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
   // 二重送信（ボタン連打・通信再試行）を requestId で弾く期間
@@ -43,6 +44,15 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_STAGES: 8,
   MAX_ELIMINATION_ENTRANTS: 128,
   MAX_REQUEST_CHARS: 100000,
+  // JSON からの復元（restoreEvent）だけは大会 1 つ分のファイルを受け取るので大きくする
+  MAX_RESTORE_REQUEST_CHARS: 2000000,
+  // 公開データ（閲覧ページの JSON）の上限。セル 10 個 × 40,000 文字
+  MAX_SNAPSHOT_CHARS: 400000,
+  MAX_COLLABORATORS: 10,
+  MAX_SERIES_NIGHTS: 30,
+  MAX_SWISS_ROUNDS: 15,
+  MAX_ANNOUNCEMENT_LENGTH: 1000,
+  MAX_IMPORT_PLAYERS: 128,
   // ポータルの「作成した大会」に返す大会の上限（新しい順）
   MAX_MY_EVENTS: 100,
 });
@@ -77,22 +87,49 @@ var STAGE_TYPE = Object.freeze({
   ROUND_ROBIN: 'round_robin', // ロビン（グループごとの総当たり）
   LEAGUE: 'league', // リーグ（全員の総当たり。ラウンドを「節」と呼ぶ）
   SINGLE_ELIMINATION: 'single_elimination', // トーナメント（勝ち抜き）
+  DOUBLE_ELIMINATION: 'double_elimination', // v0.8: ダブルエリミネーション（勝者側・敗者側・グランドファイナル）
+  SWISS: 'swiss', // v0.8: スイス式（成績の近い選手どうしを回戦ごとに組む）
+  SERIES: 'series', // v0.8: ポイントシリーズ（節ごとの小トーナメントの順位ポイントを累計）
 });
 
 var RULE_FORMAT = Object.freeze({
   BEST_OF_LEGS: 'best_of_legs', // Best of N Legs
   BEST_OF_SETS: 'best_of_sets', // Best of N セット（各セット Best of M Legs）
+  FIXED_LEGS: 'fixed_legs', // v0.8: 固定 Leg 数（N Legs をすべて投げる。同数なら引き分け。勝ち抜き戦では使えない）
+});
+
+/** v0.8: 試合の特殊な結果（空欄は通常の結果） */
+var RESULT_TYPE = Object.freeze({
+  NORMAL: '',
+  WALKOVER: 'walkover', // 不戦勝（相手の当日棄権・不在）。Leg 数は記録しない
+  RETIRED: 'retired', // 途中棄権（それまでの Leg 数は実際の数）
+  DISQUALIFIED: 'disqualified', // 失格
+  BYE: 'bye', // スイス式の不戦（相手なし）
+  NOT_NEEDED: 'not_needed', // ダブルエリミのリセットの決勝など、行わなくてよくなった試合
+});
+
+var RESULT_TYPE_LABEL = Object.freeze({
+  walkover: '不戦勝',
+  retired: '途中棄権',
+  disqualified: '失格',
+  bye: '不戦（Bye）',
+  not_needed: '実施なし',
 });
 
 var STAGE_TYPE_LABEL = Object.freeze({
   round_robin: 'ロビン',
   league: 'リーグ',
   single_elimination: 'トーナメント',
+  double_elimination: 'ダブルエリミネーション',
+  swiss: 'スイス式',
+  series: 'ポイントシリーズ',
 });
 
 /**
  * シート定義。列は見出し名で参照するため、列の並べ替えや末尾への列追加には耐える。
  * 型: text = 文字列（書式「書式なしテキスト」で保存）, int = 整数, bool = 真偽値
+ * 列の 3 つ目の値（2 など）は、その列を追加したスキーマの版。移行前のシートにその列がなくても読み込める（空として読む）。
+ * シートの since も同じ（移行前はシートがなくても空として読む）。書き込みは移行が終わるまで受け付けない。
  */
 var SCHEMA = Object.freeze({
   Events: {
@@ -114,6 +151,7 @@ var SCHEMA = Object.freeze({
       ['staff_pass_salt', 'text'],
       ['staff_pass_set_at', 'text'],
       ['notes', 'text'],
+      ['config_json', 'text', 2], // v0.8: 大会の設定（形式・お知らせ・ルール表示・公開する項目・自動終了など）
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
@@ -143,6 +181,10 @@ var SCHEMA = Object.freeze({
       ['display_name', 'text'],
       ['external_ref', 'text'], // 将来の n02 連携用
       ['notes', 'text'], // 非公開メモ（閲覧画面には出さない）
+      ['affiliation', 'text', 2], // v0.8: 所属（任意。空欄は「所属なし」）
+      ['rating', 'text', 2], // v0.8: レーティング（任意。未入力は空欄で、0 とは区別する）
+      ['seed', 'int', 2], // v0.8: シード（任意）
+      ['meta_json', 'text', 2], // v0.8: 棄権・失格など
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
@@ -172,6 +214,7 @@ var SCHEMA = Object.freeze({
       ['stage_id', 'text'],
       ['name', 'text'],
       ['order', 'int'],
+      ['meta_json', 'text', 2], // v0.8: シリーズの節の予定・中止など
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
@@ -188,6 +231,8 @@ var SCHEMA = Object.freeze({
       ['seed', 'int'],
       ['manual_order', 'int'], // 同順位を主催者が決めたときの順番
       ['source_label', 'text'], // 進出元（例: グループA 1位）
+      ['start_round', 'int', 2], // v0.8: トーナメントの途中回戦から出場するシード（空欄は 1 回戦から）
+      ['meta_json', 'text', 2], // v0.8: 進出元のグループ・直接出場など
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
@@ -221,6 +266,11 @@ var SCHEMA = Object.freeze({
       ['created_at', 'text'],
       ['updated_at', 'text'],
       ['confirmed_at', 'text'],
+      ['result_type', 'text', 2], // v0.8: 空欄=通常 / walkover=不戦勝 / retired=途中棄権 / disqualified=失格 / bye=スイスの不戦 / not_needed=不要になった試合
+      ['result_note', 'text', 2], // v0.8: 特殊な結果の理由
+      ['schedule_json', 'text', 2], // v0.8: 予定（日付・時刻・会場・ボード・審判・延期）
+      ['bracket_side', 'text', 2], // v0.8: ダブルエリミの W / L / GF
+      ['meta_json', 'text', 2], // v0.8: 試合の補足（リセットの決勝・抽選の記録など）
     ],
   },
   History: {
@@ -235,6 +285,21 @@ var SCHEMA = Object.freeze({
       ['event_id', 'text'],
       ['before_json', 'text'],
       ['after_json', 'text'],
+    ],
+  },
+  // v0.8: 共同主催者（Google アカウント単位）。招待メールは送らない
+  Collaborators: {
+    key: 'collab_id',
+    since: 2,
+    columns: [
+      ['collab_id', 'text'],
+      ['event_id', 'text'],
+      ['email', 'text'],
+      ['role', 'text'],
+      ['added_by', 'text'],
+      ['rev', 'int'],
+      ['created_at', 'text'],
+      ['updated_at', 'text'],
     ],
   },
   PublicSnapshots: {
@@ -270,6 +335,7 @@ var SHEET_ORDER = Object.freeze([
   'Matches',
   'History',
   'PublicSnapshots',
+  'Collaborators',
 ]);
 
 // ---- 01_util.js ----
@@ -756,14 +822,30 @@ function headerOf_(sheet) {
   return header;
 }
 
+/** 列の定義のうち、その版のスキーマで追加された列か（移行前のシートにはない） */
+function columnSince_(col) {
+  return col[2] || 1;
+}
+
+/** 移行前でも読めるよう、表の定義のうち since が新しいシート・列は無くてもよい */
+function isOptionalColumn_(col) {
+  return columnSince_(col) > 1;
+}
+
 /**
  * シートを読み、列定義に従って型をそろえたレコードの配列にする。
  * 見出しで列を引くので、列の順番が変わっても動く。主キーが空の行は無視する。
+ *
+ * v0.8: 読んだ表はメモリ上で変更し（appendRecords_ / updateRecord_ / deleteRecords_）、操作の最後に
+ * commitContext_ でまとめて書き込む。途中で検証に失敗した操作は何も書き込まない。
  */
 function readTable_(ss, name) {
   var def = SCHEMA[name];
   var sheet = ss.getSheetByName(name);
-  if (!sheet) throw appError_('NOT_INITIALIZED', 'シート「' + name + '」がありません。初期化を実行してください。');
+  if (!sheet) {
+    if ((def.since || 1) > 1) return emptyTable_(name, null);
+    throw appError_('NOT_INITIALIZED', 'シート「' + name + '」がありません。初期化を実行してください。');
+  }
   var lastRow = sheet.getLastRow();
   var lastCol = sheet.getLastColumn();
   if (lastRow < 1 || lastCol < 1) {
@@ -777,43 +859,63 @@ function readTable_(ss, name) {
   headers.forEach(function (h, i) {
     if (h && index[h] === undefined) index[h] = i;
   });
+  var missing = [];
   def.columns.forEach(function (c) {
-    if (index[c[0]] === undefined) {
-      throw appError_('NOT_INITIALIZED', 'シート「' + name + '」に列「' + c[0] + '」がありません。初期化を実行してください。');
-    }
+    if (index[c[0]] !== undefined) return;
+    if (isOptionalColumn_(c)) missing.push(c[0]);
+    else throw appError_('NOT_INITIALIZED', 'シート「' + name + '」に列「' + c[0] + '」がありません。初期化を実行してください。');
   });
 
-  var rows = [];
-  var byKey = {};
-  var duplicates = {};
+  var table = emptyTable_(name, sheet);
+  table.headers = headers;
+  table.index = index;
+  table.width = lastCol;
+  table.lastRow = lastRow;
+  table.missing = missing;
   for (var r = 1; r < values.length; r++) {
     var raw = values[r];
     var key = coerceCell_(raw[index[def.key]], 'text').trim();
     if (!key) continue;
     var rec = { _row: r + 1, _raw: raw };
     def.columns.forEach(function (c) {
-      rec[c[0]] = coerceCell_(raw[index[c[0]]], c[1]);
+      rec[c[0]] = coerceCell_(index[c[0]] === undefined ? '' : raw[index[c[0]]], c[1]);
     });
     rec[def.key] = key;
-    if (byKey[key]) {
-      duplicates[key] = true;
-    } else {
-      byKey[key] = rec;
-    }
-    rows.push(rec);
+    table.rows.push(rec);
   }
+  reindexTable_(table);
+  return table;
+}
+
+function emptyTable_(name, sheet) {
   return {
     name: name,
-    def: def,
+    def: SCHEMA[name],
     sheet: sheet,
-    headers: headers,
-    index: index,
-    width: lastCol,
-    lastRow: lastRow,
-    rows: rows,
-    byKey: byKey,
-    duplicates: duplicates,
+    headers: [],
+    index: {},
+    width: 0,
+    lastRow: 1,
+    missing: [],
+    rows: [],
+    byKey: {},
+    duplicates: {},
+    // 書き込み待ち
+    added: [],
+    deleted: [],
+    changed: false,
   };
+}
+
+/** 主キーの索引を作り直す（行の追加・削除の後） */
+function reindexTable_(table) {
+  var key = table.def.key;
+  table.byKey = {};
+  table.duplicates = {};
+  table.rows.forEach(function (rec) {
+    if (table.byKey[rec[key]]) table.duplicates[rec[key]] = true;
+    else table.byKey[rec[key]] = rec;
+  });
 }
 
 /** 主キーで 1 件取り出す。重複している ID は壊れたデータとして扱い、書き込ませない。 */
@@ -837,6 +939,7 @@ function rowValues_(table, rec, base) {
   var out = base ? base.slice(0, table.width) : [];
   while (out.length < table.width) out.push('');
   table.def.columns.forEach(function (c) {
+    if (table.index[c[0]] === undefined) return;
     if (Object.prototype.hasOwnProperty.call(rec, c[0])) {
       out[table.index[c[0]]] = toCell_(rec[c[0]], c[1]);
     }
@@ -844,34 +947,81 @@ function rowValues_(table, rec, base) {
   return out;
 }
 
-/** 既存行を 1 行まるごと書き戻す（定義外の列は読み込んだ値のまま残す）。 */
+/** 既存行の変更を書き込み待ちにする（定義外の列は読み込んだ値のまま残す）。 */
 function updateRecord_(table, rec) {
+  if (rec._new) return; // まだ書いていない行は、追加のときに今の値で書く
   if (!rec._row) throw appError_('INTERNAL', '更新対象の行が不明です。');
-  table.sheet.getRange(rec._row, 1, 1, table.width).setValues([rowValues_(table, rec, rec._raw)]);
+  rec._dirty = true;
+  table.changed = true;
 }
 
 function appendRecords_(table, records) {
   if (!records.length) return;
-  var sheet = table.sheet;
-  var start = sheet.getLastRow() + 1;
-  var needed = start + records.length - 1 - sheet.getMaxRows();
-  if (needed > 0) {
-    var firstNew = sheet.getMaxRows() + 1;
-    sheet.insertRowsAfter(sheet.getMaxRows(), needed);
-    applyTextFormats_(sheet, table.def, table.index, firstNew, needed);
-  }
-  var values = records.map(function (rec) {
-    return rowValues_(table, rec, null);
+  records.forEach(function (rec) {
+    rec._new = true;
+    table.rows.push(rec);
+    table.added.push(rec);
   });
-  sheet.getRange(start, 1, values.length, table.width).setValues(values);
+  table.changed = true;
+  reindexTable_(table);
+}
+
+/** 行を削除待ちにする（書き込みは commitContext_）。 */
+function deleteRecords_(table, records) {
+  if (!records.length) return;
+  var gone = [];
+  records.forEach(function (rec) {
+    if (!rec || rec._deleted) return;
+    rec._deleted = true;
+    gone.push(rec);
+    if (rec._new) {
+      table.added = table.added.filter(function (x) {
+        return x !== rec;
+      });
+    } else {
+      table.deleted.push(rec);
+    }
+  });
+  if (!gone.length) return;
+  table.rows = table.rows.filter(function (rec) {
+    return !rec._deleted;
+  });
+  table.changed = true;
+  reindexTable_(table);
+}
+
+/* ---------- 書き込み（まとめて） ---------- */
+
+function writeUpdates_(table) {
+  var dirty = table.rows
+    .filter(function (rec) {
+      return rec._dirty && rec._row && !rec._deleted;
+    })
+    .sort(function (a, b) {
+      return a._row - b._row;
+    });
+  var i = 0;
+  while (i < dirty.length) {
+    var block = [dirty[i]];
+    while (i + 1 < dirty.length && dirty[i + 1]._row === block[block.length - 1]._row + 1) {
+      i++;
+      block.push(dirty[i]);
+    }
+    table.sheet.getRange(block[0]._row, 1, block.length, table.width).setValues(
+      block.map(function (rec) {
+        return rowValues_(table, rec, rec._raw);
+      })
+    );
+    i++;
+  }
 }
 
 /**
  * 行を消す。行番号の大きい順に、連続した行はまとめて消す（先に上を消すと下の行番号がずれるため）。
  * 見出し以外の行をすべて消すとスプレッドシートがエラーにするので、その場合は先に空の行を 1 行足しておく。
  */
-function deleteRecords_(table, records) {
-  var rows = records
+function writeDeletes_(table) {
+  var rows = table.deleted
     .map(function (r) {
       return r._row;
     })
@@ -894,6 +1044,61 @@ function deleteRecords_(table, records) {
   }
 }
 
+function writeAppends_(table) {
+  var records = table.added;
+  if (!records.length) return;
+  var sheet = table.sheet;
+  var start = sheet.getLastRow() + 1;
+  var needed = start + records.length - 1 - sheet.getMaxRows();
+  if (needed > 0) {
+    var firstNew = sheet.getMaxRows() + 1;
+    sheet.insertRowsAfter(sheet.getMaxRows(), needed);
+    applyTextFormats_(sheet, table.def, table.index, firstNew, needed);
+  }
+  var values = records.map(function (rec) {
+    return rowValues_(table, rec, null);
+  });
+  sheet.getRange(start, 1, values.length, table.width).setValues(values);
+}
+
+/**
+ * 書き込み待ちの変更をシートへ書く。順番は、途中で止まっても後からやり直しやすいように
+ * 公開データの削除 → 大会に属する行 → 大会の行 → 履歴 → 公開データの更新。
+ * 各表の中では 更新 → 削除 → 追加（更新は読み込んだときの行番号で書くため、削除より先）。
+ */
+var COMMIT_ORDER_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators', 'Events', 'History'];
+
+function commitContext_(ctx) {
+  var tables = ctx.loadedTables();
+  var pending = Object.keys(tables).filter(function (n) {
+    return tables[n].changed;
+  });
+  if (!pending.length) return { tables: [] };
+  pending.forEach(function (n) {
+    if (!tables[n].sheet) throw appError_('MIGRATION_REQUIRED', 'データの保存先の更新（移行）が終わっていません。管理者に連絡してください。');
+    if (tables[n].missing.length) throw appError_('MIGRATION_REQUIRED', 'データの保存先の更新（移行）が終わっていません。管理者に連絡してください。');
+  });
+  var snap = tables.PublicSnapshots;
+  var snapOnlyDeletes = snap && snap.changed && !snap.added.length && !snap.rows.some(function (r) {
+    return r._dirty;
+  });
+  var order = (snapOnlyDeletes ? ['PublicSnapshots'] : []).concat(COMMIT_ORDER_).concat(snap && snap.changed && !snapOnlyDeletes ? ['PublicSnapshots'] : []);
+  pending.forEach(function (n) {
+    if (order.indexOf(n) === -1) order.push(n);
+  });
+  var done = [];
+  order.forEach(function (n) {
+    var table = tables[n];
+    if (!table || !table.changed) return;
+    writeUpdates_(table);
+    writeDeletes_(table);
+    writeAppends_(table);
+    table.changed = false;
+    done.push(n);
+  });
+  return { tables: done };
+}
+
 function applyTextFormats_(sheet, def, index, fromRow, count) {
   if (count < 1) return;
   def.columns.forEach(function (c) {
@@ -909,7 +1114,7 @@ function applyTextFormats_(sheet, def, index, fromRow, count) {
  * - まだ初期化されていないスプレッドシートに管理対象外のデータがあれば中止する
  *   （既存の大会ファイルなどを誤って指定した場合に書き込まないため）
  */
-function initializeStorage_(ss) {
+function initializeStorage_(ss, options) {
   var sheets = ss.getSheets();
   var byName = {};
   sheets.forEach(function (s) {
@@ -920,7 +1125,7 @@ function initializeStorage_(ss) {
   var alreadyInitialized = !!byName.Events && headerOf_(byName.Events).indexOf('event_id') !== -1;
   if (!alreadyInitialized) {
     sheets.forEach(function (s) {
-      if (SCHEMA[s.getName()]) return;
+      if (SCHEMA[s.getName()] || s.getName().indexOf(BACKUP_PREFIX_) === 0) return;
       if (s.getLastRow() > 0 || s.getLastColumn() > 0) {
         problems.push('管理対象外のシート「' + s.getName() + '」にデータがあります');
       }
@@ -975,7 +1180,11 @@ function initializeStorage_(ss) {
     if (sheet.getMaxRows() > 1) applyTextFormats_(sheet, def, index, 2, sheet.getMaxRows() - 1);
   });
 
-  PropertiesService.getScriptProperties().setProperty('SCHEMA_VERSION', String(ADMIN_CONFIG.SCHEMA_VERSION));
+  // 空の保存先を初めて初期化したときは、データの移し替えが要らないので最新の版にする。
+  // 既存のデータがある保存先の版は migrateStorage_ が（バックアップと件数の確認の後に）上げる
+  if (!(options && options.keepVersion) && !alreadyInitialized) {
+    PropertiesService.getScriptProperties().setProperty('SCHEMA_VERSION', String(ADMIN_CONFIG.SCHEMA_VERSION));
+  }
   return { created: created, extended: extended };
 }
 
@@ -985,6 +1194,9 @@ function getStorageStatus_() {
     configured: false,
     accessible: false,
     initialized: false,
+    migrationRequired: false,
+    schemaVersion: storedSchemaVersion_(),
+    appSchemaVersion: ADMIN_CONFIG.SCHEMA_VERSION,
     spreadsheetId: '',
     spreadsheetName: '',
     missing: [],
@@ -1006,24 +1218,112 @@ function getStorageStatus_() {
   }
   status.accessible = true;
   status.spreadsheetName = ss.getName();
+  var required = [];
   SHEET_ORDER.forEach(function (name) {
     var sheet = ss.getSheetByName(name);
+    var def = SCHEMA[name];
     if (!sheet) {
       status.missing.push(name);
+      if ((def.since || 1) <= 1) required.push(name);
       return;
     }
     var header = headerOf_(sheet);
-    var lacking = SCHEMA[name].columns.filter(function (c) {
+    var lacking = def.columns.filter(function (c) {
       return header.indexOf(c[0]) === -1;
     });
     if (lacking.length) status.missing.push(name + '（列不足）');
+    if (lacking.some(function (c) { return !isOptionalColumn_(c); })) required.push(name);
   });
-  status.initialized = status.missing.length === 0;
-  status.message = status.initialized ? '' : '初期化が必要です。';
+  // v0.7 までの列がそろっていれば、移行前でも画面は開ける（書き込みだけを移行まで止める）
+  status.initialized = required.length === 0;
+  status.migrationRequired = status.initialized && (status.missing.length > 0 || status.schemaVersion < ADMIN_CONFIG.SCHEMA_VERSION);
+  status.message = !status.initialized ? '初期化が必要です。' : status.migrationRequired ? '保存先の更新（移行）が必要です。' : '';
   return status;
 }
 
-/** 1 リクエスト内でテーブルの読み込みを使い回すための入れ物 */
+function storedSchemaVersion_() {
+  var v = Number(PropertiesService.getScriptProperties().getProperty('SCHEMA_VERSION') || 0);
+  return isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+
+/** 書き込みの前に、保存先がこの版のスキーマに移行済みかを確かめる */
+function assertSchemaCurrent_() {
+  if (storedSchemaVersion_() < ADMIN_CONFIG.SCHEMA_VERSION) {
+    throw appError_('MIGRATION_REQUIRED', '新しい版に合わせた保存先の更新（移行）が終わるまで、変更は保存できません。しばらくしてからもう一度お試しください（閲覧はできます）。');
+  }
+}
+
+/* ---------- 移行（スキーマの版を上げる） ---------- */
+
+var BACKUP_PREFIX_ = 'bak-';
+
+/**
+ * 保存先を ADMIN_CONFIG.SCHEMA_VERSION に移行する。管理者の鍵でだけ呼べる（migrateStorage 操作）。
+ * 1. 移行前の件数を数える  2. 各シートを同じスプレッドシート内に複製してバックアップ
+ * 3. 足りないシート・列を追加（initializeStorage_ と同じ。既存の列・値は動かさない）
+ * 4. 件数が変わっていないことを確かめてから SCHEMA_VERSION を上げる
+ * 何度呼んでも安全（移行済みなら何もしない）。途中で失敗しても、既存の列・値は変わっていない。
+ * 公開閲覧（閲覧者用 Web アプリ）からは呼ばれない。
+ */
+function migrateStorage_(ss, actor) {
+  var props = PropertiesService.getScriptProperties();
+  var from = storedSchemaVersion_();
+  var to = ADMIN_CONFIG.SCHEMA_VERSION;
+  var status = getStorageStatus_();
+  if (!status.initialized) throw appError_('NOT_INITIALIZED', '保存先が初期化されていません。先に「初期化する」を実行してください。');
+  if (from >= to && !status.migrationRequired) return { from: from, to: to, migrated: false, message: '移行済みです。' };
+
+  var counts = {};
+  SHEET_ORDER.forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    counts[name] = sheet ? readTable_(ss, name).rows.length : 0;
+  });
+  var stamp = nowIso_().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  var state = { from: from, to: to, status: 'running', startedAt: nowIso_(), backups: [], counts: counts, by: actor };
+  props.setProperty('MIGRATION_STATE', JSON.stringify(state));
+  SHEET_ORDER.forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    var copy = sheet.copyTo(ss);
+    var backupName = BACKUP_PREFIX_ + 's' + from + '-' + stamp + '-' + name;
+    copy.setName(backupName);
+    state.backups.push(backupName);
+  });
+  props.setProperty('MIGRATION_STATE', JSON.stringify(state));
+  var init = initializeStorage_(ss, { keepVersion: true });
+  var after = {};
+  var mismatch = [];
+  SHEET_ORDER.forEach(function (name) {
+    after[name] = readTable_(ss, name).rows.length;
+    if (after[name] !== counts[name]) mismatch.push(name + ' ' + counts[name] + '→' + after[name]);
+  });
+  if (mismatch.length) {
+    state.status = 'failed';
+    state.problem = mismatch.join(', ');
+    props.setProperty('MIGRATION_STATE', JSON.stringify(state));
+    throw appError_('MIGRATION_FAILED', '移行後の件数が一致しません（' + state.problem + '）。バックアップ（' + state.backups.join('、') + '）から確認してください。');
+  }
+  props.setProperty('SCHEMA_VERSION', String(to));
+  state.status = 'done';
+  state.finishedAt = nowIso_();
+  state.added = init;
+  props.setProperty('MIGRATION_STATE', JSON.stringify(state));
+  return { from: from, to: to, migrated: true, backups: state.backups, added: init, counts: after };
+}
+
+function migrationState_() {
+  try {
+    return JSON.parse(PropertiesService.getScriptProperties().getProperty('MIGRATION_STATE') || 'null');
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * 1 リクエスト内でテーブルの読み込みを使い回す入れ物。
+ * v0.8: 変更はメモリ上の表に入り、commitContext_ でまとめて書く。invalidate は互換のために残しているが、
+ * 表はいつも書き込み待ちの変更を含めた最新の内容なので、読み直しはしない。
+ */
 function createContext_(ss, actor, user) {
   var cache = {};
   return {
@@ -1036,9 +1336,9 @@ function createContext_(ss, actor, user) {
       if (!cache[name]) cache[name] = readTable_(ss, name);
       return cache[name];
     },
-    invalidate: function (name) {
-      if (name) delete cache[name];
-      else cache = {};
+    invalidate: function () {},
+    loadedTables: function () {
+      return cache;
     },
   };
 }
@@ -1067,7 +1367,6 @@ function flushHistory_(ctx) {
   });
   appendRecords_(table, ctx.history);
   ctx.history = [];
-  ctx.invalidate('History');
 }
 
 /** 記録から画面・履歴に出す値だけを取り出す（_row などの内部情報を除く） */
@@ -1906,6 +2205,8 @@ function buildPublicSnapshot_(bundle) {
  * 大会の公開状態をシートへ反映する。書き込み系の操作の最後に必ず呼ぶ。
  * - 公開中: 公開データを作り直して保存（内容が同じなら書き込まない）
  * - 非公開: 公開データの行を削除する（閲覧画面から消える）
+ * v0.8: 他の変更と同じく書き込み待ちにするだけで、シートへは commitContext_ が書く。
+ * 公開データが上限を超えるときは、その操作ごと保存しない（TOO_LARGE）。
  */
 function syncPublication_(ctx, eventId) {
   ctx.invalidate();
@@ -1924,6 +2225,7 @@ function syncPublication_(ctx, eventId) {
   }
 
   var json = JSON.stringify(buildPublicSnapshot_(bundle));
+  assertSnapshotSize_(json);
   var version = md5Hex_(json);
   var existing = rows[0] || null;
   if (rows.length > 1) {
@@ -1940,9 +2242,7 @@ function syncPublication_(ctx, eventId) {
   var size = ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE;
   var chunks = [];
   for (var i = 0; i < json.length; i += size) chunks.push(SNAPSHOT_CHUNK_PREFIX_ + json.slice(i, i + size));
-  if (chunks.length > ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS) {
-    throw appError_('TOO_LARGE', '公開データが大きすぎます（' + json.length + ' 文字）。');
-  }
+  if (chunks.length > ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS) assertSnapshotSize_(json, true);
   var rec = {
     event_id: eventId,
     is_default: bundle.event.is_featured,
@@ -1963,6 +2263,24 @@ function syncPublication_(ctx, eventId) {
   }
   ctx.invalidate('PublicSnapshots');
   return { published: true, version: version, publishedAt: ctx.now, unchanged: false };
+}
+
+/** 公開データの大きさの確認。上限を超えるなら、その操作を保存しない */
+function assertSnapshotSize_(json, force) {
+  var limit = Math.min(ADMIN_CONFIG.MAX_SNAPSHOT_CHARS, ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE * ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS);
+  if (force || json.length > limit) {
+    throw appError_(
+      'TOO_LARGE',
+      '閲覧ページの公開データが上限を超えるため、この変更は保存していません（' + json.length + ' 文字 / 上限 ' + limit + ' 文字）。段階・グループを分けるか、大会を非公開にしてから操作してください。'
+    );
+  }
+}
+
+/** 公開データの大きさの目安（運営画面の表示用。公開していない大会でも、公開したときの大きさを返す） */
+function snapshotBudget_(bundle) {
+  var limit = Math.min(ADMIN_CONFIG.MAX_SNAPSHOT_CHARS, ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE * ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS);
+  var size = JSON.stringify(buildPublicSnapshot_(bundle)).length;
+  return { size: size, limit: limit, percent: Math.floor((size * 100) / limit) };
 }
 
 /** 公開状態の概要（運営画面の表示用） */
@@ -2117,14 +2435,37 @@ function actionConfigureStorage_(ctx, payload) {
   return actionBootstrap_(ctx);
 }
 
+/**
+ * 初期化。空の保存先にはシート・列を作る。v0.7 までのデータがある保存先では、
+ * バックアップを取ってから列を足す移行（migrateStorage_）を行う。
+ */
 function actionInitializeStorage_(ctx) {
   var ss = openStorage_();
+  var status = getStorageStatus_();
+  if (status.initialized && status.migrationRequired) return actionMigrateStorage_(ctx);
   var result = initializeStorage_(ss);
   var c = createContext_(ss, ctx.actor, ctx.user);
   recordHistory_(c, 'storage.initialize', 'Storage', '', '', null, result);
   flushHistory_(c);
+  commitContext_(c);
   var boot = actionBootstrap_(ctx);
   boot.initializeResult = result;
+  return boot;
+}
+
+/** 保存先の移行（管理者の鍵のみ。本番反映の手順からも呼ぶ）。結果は履歴にも残す */
+function actionMigrateStorage_(ctx) {
+  var ss = openStorage_();
+  var result = migrateStorage_(ss, ctx.actor);
+  if (result.migrated) {
+    var c = createContext_(ss, ctx.actor, ctx.user);
+    recordHistory_(c, 'storage.migrate', 'Storage', '', '', null, result);
+    flushHistory_(c);
+    commitContext_(c);
+  }
+  var boot = actionBootstrap_(ctx);
+  boot.migrateResult = result;
+  boot.migration = migrationState_();
   return boot;
 }
 
@@ -2498,10 +2839,7 @@ function actionUpdateEvent_(ctx, payload) {
   }
   ctx.invalidate();
   recordHistory_(ctx, 'event.update', 'Event', eventId, eventId, eventForLog_(before), eventForLog_(event));
-  others.forEach(function (id) {
-    syncPublication_(ctx, id);
-  });
-  return { eventId: eventId };
+  return { eventId: eventId, alsoPublish: others };
 }
 
 /** 互換用: 大会の既定ルール（最初の段階のルール）を変える。段階ごとの変更は updateStage */
@@ -3675,6 +4013,13 @@ function actionCreateSampleEvent_(ctx, payload) {
   return { eventId: eventId, adminKey: created.adminKey };
 }
 
+/* ---------- 操作の後処理（自動終了など） ---------- */
+
+/** 大会を変更する操作の後に呼ぶ（runMutation_ が公開データを作る前）。 */
+function afterEventChange_(ctx, eventId) {
+  if (!ctx.table('Events').byKey[eventId]) return;
+}
+
 // ---- 07_api.js ----
 /* 公開エントリポイント（外部から呼べるのはこのファイルの doGet と doPost だけ） */
 
@@ -3696,6 +4041,7 @@ function adminActions_() {
     eventDetail: { fn: actionEventDetail_, scope: 'event', mutating: false },
     configureStorage: { fn: actionConfigureStorage_, scope: 'platform', mutating: true, needsStorage: false },
     initializeStorage: { fn: actionInitializeStorage_, scope: 'platform', mutating: true, needsStorage: false },
+    migrateStorage: { fn: actionMigrateStorage_, scope: 'platform', mutating: true, needsStorage: false },
     setViewerUrl: { fn: actionSetViewerUrl_, scope: 'platform', mutating: true, needsStorage: false },
     createEvent: { fn: actionCreateEvent_, scope: 'create', mutating: true },
     createSampleEvent: { fn: actionCreateSampleEvent_, scope: 'create', mutating: true },
@@ -3733,10 +4079,23 @@ function jsonOutput_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
-/** 運営画面は GitHub Pages にある。ここを直接開いた人には案内だけを返す */
+/**
+ * 運営画面は GitHub Pages にある。ここを直接開いた人には案内だけを返す。
+ * version / release は本番反映の確認用（どの版のコードが動いているか。秘密の情報は含まない）。
+ */
 function doGet() {
-  return jsonOutput_({ ok: true, app: 'n02-tournament-admin-api', message: 'この URL は運営画面（GitHub Pages）から使う API です。' });
+  return jsonOutput_({
+    ok: true,
+    app: 'n02-tournament-admin-api',
+    version: ADMIN_CONFIG.APP_VERSION,
+    schema: ADMIN_CONFIG.SCHEMA_VERSION,
+    release: RELEASE_ID_,
+    message: 'この URL は運営画面（GitHub Pages）から使う API です。',
+  });
 }
+
+/** 本番反映のときに、反映した正本のコミット（SHA）に置き換わる。手で貼り付けた場合は 'manual' のまま */
+var RELEASE_ID_ = 'manual';
 
 /**
  * 運営画面からの API 呼び出し。本文は JSON（Content-Type: text/plain で送る。CORS のプリフライトを避けるため）。
@@ -3746,13 +4105,17 @@ function doGet() {
 function doPost(e) {
   var startedAt = Date.now();
   var text = e && e.postData && typeof e.postData.contents === 'string' ? e.postData.contents : '';
-  if (!text || text.length > ADMIN_CONFIG.MAX_REQUEST_CHARS) {
+  if (!text || text.length > ADMIN_CONFIG.MAX_RESTORE_REQUEST_CHARS) {
     return jsonOutput_(errorResponse_(appError_('BAD_REQUEST', 'リクエストが不正です。'), startedAt));
   }
   var request;
   try {
     request = JSON.parse(text);
   } catch (err) {
+    return jsonOutput_(errorResponse_(appError_('BAD_REQUEST', 'リクエストが不正です。'), startedAt));
+  }
+  // 大会ファイルからの復元だけは大きな本文を受け付ける。それ以外の操作は従来どおりの上限
+  if (text.length > ADMIN_CONFIG.MAX_REQUEST_CHARS && !(request && request.action === 'restoreEvent')) {
     return jsonOutput_(errorResponse_(appError_('BAD_REQUEST', 'リクエストが不正です。'), startedAt));
   }
   return jsonOutput_(handleAdminRequest_(request, startedAt));
@@ -3816,6 +4179,19 @@ function runQuery_(user, spec, payload, reuse) {
 }
 
 var REQUEST_ID_PATTERN_ = /^[A-Za-z0-9-]{16,64}$/;
+var WRITE_JOURNAL_KEY_ = 'WRITE_JOURNAL';
+
+/**
+ * 書き込みの途中で止まった操作の目印（スクリプト プロパティ）。書き込みの直前に置き、書き終えたら消す。
+ * 残っていれば、前の操作の書き込みが途中で止まった（Google 側のエラー・時間切れ）可能性がある。
+ */
+function readWriteJournal_() {
+  try {
+    return JSON.parse(PropertiesService.getScriptProperties().getProperty(WRITE_JOURNAL_KEY_) || 'null');
+  } catch (e) {
+    return null;
+  }
+}
 
 function runMutation_(user, action, spec, payload, requestId, auth) {
   if (typeof requestId !== 'string' || !REQUEST_ID_PATTERN_.test(requestId)) {
@@ -3835,11 +4211,23 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
     // ロック待ちの間に同じ requestId の処理が終わっていることがあるので、もう一度確認する
     done = cache.get(dedupeKey);
     if (done) return duplicateResult_(done);
+    var props = PropertiesService.getScriptProperties();
+    var journal = readWriteJournal_();
+    if (journal && journal.key === dedupeKey) {
+      // 同じ操作の再送: 前回の書き込みが途中で止まっている可能性があるので、もう一度は実行しない
+      throw appError_('PARTIAL_WRITE', '前回の保存が途中で止まった可能性があります。画面を再読み込みして内容を確認してから、必要ならもう一度操作してください。');
+    }
     var result;
     if (spec.needsStorage === false) {
       result = spec.fn({ actor: user.label, user: user }, payload);
     } else {
+      assertSchemaCurrent_();
       var ctx = contextFor_(user, null);
+      if (journal) {
+        // 別の操作の書き込みが途中で止まっていた: 記録だけ残して先へ進む（管理者が履歴で確認できる）
+        recordHistory_(ctx, 'storage.incompleteWrite', 'Storage', '', journal.eventId || '', null, { action: journal.action, at: journal.at, actor: journal.actor });
+        props.deleteProperty(WRITE_JOURNAL_KEY_);
+      }
       // ログインの確認と権限の確認は、ロックの中で最新のデータに対してやり直す（パスワード変更・主催者の付け替えと同時に操作された場合に備える）
       if (user.kind === 'staff' || user.kind === 'google') {
         user = authenticate_(function () {
@@ -3849,24 +4237,42 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
       }
       if (spec.scope === 'event') authorizeEventPayload_(ctx, payload);
       result = spec.fn(ctx, payload) || {};
+      var eventIds = [];
+      if (result.eventId) eventIds.push(result.eventId);
+      (result.alsoPublish || []).forEach(function (id) {
+        if (eventIds.indexOf(id) === -1) eventIds.push(id);
+      });
+      delete result.alsoPublish;
+      eventIds.forEach(function (id) {
+        afterEventChange_(ctx, id);
+      });
       flushHistory_(ctx);
-      if (result.eventId) {
-        // ここまでの変更はもう書き込んである。閲覧ページへの反映だけが失敗しても操作は成功として返し、
-        // 再送で同じ操作をやり直さないよう下で requestId を記録する（反映は「公開データを再生成」でやり直せる）
+      // 公開データも書き込む前に組み立てる。大きすぎるときは何も保存せずに止める（保存してから気づくことがないように）
+      var publications = {};
+      eventIds.forEach(function (id) {
         try {
-          result.publication = syncPublication_(ctx, result.eventId);
+          publications[id] = syncPublication_(ctx, id);
         } catch (e) {
-          console.error('syncPublication_ failed', result.eventId, e && e.message);
-          result.publication = { published: false, failed: true, message: (e && e.publicMessage) || '公開データを書き込めませんでした' };
+          if (e && e.appCode === 'TOO_LARGE') throw e;
+          // 公開データを作る処理の思わぬ失敗では、操作そのものは保存する（結果の入力を止めない）。
+          // 閲覧ページへの反映は「公開データを再生成」でやり直せる
+          console.error('syncPublication_ failed', id, e && e.message);
+          publications[id] = { published: false, failed: true, message: (e && e.publicMessage) || '公開データを書き込めませんでした' };
         }
+      });
+      props.setProperty(WRITE_JOURNAL_KEY_, JSON.stringify({ key: dedupeKey, action: action, eventId: result.eventId || '', at: ctx.now, actor: user.label }));
+      commitContext_(ctx);
+      if (result.eventId) {
+        result.publication = publications[result.eventId];
         result.detail = eventDetail_(ctx, result.eventId);
       }
       delete result.forceRepublish;
     }
     SpreadsheetApp.flush();
     // 大会作成は、通信が切れて再送されても作った大会を開けるよう、大会 ID を保存する（サーバー内のみ・10 分）
-    var memo = (action === 'createEvent' || action === 'createSampleEvent') && result && result.eventId ? { eventId: result.eventId } : {};
+    var memo = (action === 'createEvent' || action === 'createSampleEvent' || action === 'duplicateEvent' || action === 'restoreEvent') && result && result.eventId ? { eventId: result.eventId } : {};
     cache.put(dedupeKey, JSON.stringify(memo), ADMIN_CONFIG.REQUEST_DEDUPE_TTL_SEC);
+    props.deleteProperty(WRITE_JOURNAL_KEY_);
     return result;
   } finally {
     lock.releaseLock();

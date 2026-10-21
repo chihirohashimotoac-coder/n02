@@ -188,7 +188,7 @@ test('既定表示がない場合は最後に公開データを更新した大�
   assert.equal(p.viewer.run('getPublicSnapshot', {}).data.event.id, second);
 });
 
-test('キャッシュに入らない大きさの公開データでも応答は返す（キャッシュせずに読む）', () => {
+test('1 つのキャッシュに入らない大きさの公開データは、分けてキャッシュする（v0.8。日本語でも 100KB を超えない）', () => {
   const p = setupPair();
   p.ok('initializeStorage');
   const eventId = p.ok('createEvent', { name: 'x'.repeat(80), dateLabel: '', bestOf: 5, groupCount: 16 }).eventId;
@@ -202,7 +202,27 @@ test('キャッシュに入らない大きさの公開データでも応答は�
   const res = p.viewer.run('getPublicSnapshot', {});
   assert.equal(res.ok, true);
   assert.equal(res.data.groups.length, 16);
-  assert.ok(p.viewer.logs.some((l) => l[0] === 'warn' && String(l[1]).includes('too large')));
+  assert.ok(JSON.stringify(res.data).length > 90000, '分けて入れる大きさで確かめる');
+  assert.ok(!p.viewer.logs.some((l) => l[0] === 'warn' && String(l[1]).includes('too large')));
+  // 2 回目はキャッシュから（分けた部分を組み立て直す）。内容は同じ
+  const again = p.viewer.run('getPublicSnapshot', {});
+  assert.equal(again.cache, 'hit');
+  assert.deepEqual(again.data, res.data);
+  // 一部が消えたら、キャッシュがないものとしてシートから読み直す
+  p.viewer.cache.remove('pub:v1:_default#2');
+  const reread = p.viewer.run('getPublicSnapshot', {});
+  assert.equal(reread.cache, 'miss');
+  assert.deepEqual(reread.data, res.data);
+});
+
+test('?format=version: 本番反映の確認用に版を返す（秘密の情報は含まない）', () => {
+  const p = setupPair();
+  const res = JSON.parse(p.viewer.fn('doGet')({ parameter: { format: 'version' } }).getContent());
+  assert.deepEqual(Object.keys(res).sort(), ['app', 'ok', 'release', 'version']);
+  assert.equal(res.release, 'manual');
+  const admin = JSON.parse(p.admin.fn('doGet')().getContent());
+  assert.equal(admin.version, res.version);
+  assert.equal(admin.release, 'manual');
 });
 
 test('?format=json: 閲覧ページ（GitHub Pages）用に公開データを JSON で返す', () => {

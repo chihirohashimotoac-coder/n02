@@ -165,6 +165,20 @@ class FakeSheet {
   setFrozenRows(n) {
     this.frozen = n;
   }
+  setName(name) {
+    if (this.book.sheets.some((s) => s !== this && s.name === name)) throw new Error(`A sheet with the name "${name}" already exists.`);
+    this.name = name;
+    return this;
+  }
+  /** 同じ（または別の）スプレッドシートに複製する。名前は「〜のコピー」 */
+  copyTo(book) {
+    if (this.book.store.failWrites) throw new Error('Service Spreadsheets failed (simulated)');
+    const copy = new FakeSheet(book, 'Copy of ' + this.name, this.maxRows, this.maxCols);
+    copy.rows = this.rows.map((r) => r.map((v) => (v instanceof Date ? new Date(v.getTime()) : v)));
+    copy.formats = this.formats.map((r) => r.slice());
+    book.sheets.push(copy);
+    return copy;
+  }
   /** テスト用: 見出し行をオブジェクトの配列として読む */
   records() {
     const header = (this.rows[0] || []).map(String);
@@ -337,7 +351,8 @@ export function loadProject(app, options = {}) {
     logs: [],
   };
   project.properties = createProperties(options.properties);
-  project.cache = createCache(clock);
+  // options.cache: 同じスクリプトの別の版（コードの差し替え）を模すときは、キャッシュ（ログインのセッションなど）を引き継ぐ
+  project.cache = options.cache || createCache(clock);
   const htmlPath = join(ROOT, 'dist', app, 'Index.html');
   const html = existsSync(htmlPath) ? readFileSync(htmlPath, 'utf8') : null;
 

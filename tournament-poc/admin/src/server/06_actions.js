@@ -142,14 +142,37 @@ function actionConfigureStorage_(ctx, payload) {
   return actionBootstrap_(ctx);
 }
 
+/**
+ * 初期化。空の保存先にはシート・列を作る。v0.7 までのデータがある保存先では、
+ * バックアップを取ってから列を足す移行（migrateStorage_）を行う。
+ */
 function actionInitializeStorage_(ctx) {
   var ss = openStorage_();
+  var status = getStorageStatus_();
+  if (status.initialized && status.migrationRequired) return actionMigrateStorage_(ctx);
   var result = initializeStorage_(ss);
   var c = createContext_(ss, ctx.actor, ctx.user);
   recordHistory_(c, 'storage.initialize', 'Storage', '', '', null, result);
   flushHistory_(c);
+  commitContext_(c);
   var boot = actionBootstrap_(ctx);
   boot.initializeResult = result;
+  return boot;
+}
+
+/** 保存先の移行（管理者の鍵のみ。本番反映の手順からも呼ぶ）。結果は履歴にも残す */
+function actionMigrateStorage_(ctx) {
+  var ss = openStorage_();
+  var result = migrateStorage_(ss, ctx.actor);
+  if (result.migrated) {
+    var c = createContext_(ss, ctx.actor, ctx.user);
+    recordHistory_(c, 'storage.migrate', 'Storage', '', '', null, result);
+    flushHistory_(c);
+    commitContext_(c);
+  }
+  var boot = actionBootstrap_(ctx);
+  boot.migrateResult = result;
+  boot.migration = migrationState_();
   return boot;
 }
 
@@ -523,10 +546,7 @@ function actionUpdateEvent_(ctx, payload) {
   }
   ctx.invalidate();
   recordHistory_(ctx, 'event.update', 'Event', eventId, eventId, eventForLog_(before), eventForLog_(event));
-  others.forEach(function (id) {
-    syncPublication_(ctx, id);
-  });
-  return { eventId: eventId };
+  return { eventId: eventId, alsoPublish: others };
 }
 
 /** 互換用: 大会の既定ルール（最初の段階のルール）を変える。段階ごとの変更は updateStage */
@@ -1698,4 +1718,11 @@ function actionCreateSampleEvent_(ctx, payload) {
   }
   recordHistory_(ctx, 'event.sample', 'Event', eventId, eventId, null, { players: names.length, matches: matches.length, publish: publish });
   return { eventId: eventId, adminKey: created.adminKey };
+}
+
+/* ---------- 操作の後処理（自動終了など） ---------- */
+
+/** 大会を変更する操作の後に呼ぶ（runMutation_ が公開データを作る前）。 */
+function afterEventChange_(ctx, eventId) {
+  if (!ctx.table('Events').byKey[eventId]) return;
 }
