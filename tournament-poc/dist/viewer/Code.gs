@@ -18,7 +18,7 @@
  */
 
 var VIEWER_CONFIG = Object.freeze({
-  APP_VERSION: '0.7.0',
+  APP_VERSION: '0.7.1',
   CACHE_TTL_SEC: 20,
   STALE_TTL_SEC: 21600, // CacheService の上限（6 時間）
   NONE_TTL_SEC: 20,
@@ -37,6 +37,9 @@ var DEFAULT_KEY_ = '_default';
 var LIST_KEY_ = '_list';
 // 一覧に載せる大会の上限（運営用アプリの MAX_EVENTS_TOTAL と同じ。キャッシュ 1 件の大きさを抑える）
 var LIST_MAX_EVENTS_ = 200;
+// シートを読めないときに返す予備の内容（stale:…）と、予備を持っている大会の一覧のキー
+var STALE_PREFIX_ = 'stale:';
+var STALE_IDS_KEY_ = '_ids';
 
 /**
  * ?format=json のときは画面ではなく公開データ（getPublicSnapshot と同じ内容）を JSON で返す。
@@ -179,25 +182,24 @@ function loadEntry_(key) {
     locked = false;
   }
   try {
-    if (locked) {
-      // 待っている間に別のリクエストが読み直していればそれを使う
-      hit = readCache_(cache, VIEWER_CONFIG.CACHE_PREFIX + key);
-      if (hit) {
-        hit.source = 'hit-after-wait';
-        return hit;
-      }
+    // 待っている間に別のリクエストが読み直していればそれを使う
+    hit = readCache_(cache, VIEWER_CONFIG.CACHE_PREFIX + key);
+    if (hit) {
+      hit.source = 'hit-after-wait';
+      return hit;
+    }
+    if (!locked) {
+      // 読み直しが長引いている。待っている全員がシートを読みに行かないよう、前回の内容で答える
+      var waiting = readStale_(cache, key);
+      if (waiting) return waiting;
     }
     var fresh;
     try {
       fresh = refreshFromSheet_(cache);
     } catch (e) {
       console.error('refreshFromSheet_ failed', e && e.message);
-      var stale = readCache_(cache, VIEWER_CONFIG.CACHE_PREFIX + 'stale:' + key);
-      if (stale) {
-        stale.stale = true;
-        stale.source = 'stale';
-        return stale;
-      }
+      var stale = readStale_(cache, key);
+      if (stale) return stale;
       throw e;
     }
     var entry = fresh[key];
@@ -211,6 +213,14 @@ function loadEntry_(key) {
   } finally {
     if (locked) lock.releaseLock();
   }
+}
+
+function readStale_(cache, key) {
+  var stale = readCache_(cache, VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_ + key);
+  if (!stale) return null;
+  stale.stale = true;
+  stale.source = 'stale';
+  return stale;
 }
 
 function readCache_(cache, fullKey) {
@@ -250,8 +260,24 @@ function refreshFromSheet_(cache) {
       return;
     }
     freshValues[VIEWER_CONFIG.CACHE_PREFIX + k] = value;
-    if (!fresh[k].none) staleValues[VIEWER_CONFIG.CACHE_PREFIX + 'stale:' + k] = value;
+    if (!fresh[k].none) staleValues[VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_ + k] = value;
   });
+  // 公開をやめた・削除した大会の予備（stale）を消す。残すと、シートを読めないときに非公開の大会を返してしまう
+  var staleIdsKey = VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_ + STALE_IDS_KEY_;
+  var previousIds = readCache_(cache, staleIdsKey);
+  if (!Array.isArray(previousIds)) previousIds = [];
+  var currentIds = Object.keys(staleValues).map(function (fullKey) {
+    return fullKey.slice((VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_).length);
+  });
+  var gone = previousIds
+    .filter(function (k) {
+      return currentIds.indexOf(k) < 0;
+    })
+    .map(function (k) {
+      return VIEWER_CONFIG.CACHE_PREFIX + STALE_PREFIX_ + k;
+    });
+  if (gone.length) cache.removeAll(gone);
+  staleValues[staleIdsKey] = JSON.stringify(currentIds);
   if (fresh[DEFAULT_KEY_].none) {
     cache.put(VIEWER_CONFIG.CACHE_PREFIX + DEFAULT_KEY_, freshValues[VIEWER_CONFIG.CACHE_PREFIX + DEFAULT_KEY_], VIEWER_CONFIG.NONE_TTL_SEC);
     delete freshValues[VIEWER_CONFIG.CACHE_PREFIX + DEFAULT_KEY_];

@@ -418,6 +418,12 @@
       }
     }
 
+    /** 保存はできたが閲覧ページへの反映（公開データの書き込み）だけが失敗したとき */
+    function warnPublication(data) {
+      if (!data || !data.publication || !data.publication.failed) return;
+      toast('error', '保存しました。ただし閲覧ページへの反映に失敗しました（' + data.publication.message + '）。「公開データを再生成」でやり直せます。');
+    }
+
     /** 書き込み操作の共通処理。実行中は他の書き込みボタンを押せなくする。 */
     function mutate(action, payload, okMessage) {
       if (state.busy) return Promise.resolve(null);
@@ -428,6 +434,7 @@
           // 大会を作ったら、その大会の運営画面へ（通信の再送で二重に作られた場合も同じ大会を開く）
           if (data && data.eventId && (action === 'createEvent' || action === 'createSampleEvent')) {
             if (okMessage && !data.duplicate) toast('ok', okMessage);
+            warnPublication(data);
             goTo('#e=' + encodeURIComponent(data.eventId));
             return data;
           }
@@ -441,6 +448,7 @@
           }
           if (data && data.storage) state.boot = data;
           if (okMessage) toast('ok', typeof okMessage === 'function' ? okMessage(data) : okMessage);
+          warnPublication(data);
           render();
           return data;
         })

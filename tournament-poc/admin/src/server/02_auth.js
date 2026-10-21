@@ -172,24 +172,33 @@ function verifyStaffPassword_(ctx, eventId, password) {
   if (!isValidId_(eventId) || typeof password !== 'string' || !password || password.length > STAFF_PASSWORD_MAX_) {
     throw appError_('AUTH_INVALID', '大会または管理パスワードが違います。');
   }
-  var cache = CacheService.getScriptCache();
-  var fails = Number(cache.get(staffFailKey_(eventId)) || 0);
-  if (fails >= STAFF_FAIL_LIMIT_) {
-    throw appError_('AUTH_LOCKED', '管理パスワードの間違いが続いたため、10 分間この大会はパスワードで開けません。時間をおいてお試しください。');
+  // 回数の確認から書き戻しまでをロックの中で行う。並列に送られた間違いも 1 回ずつ数える
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(ADMIN_CONFIG.LOCK_WAIT_MS)) {
+    throw appError_('BUSY', '他の処理が実行中です。数秒後にもう一度お試しください。');
   }
-  var events = ctx.table('Events');
-  var event = events.byKey[eventId];
-  var matched =
-    event &&
-    !events.duplicates[eventId] &&
-    event.staff_pass_hash &&
-    event.staff_pass_salt &&
-    safeEqual_(staffPasswordHash_(eventId, event.staff_pass_salt, password), event.staff_pass_hash);
-  if (!matched) {
-    cache.put(staffFailKey_(eventId), String(fails + 1), STAFF_FAIL_WINDOW_SEC_);
-    throw appError_('AUTH_INVALID', '大会または管理パスワードが違います。');
+  try {
+    var cache = CacheService.getScriptCache();
+    var fails = Number(cache.get(staffFailKey_(eventId)) || 0);
+    if (fails >= STAFF_FAIL_LIMIT_) {
+      throw appError_('AUTH_LOCKED', '管理パスワードの間違いが続いたため、10 分間この大会はパスワードで開けません。時間をおいてお試しください。');
+    }
+    var events = ctx.table('Events');
+    var event = events.byKey[eventId];
+    var matched =
+      event &&
+      !events.duplicates[eventId] &&
+      event.staff_pass_hash &&
+      event.staff_pass_salt &&
+      safeEqual_(staffPasswordHash_(eventId, event.staff_pass_salt, password), event.staff_pass_hash);
+    if (!matched) {
+      cache.put(staffFailKey_(eventId), String(fails + 1), STAFF_FAIL_WINDOW_SEC_);
+      throw appError_('AUTH_INVALID', '大会または管理パスワードが違います。');
+    }
+    return event;
+  } finally {
+    lock.releaseLock();
   }
-  return event;
 }
 
 /* ---------- 利用者の判定 ---------- */

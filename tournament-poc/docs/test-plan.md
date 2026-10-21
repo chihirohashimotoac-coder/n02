@@ -52,8 +52,8 @@
 ## 3. 実行結果（本作業時点）
 
 ```
-npm test      → tests 126 / pass 126 / fail 0（v0.7.0）
-npm run e2e   → 83 passed（desktop 41・mobile 42。引っぱって更新はスマートフォンだけ。v0.7.0）
+npm test      → tests 130 / pass 130 / fail 0（v0.7.1）
+npm run e2e   → 83 passed（desktop 41・mobile 42。引っぱって更新はスマートフォンだけ。v0.7.1）
 node tools/build.mjs --check → dist/ is up to date.
 リポジトリ直下 npx eslint . → エラーなし（既存 n02 への影響なし）
 ```

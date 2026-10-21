@@ -426,3 +426,28 @@ test('閲覧者用 URL: GitHub Pages と Apps Script の URL だけを登録で�
   }
   assert.equal(p.ok('setViewerUrl', { url: '' }).viewerUrl, '');
 });
+
+test('閲覧ページへの反映だけが失敗しても、保存した操作は成功として返し、再送で二重に実行しない', () => {
+  const p = setupPair();
+  p.ok('initializeStorage');
+  const d = p.ok('createSampleEvent', { publish: true }).detail;
+  const m = d.groups.flatMap((g) => g.matches).find((x) => x.status === 'scheduled');
+  const original = p.admin.context.syncPublication_;
+  p.admin.context.syncPublication_ = () => {
+    throw new Error('Service Spreadsheets failed (simulated)');
+  };
+  const request = { requestId: 'publication-fail-0001' };
+  const res = p.call('saveMatchResult', { matchId: m.id, rev: m.rev, status: 'final', p1Legs: 3, p2Legs: 0 }, request);
+  assert.equal(res.ok, true);
+  assert.equal(res.data.publication.failed, true);
+  assert.doesNotMatch(JSON.stringify(res.data.publication), /simulated|Spreadsheets/, '内部のエラー内容は返さない');
+  const saved = res.data.detail.groups.flatMap((g) => g.matches).find((x) => x.id === m.id);
+  assert.equal(saved.status, 'final');
+  // 同じ requestId の再送は実行し直さない（rev が古いことによる衝突にもならない）
+  const again = p.call('saveMatchResult', { matchId: m.id, rev: m.rev, status: 'final', p1Legs: 3, p2Legs: 0 }, request);
+  assert.equal(again.ok, true);
+  assert.equal(again.data.duplicate, true);
+  // 反映は「公開データを再生成」でやり直せる
+  p.admin.context.syncPublication_ = original;
+  assert.equal(p.ok('republish', { eventId: d.event.id }).publication.published, true);
+});

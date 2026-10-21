@@ -173,7 +173,14 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
       result = spec.fn(ctx, payload) || {};
       flushHistory_(ctx);
       if (result.eventId) {
-        result.publication = syncPublication_(ctx, result.eventId);
+        // ここまでの変更はもう書き込んである。閲覧ページへの反映だけが失敗しても操作は成功として返し、
+        // 再送で同じ操作をやり直さないよう下で requestId を記録する（反映は「公開データを再生成」でやり直せる）
+        try {
+          result.publication = syncPublication_(ctx, result.eventId);
+        } catch (e) {
+          console.error('syncPublication_ failed', result.eventId, e && e.message);
+          result.publication = { published: false, failed: true, message: (e && e.publicMessage) || '公開データを書き込めませんでした' };
+        }
         result.detail = eventDetail_(ctx, result.eventId);
       }
       delete result.forceRepublish;

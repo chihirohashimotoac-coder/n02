@@ -237,3 +237,19 @@ test('他人の大会: Google ログインだけでは運営できず、管理�
   assert.equal(d.event.id, id);
   assert.equal(d.event.ownerEmail, undefined);
 });
+
+test('管理パスワードの間違いは、並んで届いても 1 回ずつ数え、ロックを取れなければ照合しない', () => {
+  const p = ready();
+  const alice = p.loginAs(ALICE);
+  const id = p.ok('createSampleEvent', { publish: true }, { auth: alice }).eventId;
+  const ev = p.ok('eventDetail', { eventId: id }, { auth: alice }).event;
+  p.ok('setStaffPassword', { eventId: id, rev: ev.rev, password: 'staff-pass-1234' }, { auth: alice });
+  const before = p.admin.locks;
+  assert.equal(p.call('staffLogin', { eventId: id, password: 'wrong-pass-0000' }, { auth: 'anon' }).error.code, 'AUTH_INVALID');
+  assert.ok(p.admin.locks > before, '照合と回数の更新をロックの中で行う');
+  p.admin.lockBusy = true;
+  assert.equal(p.call('staffLogin', { eventId: id, password: 'staff-pass-1234' }, { auth: 'anon' }).error.code, 'BUSY');
+  p.admin.lockBusy = false;
+  for (let i = 1; i < 10; i++) p.call('staffLogin', { eventId: id, password: 'wrong-pass-0000' }, { auth: 'anon' });
+  assert.equal(p.call('staffLogin', { eventId: id, password: 'staff-pass-1234' }, { auth: 'anon' }).error.code, 'AUTH_LOCKED');
+});

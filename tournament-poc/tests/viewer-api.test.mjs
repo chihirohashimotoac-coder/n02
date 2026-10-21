@@ -128,6 +128,44 @@ test('ロックを取れないとき（他のリクエストが再読込中）�
   assert.equal(res.ok, true);
 });
 
+test('ロックを取れないとき: 予備キャッシュ（stale）があればそれを返し、シートを読みに行かない', () => {
+  const p = published();
+  const first = p.viewer.run('getPublicSnapshot', {});
+  p.viewer.cache.expireFresh('pub:v1:');
+  p.viewer.lockBusy = true;
+  let reads = 0;
+  const original = p.viewer.context.refreshFromSheet_;
+  p.viewer.context.refreshFromSheet_ = (...args) => {
+    reads++;
+    return original(...args);
+  };
+  const res = p.viewer.run('getPublicSnapshot', {});
+  assert.equal(res.ok, true);
+  assert.equal(res.stale, true);
+  assert.equal(res.version, first.version);
+  assert.equal(reads, 0, '待っている側はシートを読まない');
+  p.viewer.lockBusy = false;
+  assert.equal(p.viewer.run('getPublicSnapshot', {}).ok, true);
+  assert.equal(reads, 1, 'ロックを取れた側だけが読み直す');
+});
+
+test('公開をやめた大会は、シートが読めないときも予備キャッシュから返さない', () => {
+  const p = published();
+  assert.equal(p.viewer.run('getPublicSnapshot', { eventId: p.eventId }).ok, true);
+  const ev = p.ok('eventDetail', { eventId: p.eventId }).event;
+  p.ok('updateEvent', { eventId: p.eventId, rev: ev.rev, name: ev.name, dateLabel: ev.dateLabel, status: ev.status, isPublic: false, isFeatured: false, notes: ev.notes });
+  p.viewer.cache.expireFresh('pub:v1:');
+  assert.equal(p.viewer.run('getPublicSnapshot', { eventId: p.eventId }).ok, false, '読み直したら非公開');
+  // 「公開されていない」の短いキャッシュが切れた後にシートが読めなくなっても、古い内容を出さない
+  p.viewer.cache.expireFresh('pub:v1:');
+  p.store.failOpen = true;
+  const res = p.viewer.run('getPublicSnapshot', { eventId: p.eventId });
+  assert.equal(res.ok, false);
+  assert.equal(res.error.code, 'UNAVAILABLE');
+  const list = JSON.parse(p.viewer.fn('doGet')({ parameter: { format: 'list' } }).getContent());
+  assert.ok(!JSON.stringify(list).includes(p.eventId), '一覧の予備にも載らない');
+});
+
 test('壊れた公開データ行（接頭辞なし・JSON 不正）は読み飛ばす', () => {
   const p = published();
   const sheet = p.store.get().getSheetByName('PublicSnapshots');

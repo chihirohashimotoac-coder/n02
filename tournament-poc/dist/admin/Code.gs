@@ -14,7 +14,7 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.7.0',
+  APP_VERSION: '0.7.1',
   SCHEMA_VERSION: 1,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
@@ -587,24 +587,33 @@ function verifyStaffPassword_(ctx, eventId, password) {
   if (!isValidId_(eventId) || typeof password !== 'string' || !password || password.length > STAFF_PASSWORD_MAX_) {
     throw appError_('AUTH_INVALID', '大会または管理パスワードが違います。');
   }
-  var cache = CacheService.getScriptCache();
-  var fails = Number(cache.get(staffFailKey_(eventId)) || 0);
-  if (fails >= STAFF_FAIL_LIMIT_) {
-    throw appError_('AUTH_LOCKED', '管理パスワードの間違いが続いたため、10 分間この大会はパスワードで開けません。時間をおいてお試しください。');
+  // 回数の確認から書き戻しまでをロックの中で行う。並列に送られた間違いも 1 回ずつ数える
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(ADMIN_CONFIG.LOCK_WAIT_MS)) {
+    throw appError_('BUSY', '他の処理が実行中です。数秒後にもう一度お試しください。');
   }
-  var events = ctx.table('Events');
-  var event = events.byKey[eventId];
-  var matched =
-    event &&
-    !events.duplicates[eventId] &&
-    event.staff_pass_hash &&
-    event.staff_pass_salt &&
-    safeEqual_(staffPasswordHash_(eventId, event.staff_pass_salt, password), event.staff_pass_hash);
-  if (!matched) {
-    cache.put(staffFailKey_(eventId), String(fails + 1), STAFF_FAIL_WINDOW_SEC_);
-    throw appError_('AUTH_INVALID', '大会または管理パスワードが違います。');
+  try {
+    var cache = CacheService.getScriptCache();
+    var fails = Number(cache.get(staffFailKey_(eventId)) || 0);
+    if (fails >= STAFF_FAIL_LIMIT_) {
+      throw appError_('AUTH_LOCKED', '管理パスワードの間違いが続いたため、10 分間この大会はパスワードで開けません。時間をおいてお試しください。');
+    }
+    var events = ctx.table('Events');
+    var event = events.byKey[eventId];
+    var matched =
+      event &&
+      !events.duplicates[eventId] &&
+      event.staff_pass_hash &&
+      event.staff_pass_salt &&
+      safeEqual_(staffPasswordHash_(eventId, event.staff_pass_salt, password), event.staff_pass_hash);
+    if (!matched) {
+      cache.put(staffFailKey_(eventId), String(fails + 1), STAFF_FAIL_WINDOW_SEC_);
+      throw appError_('AUTH_INVALID', '大会または管理パスワードが違います。');
+    }
+    return event;
+  } finally {
+    lock.releaseLock();
   }
-  return event;
 }
 
 /* ---------- 利用者の判定 ---------- */
@@ -3842,7 +3851,14 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
       result = spec.fn(ctx, payload) || {};
       flushHistory_(ctx);
       if (result.eventId) {
-        result.publication = syncPublication_(ctx, result.eventId);
+        // ここまでの変更はもう書き込んである。閲覧ページへの反映だけが失敗しても操作は成功として返し、
+        // 再送で同じ操作をやり直さないよう下で requestId を記録する（反映は「公開データを再生成」でやり直せる）
+        try {
+          result.publication = syncPublication_(ctx, result.eventId);
+        } catch (e) {
+          console.error('syncPublication_ failed', result.eventId, e && e.message);
+          result.publication = { published: false, failed: true, message: (e && e.publicMessage) || '公開データを書き込めませんでした' };
+        }
         result.detail = eventDetail_(ctx, result.eventId);
       }
       delete result.forceRepublish;
