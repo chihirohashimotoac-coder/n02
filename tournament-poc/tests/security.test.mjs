@@ -452,7 +452,7 @@ test('閲覧者用の doGet は書き込み関数を呼ぶコードを含まな�
 });
 
 test('画面のスクリプトはデータを innerHTML で埋め込まない（XSS 対策）', () => {
-  for (const file of ['admin/src/client/admin.js', 'viewer/src/client/viewer.js', 'portal/src/client/portal.js']) {
+  for (const file of ['admin/src/client/admin.js', 'viewer/src/client/viewer.js', 'portal/src/client/portal.js', 'shared/client/ux-kit.js', 'viewer/src/pages/viewer-plus.js']) {
     const code = read(file);
     assert.ok(!/\.innerHTML\s*=|insertAdjacentHTML|document\.write|\beval\(|new Function/.test(code), file);
   }

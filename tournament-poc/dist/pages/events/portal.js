@@ -373,9 +373,11 @@
       });
     }
 
+    /** reason: 'start' | 'auto' | 'visible' | 'manual'（ボタン・引っぱって更新）。manual のときだけ結果をトーストで伝える */
     function loadPublic(reason) {
       if (state.pub.loading) return Promise.resolve();
       state.pub.loading = true;
+      var before = state.pub.version;
       if (!state.pub.events) render();
       var url = viewerEndpoint + '?format=list' + (state.pub.version ? '&known=' + encodeURIComponent(state.pub.version) : '');
       return fetchJson(url, { method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'follow' })
@@ -399,6 +401,7 @@
           state.pub.loading = false;
           render();
           scheduleRefresh();
+          if (reason === 'manual' && !state.pub.error) toast('ok', state.pub.version !== before ? '大会の一覧を更新しました。' : '一覧は最新の状態です。');
         });
     }
 
@@ -825,6 +828,10 @@
 
     /* ---- トースト ---- */
     function toast(kind, text) {
+      if (win.TPUX) {
+        win.TPUX.toast(kind, text);
+        return;
+      }
       var box = $('toast');
       var item = el(doc, 'div', { className: 'toast toast--' + kind, role: kind === 'error' ? 'alert' : 'status', text: text });
       box.appendChild(item);
@@ -935,6 +942,9 @@
     }
 
     /* ---- 一覧 ---- */
+    var shownRows = { public: {}, mine: {} };
+    var rowSeq = 0;
+
     function eventRow(ev, mine) {
       var stats = el(doc, 'dl', { className: 'row__stats' }, [
         el(doc, 'div', null, [el(doc, 'dt', { text: '参加' }), el(doc, 'dd', null, [ev.playerCount === null || ev.playerCount === undefined ? '—' : el(doc, 'span', { className: 'num', text: String(ev.playerCount) }), ev.playerCount === null || ev.playerCount === undefined ? null : ' 名'])]),
@@ -948,7 +958,10 @@
       button.addEventListener('click', function () {
         openEvent(ev, button);
       });
-      var item = el(doc, 'li', { className: 'row row--' + (STATUS[ev.status] ? ev.status : 'unknown') }, [
+      var seen = shownRows[mine ? 'mine' : 'public'];
+      var fresh = !seen[ev.id];
+      seen[ev.id] = true;
+      var item = el(doc, 'li', { className: 'row row--' + (STATUS[ev.status] ? ev.status : 'unknown') + (fresh ? ' is-new' : ''), style: fresh ? { '--n': String(Math.min(rowSeq++, 8)) } : null }, [
         el(doc, 'div', { className: 'row__main' }, [
           el(doc, 'div', { className: 'row__tags' }, [
             statusChip(doc, ev.status),
@@ -1003,6 +1016,7 @@
       renderStatusFilter(list.events ? countByStatus(list.events) : null);
       formatSelect.value = state.format;
 
+      rowSeq = 0;
       if (!list.events) {
         count.textContent = '';
         if (list.error) {
@@ -1017,7 +1031,7 @@
             ])
           );
         } else {
-          box.appendChild(el(doc, 'p', { className: 'loading', text: state.tab === 'mine' ? '作成した大会を読み込んでいます…' : '大会の一覧を読み込んでいます…' }));
+          box.appendChild(skeletonList(state.tab === 'mine' ? '作成した大会を読み込んでいます' : '大会の一覧を読み込んでいます'));
         }
         return;
       }
@@ -1083,6 +1097,24 @@
       });
     }
 
+    /** スケルトン: 一覧の行と同じ形の灰色の枠を先に出す（読み込み中であることは読み上げで伝える） */
+    function skeletonList(label) {
+      var bar = function (cls) {
+        return el(doc, 'span', { className: 'ux-skeleton ' + cls, 'aria-hidden': 'true' });
+      };
+      var rows = [0, 1, 2, 3].map(function () {
+        return el(doc, 'li', { className: 'row row--skeleton', 'aria-hidden': 'true' }, [
+          el(doc, 'div', { className: 'row__main' }, [bar('sk-tags'), bar('sk-title'), bar('sk-date')]),
+          el(doc, 'div', { className: 'row__side' }, [bar('sk-meter'), bar('sk-stats')]),
+        ]);
+      });
+      return el(doc, 'div', { className: 'skeleton', role: 'status' }, [
+        el(doc, 'span', { className: 'visually-hidden', text: label }),
+        el(doc, 'span', { className: 'ux-skeleton sk-heading', 'aria-hidden': 'true' }),
+        el(doc, 'ul', { className: 'rows' }, rows),
+      ]);
+    }
+
     function renderSync() {
       var s = $('sync');
       s.textContent = '';
@@ -1102,6 +1134,35 @@
       renderNotice();
       renderResults();
       renderSync();
+    }
+
+    /* ---- 引っぱって更新（スマートフォン）。一覧と、ログインしていれば作成した大会を読み直す ---- */
+    if (win.TPUX) {
+      win.TPUX.pullToRefresh({
+        onRefresh: function () {
+          return Promise.all([loadPublic('manual'), state.google ? loadMine() : null]);
+        },
+      });
+    }
+
+    /* ---- 大会名の候補（オートコンプリート）。表示中のタブの大会から選び、選ぶとその大会を開く ---- */
+    if (win.TPUX) {
+      win.TPUX.combobox({
+        input: q,
+        max: 6,
+        getItems: function (text) {
+          var list = state.tab === 'mine' ? state.mine.events : state.pub.events;
+          return filterEvents(list || [], { q: text }).map(function (ev) {
+            return { id: ev.id, label: ev.name, meta: (STATUS[ev.status] || { label: '' }).label + (ev.dateLabel ? '・' + ev.dateLabel : ''), event: ev };
+          });
+        },
+        onPick: function (item) {
+          q.value = item.label;
+          applySearch();
+          var row = doc.querySelector('.row__open[data-event-id="' + item.id + '"]');
+          openEvent(item.event, row || q);
+        },
+      });
     }
 
     /* ---- 起動 ---- */

@@ -647,6 +647,15 @@
       qrClose: $('qr-close'),
     };
     var qrState = { url: '' };
+    // 画面の動き（GitHub Pages の viewer-plus.js）に知らせる。描画と更新の結果だけを伝え、取得の間隔などには関わらない
+    var lastReason = '';
+    function notify(type, detail) {
+      try {
+        doc.dispatchEvent(new win.CustomEvent('tpoc:viewer', { detail: Object.assign({ type: type }, detail || {}) }));
+      } catch (e) {
+        /* CustomEvent がない環境では知らせない */
+      }
+    }
     var view = { data: null, filter: { stage: 'all', group: 'all' }, lastError: null, eventId: '' };
 
     function showBanner(kind, text) {
@@ -663,6 +672,7 @@
           onPick(it.id);
           renderFilter();
           renderEvent(ui.groups, view.data, view.filter);
+          notify('render', { data: view.data, filterOnly: true });
         });
         row.appendChild(b);
       });
@@ -699,6 +709,7 @@
     function renderData() {
       var d = view.data;
       ui.message.hidden = true;
+      ui.title.classList.remove('is-loading');
       ui.title.textContent = d.event.name;
       doc.title = d.event.name + ' | n02 Tournament';
       ui.date.textContent = d.event.dateLabel || '';
@@ -721,6 +732,7 @@
       renderQr(d);
       renderFilter();
       renderEvent(ui.groups, d, view.filter);
+      notify('render', { data: d });
     }
 
     /**
@@ -799,10 +811,12 @@
         if (res.version && !metrics.versions[res.version]) metrics.versions[res.version] = Date.now();
         ui.fetched.textContent = formatTime(new Date(s.lastSuccessAt));
         if (res.ok) {
+          var previous = view.data;
           if (res.data) {
             view.data = res.data;
             renderData();
           }
+          notify('result', { reason: lastReason, previous: previous, data: view.data, changed: !!res.data && !!previous, notModified: !!res.notModified });
           if (res.stale) {
             showBanner('warn', 'サーバーで最新データを読み込めなかったため、' + formatTime(res.publishedAt) + ' 時点の公開データを表示しています。');
           } else {
@@ -812,7 +826,9 @@
           view.data = null;
           ui.groups.textContent = '';
           ui.filter.hidden = true;
+          ui.title.classList.remove('is-loading');
           ui.title.textContent = 'n02 Tournament';
+          notify('empty', {});
           ui.rule.hidden = true;
           showMessage(res.error.message);
           showBanner('ok', '');
@@ -824,10 +840,13 @@
         if (view.data) {
           showBanner('warn', '更新に失敗しました（' + s.failures + ' 回目）。' + sec + ' 秒後に再試行します。表示中は ' + ui.fetched.textContent + ' に取得したデータです。');
         } else {
+          ui.groups.textContent = '';
           showMessage('データを取得できませんでした。' + sec + ' 秒後に自動で再試行します。');
           showBanner('error', '通信エラー（' + s.failures + ' 回目）');
         }
+        notify('failure', { reason: lastReason });
       } else if (type === 'request') {
+        lastReason = (detail && detail.reason) || '';
         ui.refresh.disabled = true;
         ui.refresh.textContent = '更新中…';
       }
@@ -890,6 +909,7 @@
       ui.refresh.addEventListener('click', function () {
         var r = poller.refreshNow();
         if (r === 'throttled') showBanner('info', '少し時間をおいてから更新してください。');
+        notify('refresh-requested', { result: r });
       });
       doc.addEventListener('visibilitychange', function () {
         poller.setHidden(doc.visibilityState === 'hidden');

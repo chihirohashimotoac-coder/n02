@@ -1199,3 +1199,89 @@ body {
     animation: none !important;
   }
 }
+
+/* ---------------------------------------------------------------- 読み込み中（スケルトン） */
+
+.skeleton {
+  margin-top: 28px;
+}
+.sk-heading {
+  width: 6em;
+  height: 24px;
+  margin-bottom: 12px;
+}
+.row--skeleton {
+  pointer-events: none;
+}
+.row--skeleton:hover {
+  background: transparent;
+}
+.sk-tags {
+  width: 9em;
+  height: 22px;
+}
+.sk-title {
+  width: min(16em, 80%);
+  height: 26px;
+  margin: 10px 0 8px;
+}
+.sk-date {
+  width: 7em;
+  height: 16px;
+}
+.sk-meter {
+  height: 12px;
+}
+.sk-stats {
+  width: 70%;
+  height: 16px;
+}
+
+/* ---------------------------------------------------------------- 動き（最初に出た行だけ。視差効果を減らす設定では出さない） */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 行は上から順に現れ、進捗の帯は確定した分まで伸びる（インフォグラフィック） */
+  .row.is-new {
+    animation: row-in 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation-delay: calc(var(--n, 0) * 45ms);
+  }
+  .row.is-new .meter__final,
+  .row.is-new .meter__live,
+  .dialog[open] .meter__final,
+  .dialog[open] .meter__live {
+    transform-origin: left center;
+    animation: meter-grow 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation-delay: calc(200ms + var(--n, 0) * 45ms);
+  }
+  .tabs__tab[aria-selected='true']::after {
+    animation: tab-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .segmented__item {
+    transition:
+      background 160ms,
+      color 160ms,
+      border-color 160ms,
+      transform 120ms;
+  }
+  .segmented__item:active,
+  .btn:active {
+    transform: scale(0.97);
+  }
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes meter-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes tab-in {
+  from {
+    transform: scaleX(0.3);
+    opacity: 0;
+  }
+}

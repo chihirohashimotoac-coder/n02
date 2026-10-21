@@ -146,7 +146,7 @@ Web アプリの URL が変わると、これらのページが動かなくな�
 
 1. 運営用: `dist/admin/Code.gs` を貼り替え →「デプロイを管理」→ 鉛筆 →「新バージョン」。権限・列の変更はないので、承認のし直しと「初期化する」は不要です。
 2. 閲覧者用: `dist/viewer/Code.gs` を貼り替え → 同じく「新バージョン」（v0.2.0 以来の更新。権限の変更はありません）。
-3. GitHub Pages: `dist/pages/events/` フォルダ（`index.html` `portal.js` `portal.css` `archivo.woff2` `OFL-Archivo.txt`）を追加し、`admin/` の `admin.js` `admin.css` `index.html` を置き換えます。`config.js` と `admin/config.js` はそのまま（ポータルはこの 2 つを読みます）。
+3. GitHub Pages: `dist/pages/events/` フォルダ（`index.html` `portal.js` `portal.css` `archivo.woff2` `OFL-Archivo.txt`）と、ルートの `ux-kit.js` `ux-kit.css` `viewer-plus.js` を追加し、ルートの `index.html` `viewer.js` `viewer.css` と `admin/` の `admin.js` `admin.css` `index.html` を置き換えます。`config.js` と `admin/config.js` はそのまま（ポータルはこの 2 つを読みます）。
 4. Google Cloud の OAuth クライアントの設定変更は不要です（ポータルは運営画面と同じ `https://<ユーザー名>.github.io` から開くため）。
 5. 一覧の「参加人数」は、v0.7.0 の運営用で公開データを作り直した大会から表示されます。それまでは「—」です。すぐに表示したい大会は、運営画面の「進行状況」→「公開データを再生成」を押してください。
 

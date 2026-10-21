@@ -1002,3 +1002,317 @@ body.qr-forced .qr-panel {
     grid-area: status;
   }
 }
+
+/* ---- 上部: 大会一覧へ（GitHub Pages の閲覧ページだけ） ---- */
+
+.topbar__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.to-portal {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px 14px 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  color: var(--brand-ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.to-portal:hover {
+  background: rgba(255, 255, 255, 0.14);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.to-portal:focus-visible {
+  outline: 3px solid var(--brand-ink);
+  outline-offset: 2px;
+}
+
+/* ---- 読み込み中（スケルトン） ---- */
+
+.event-title.is-loading {
+  opacity: 0.75;
+}
+
+.sk-stage,
+.sk-card {
+  display: block;
+  border-radius: var(--radius);
+  background: var(--sched-bg);
+}
+
+.sk-stage {
+  width: min(18em, 60%);
+  height: 28px;
+  margin: 8px 0 16px;
+}
+
+.sk-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 16px;
+}
+
+.sk-card {
+  height: 340px;
+}
+
+/* ---- 大会の進み具合（GitHub Pages の閲覧ページだけ） ---- */
+
+.overview {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 24px;
+  align-items: center;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.overview__head {
+  display: grid;
+  gap: 2px;
+}
+
+.overview__pct {
+  margin: 0;
+  line-height: 1;
+}
+
+.overview__num {
+  font-size: 44px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--final);
+}
+
+.overview__unit {
+  margin-left: 2px;
+  font-size: 18px;
+  color: var(--ink-2);
+}
+
+.overview__counts {
+  margin: 4px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.overview__count b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.overview__dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border-radius: 2px;
+  background: var(--sched-bg);
+  border: 1px solid var(--line);
+}
+
+.overview__count--final .overview__dot {
+  background: var(--final);
+  border-color: var(--final);
+}
+
+.overview__count--live .overview__dot {
+  background: repeating-linear-gradient(-45deg, var(--live) 0 2px, transparent 2px 4px);
+  border-color: var(--live);
+}
+
+.overview__stages {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ov-stage {
+  display: grid;
+  grid-template-columns: minmax(4em, 9em) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.ov-stage__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.ov-stage__track {
+  position: relative;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--sched-bg);
+}
+
+.ov-stage__track.is-pending {
+  background: repeating-linear-gradient(-45deg, var(--line) 0 2px, transparent 2px 6px), var(--sched-bg);
+}
+
+.ov-stage__final,
+.ov-stage__live {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--l, 0);
+  width: var(--w, 0);
+  background: var(--final);
+}
+
+.ov-stage__live {
+  background: repeating-linear-gradient(-45deg, var(--live) 0 3px, transparent 3px 6px);
+}
+
+.ov-stage__value {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ov-stage__final,
+  .ov-stage__live {
+    transition:
+      width 900ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      left 900ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+@media (max-width: 640px) {
+  .overview {
+    grid-template-columns: 1fr;
+  }
+  .overview__num {
+    font-size: 36px;
+  }
+}
+
+/* ---- 選手を探す（GitHub Pages の閲覧ページだけ） ---- */
+
+.player-search {
+  display: grid;
+  gap: 6px;
+  max-width: 520px;
+  margin: 0 0 14px;
+}
+
+.player-search__label {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.player-search__input {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.player-search__chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 6px 6px 12px;
+  border-radius: 999px;
+  background: var(--final-bg);
+  color: var(--final);
+  font-size: 14px;
+  font-weight: 700;
+  justify-self: start;
+}
+
+.player-search__clear {
+  min-height: 32px;
+  padding: 2px 12px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* 強調中: その選手の試合と順位表の行だけをはっきり見せる（他は薄くする。色だけでなく枠でも示す） */
+.has-focus .match:not(.is-focus),
+.has-focus .bmatch:not(.is-focus) {
+  opacity: 0.4;
+}
+
+.has-focus .match.is-focus,
+.has-focus .bmatch.is-focus {
+  box-shadow: 0 0 0 3px var(--final);
+}
+
+.has-focus .summary tr.is-focus th,
+.has-focus .summary tr.is-focus td {
+  background: var(--final-bg);
+  font-weight: 700;
+}
+
+/* ---- 更新された試合（一瞬だけ強調） ---- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .match.is-updated,
+  .bmatch.is-updated {
+    animation: match-updated 2.4s ease-out;
+  }
+  .match.is-updated .legs,
+  .bmatch.is-updated .bmatch__score {
+    display: inline-block;
+    animation: score-pop 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .overview,
+  .player-search__chip {
+    animation: fade-in 300ms ease-out;
+  }
+}
+
+@keyframes match-updated {
+  0%,
+  30% {
+    box-shadow: 0 0 0 3px var(--live);
+    background-color: var(--live-bg);
+  }
+}
+
+@keyframes score-pop {
+  from {
+    transform: translateY(-0.5em) scale(1.25);
+    opacity: 0;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}

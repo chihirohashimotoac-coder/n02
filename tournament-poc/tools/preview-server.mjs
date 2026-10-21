@@ -108,6 +108,9 @@ const server = http.createServer(async (req, res) => {
         'events/portal.css': 'text/css; charset=utf-8',
         'events/portal.js': 'text/javascript; charset=utf-8',
         'events/archivo.woff2': 'font/woff2',
+        'ux-kit.js': 'text/javascript; charset=utf-8',
+        'ux-kit.css': 'text/css; charset=utf-8',
+        'viewer-plus.js': 'text/javascript; charset=utf-8',
       };
       if (!types[name]) return send(res, 404, 'text/plain', 'not found');
       const file = join(ROOT, 'dist', 'pages', name);

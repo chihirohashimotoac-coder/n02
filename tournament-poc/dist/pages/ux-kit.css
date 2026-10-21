@@ -1,0 +1,244 @@
+/* このファイルは tools/build.mjs が生成したものです。直接編集しないでください。 */
+/* n02 Tournament - 共通部品（ux-kit.js）の見た目。色はそれぞれのページの CSS 変数を使う */
+
+/* ---- トースト ---- */
+.ux-toasts {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  z-index: 60;
+  display: grid;
+  gap: 8px;
+  width: min(520px, calc(100% - 32px));
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.ux-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: #1a1f22;
+  color: #f1f4f2;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.ux-toast__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #2f9b72;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+.ux-toast--info .ux-toast__mark {
+  background: #4c6f8f;
+}
+.ux-toast--warn .ux-toast__mark {
+  background: #c46a00;
+}
+.ux-toast--error {
+  background: #7a1414;
+}
+.ux-toast--error .ux-toast__mark {
+  background: #fff;
+  color: #7a1414;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ux-toast {
+    animation: ux-toast-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .ux-toast.is-leaving {
+    animation: ux-toast-out 220ms ease-in forwards;
+  }
+}
+@keyframes ux-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+@keyframes ux-toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ---- プルトゥリフレッシュ（ブラウザ標準の引っぱって再読み込みは止め、こちらの印を出す） ---- */
+.ux-ptr-enabled,
+.ux-ptr-enabled body {
+  overscroll-behavior-y: contain;
+}
+.ux-ptr {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) - 44px);
+  left: 50%;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 8px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1b1f1d;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.22);
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0;
+  transform: translate(-50%, var(--ptr-y, 0px));
+  pointer-events: none;
+}
+.ux-ptr.is-visible {
+  opacity: 1;
+}
+.ux-ptr:not(.is-visible) {
+  transition:
+    transform 200ms ease,
+    opacity 200ms ease;
+}
+.ux-ptr__ring {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid #d9d7cf;
+  border-top-color: #0d503a;
+  transform: rotate(calc(var(--ptr-p, 0) * 300deg));
+}
+.ux-ptr.is-armed .ux-ptr__ring {
+  border-color: #0d503a;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ux-ptr.is-refreshing .ux-ptr__ring {
+    border-color: #d9d7cf;
+    border-top-color: #0d503a;
+    animation: ux-spin 0.8s linear infinite;
+  }
+}
+@keyframes ux-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- キネティックタイポグラフィ ---- */
+.ux-kinetic__char {
+  display: inline-block;
+  white-space: pre;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ux-kinetic__char {
+    animation: ux-rise 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation-delay: calc(var(--i) * var(--step, 45ms));
+  }
+}
+@keyframes ux-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.6em) rotate(4deg);
+  }
+}
+
+/* ---- オートコンプリート ---- */
+.ux-combobox {
+  position: relative;
+}
+.ux-combobox__list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: min(320px, 50vh);
+  margin: 0;
+  padding: 6px 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid #8a8f8c;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1b1f1d;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+.ux-combobox__option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+.ux-combobox__option:hover,
+.ux-combobox__option.is-active {
+  background: #e1f1e9;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ux-combobox__option.is-active {
+  box-shadow: inset 4px 0 0 #0d503a;
+}
+.ux-combobox__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+.ux-combobox__meta {
+  flex: none;
+  font-size: 13px;
+  color: #4c5551;
+}
+@media (prefers-color-scheme: dark) {
+  .ux-combobox__list,
+  .ux-ptr {
+    background: #1a1f1d;
+    color: #eef1ef;
+    border-color: #6a7470;
+  }
+  .ux-combobox__option:hover,
+  .ux-combobox__option.is-active {
+    background: #163329;
+  }
+  .ux-combobox__meta {
+    color: #aab4af;
+  }
+}
+
+/* ---- スケルトン（読み込み中の形だけを先に見せる） ---- */
+.ux-skeleton {
+  display: block;
+  border-radius: 6px;
+  background: #e6e4dc;
+}
+@media (prefers-color-scheme: dark) {
+  .ux-skeleton {
+    background: #2a312e;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ux-skeleton {
+    background-image: linear-gradient(90deg, transparent 0, rgb(255 255 255 / 0.55) 50%, transparent 100%);
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: ux-shimmer 1.3s ease-in-out infinite;
+  }
+}
+@media (prefers-reduced-motion: no-preference) and (prefers-color-scheme: dark) {
+  .ux-skeleton {
+    background-image: linear-gradient(90deg, transparent 0, rgb(255 255 255 / 0.08) 50%, transparent 100%);
+  }
+}
+@keyframes ux-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}

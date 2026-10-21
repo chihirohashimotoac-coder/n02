@@ -67,7 +67,10 @@
 - 運営用 Apps Script: 操作 `myEvents`（scope `google`）。公開データに `event.playerCount` を追加
 - 要約の計算は `shared/summary.js`（両方の Code.gs の末尾に入る）
 - 運営画面: `#new`（作成欄へ移る）、上部にポータルへのリンク
-- n02 本体: `src/components/tournament/TournamentPortalLink.tsx`・`src/styles/tournament-link.css`。トップ画面のモード選択の下に「大会」セクション（ユーザーが案 C を選択）。リンク先は `VITE_TOURNAMENT_PORTAL_URL`（既定は本番の `…/n02-tournament-viewer/events/`）
+- 閲覧ページ（Pages 版だけ）: 右上に「大会一覧」、大会の進み具合、選手を探す（候補）、更新された試合の強調、引っぱって更新、トースト、読み込み中のスケルトン、優勝者の名前の演出（`viewer/src/pages/viewer-plus.js`。viewer.js は描画のたびに `tpoc:viewer` イベントを出すだけで、取得・自動更新の規則は変えていない）。Apps Script の閲覧画面には足さない
+- 共通部品: `shared/client/ux-kit.js`・`ux-kit.css`（トースト・引っぱって更新・数え上げ・文字の演出・候補）。ポータルと閲覧ページが使う
+- ユーザーの指示（2026-10-21）: プルトゥリフレッシュ・スケルトン・トースト・オートコンプリート・キネティックタイポグラフィ・UI/UX アニメーション・インフォグラフィックアニメーションを「適した場所に」使う（無理に全部は入れない）。ポータルではキネティックタイポグラフィは使っていない
+- n02 本体: `src/components/tournament/TournamentPortalLink.tsx`・`src/styles/tournament-link.css`。トップ画面の上部バーの右側（ユーザーが案 B を選択。案 A・C は不採用）。リンク先は `VITE_TOURNAMENT_PORTAL_URL`（既定は本番の `…/n02-tournament-viewer/events/`）
 - 確認用プレビュー: `node tools/preview-site/build-preview-site.mjs <出力先>`。実物の Code.gs をブラウザ内の模擬環境で動かす静的サイト（Google 非接続）。claude.ai の Artifact に公開済み: https://claude.ai/artifact/XcYhUQcBWLY7tJ6hUmzZeN
 - 反映手順は [deploy.md](deploy.md) の「v0.7.0 に更新するとき」（Apps Script を先に、Pages を後に）
 

@@ -86,7 +86,8 @@ function rewritePage(file, pageDir) {
     .replace(/\s*<meta http-equiv="Content-Security-Policy" content="[^"]*" \/>/, '')
     .replace('<script src="https://accounts.google.com/gsi/client" async></script>', '')
     .replace(/<script src="/, () => previewScripts(pageDir) + '\n    <script src="')
-    .replace('href="../events/"', 'href="../events/index.html"');
+    .replace('href="../events/"', 'href="../events/index.html"')
+    .replace('class="to-portal" href="events/"', 'class="to-portal" href="events/index.html"');
   if (html.includes('accounts.google.com') || html.includes('Content-Security-Policy')) throw new Error('not rewritten: ' + file);
   writeFileSync(file, html);
 }

@@ -46,7 +46,9 @@ function buildApp(name, spec) {
   if (css.includes('</style')) throw new Error(`${spec.css} must not contain "</style"`);
   const html = template
     .replace('/*@@STYLES@@*/', () => css)
-    .replace('/*@@SCRIPT@@*/', () => js);
+    .replace('/*@@SCRIPT@@*/', () => js)
+    // Apps Script の閲覧画面にはポータルがないので「大会一覧」は出さない
+    .replace('<!--@@PORTAL_LINK@@-->', '');
   if (html.includes('@@STYLES@@') || html.includes('@@SCRIPT@@')) throw new Error('placeholder left in ' + name);
 
   return {
@@ -87,11 +89,21 @@ function toStaticPage(templatePath, css, js, connect, opts = {}) {
         `    <meta http-equiv="Content-Security-Policy" content="${csp}" />\n` +
         `    <meta name="referrer" content="${referrer}" />`
     )
-    .replace(/<style>\s*\/\*@@STYLES@@\*\/\s*<\/style>/, `<link rel="stylesheet" href="${css}" />`)
+    .replace(
+      '<!--@@PORTAL_LINK@@-->',
+      opts.portalLink
+        ? '<a class="to-portal" href="events/"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h2v2H4V6Zm4 0h12v2H8V6Zm-4 5h2v2H4v-2Zm4 0h12v2H8v-2Zm-4 5h2v2H4v-2Zm4 0h12v2H8v-2Z" fill="currentcolor" /></svg>大会一覧</a>'
+        : ''
+    )
+    .replace(
+      /<style>\s*\/\*@@STYLES@@\*\/\s*<\/style>/,
+      (opts.css || []).map((c) => `<link rel="stylesheet" href="${c}" />\n    `).join('') + `<link rel="stylesheet" href="${css}" />`
+    )
     .replace(
       /<script>\s*\/\*@@SCRIPT@@\*\/\s*<\/script>/,
       (opts.google ? '<script src="https://accounts.google.com/gsi/client" async></script>\n    ' : '') +
-        `<script src="config.js"></script>\n    <script src="qrcode.js"></script>\n    <script src="${js}"></script>`
+        `<script src="config.js"></script>\n    <script src="qrcode.js"></script>\n    <script src="${js}"></script>` +
+        (opts.js || []).map((j) => `\n    <script src="${j}"></script>`).join('')
     );
   if (html.includes('@@') || html.includes('<base')) throw new Error('pages template not converted: ' + templatePath);
   return html;
@@ -129,7 +141,7 @@ function portalPage(connect) {
     .replace(
       '<!--@@SCRIPTS@@-->',
       '<script src="https://accounts.google.com/gsi/client" async></script>\n' +
-        '    <script src="../config.js"></script>\n    <script src="../admin/config.js"></script>\n    <script src="portal.js"></script>'
+        '    <script src="../config.js"></script>\n    <script src="../admin/config.js"></script>\n    <script src="../ux-kit.js"></script>\n    <script src="portal.js"></script>'
     );
   if (html.includes('@@')) throw new Error('portal template not converted');
   return html;
@@ -142,7 +154,15 @@ function buildPages() {
   return {
     'dist/pages/qrcode.js': qrcode,
     'dist/pages/admin/qrcode.js': qrcode,
-    'dist/pages/index.html': toStaticPage('viewer/src/client/index.html', 'viewer.css', 'viewer.js', connect),
+    // 閲覧ページは「大会一覧」へのリンク・進み具合・選手を探す・引っぱって更新などを足す（Apps Script の閲覧画面には足さない）
+    'dist/pages/index.html': toStaticPage('viewer/src/client/index.html', 'viewer.css', 'viewer.js', connect, {
+      portalLink: true,
+      css: ['ux-kit.css'],
+      js: ['ux-kit.js', 'viewer-plus.js'],
+    }),
+    'dist/pages/ux-kit.js': header + read('shared/client/ux-kit.js'),
+    'dist/pages/ux-kit.css': header + read('shared/client/ux-kit.css'),
+    'dist/pages/viewer-plus.js': header + read('viewer/src/pages/viewer-plus.js'),
     'dist/pages/viewer.css': header + read('viewer/src/client/viewer.css'),
     'dist/pages/viewer.js': header + read('viewer/src/client/viewer.js'),
     'dist/pages/config.example.js': read('viewer/src/pages/config.example.js'),

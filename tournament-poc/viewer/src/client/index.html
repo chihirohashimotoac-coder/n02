@@ -12,8 +12,11 @@
   <body>
     <header class="topbar">
       <div class="topbar__inner">
-        <p class="brand">n02 Tournament</p>
-        <h1 id="event-title" class="event-title">読み込み中…</h1>
+        <div class="topbar__row">
+          <p class="brand">n02 Tournament</p>
+          <!--@@PORTAL_LINK@@-->
+        </div>
+        <h1 id="event-title" class="event-title is-loading">読み込み中…</h1>
         <p class="event-meta">
           <span id="event-date"></span>
           <span id="event-status" class="event-status"></span>
@@ -37,9 +40,20 @@
     <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
 
     <main class="content">
+      <section id="overview" class="overview" aria-label="大会の進み具合" hidden></section>
+      <div id="player-search" class="player-search" hidden></div>
       <nav id="group-filter" class="filter" aria-label="グループの絞り込み" hidden></nav>
       <p id="message" class="message" role="status" hidden></p>
-      <div id="groups" class="stages"></div>
+      <div id="groups" class="stages">
+        <div class="skeleton" role="status">
+          <span class="visually-hidden">大会のデータを読み込んでいます</span>
+          <span class="ux-skeleton sk-stage" aria-hidden="true"></span>
+          <div class="sk-groups" aria-hidden="true">
+            <span class="ux-skeleton sk-card"></span>
+            <span class="ux-skeleton sk-card"></span>
+          </div>
+        </div>
+      </div>
       <p class="footnote">
         勝-敗・セット/Leg 得-失・順位は「確定済み」の試合だけで数えています。順位の決め方は各ステージの下に表示しています。
       </p>
