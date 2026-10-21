@@ -109,7 +109,7 @@ export default function SetupScreen({
 
   return (
     <div className="app-shell">
-      <TopBar />
+      <TopBar actions={<TournamentPortalLink />} />
       <section className="setup-layout">
         <div className="panel setup-panel">
           <div className="section-heading">
@@ -191,11 +191,6 @@ export default function SetupScreen({
               {hasSavedPentathlon && ' 中断したセッションを再開できます。'}
             </p>
           </div>
-
-          <section className="field-section tournament-section" aria-labelledby="tournament-heading">
-            <h2 id="tournament-heading">大会</h2>
-            <TournamentPortalLink />
-          </section>
 
           <button type="button" className="primary-button" onClick={handleStart}>
             ➤ ゲームを開始

@@ -20,7 +20,12 @@ export default function TournamentPortalLink() {
         />
       </svg>
       <span className="tournament-link__text">
-        <strong>トーナメント・リーグ</strong>
+        {/* Breaks after the 「・」 when the bar is narrow, never inside a word. */}
+        <strong>
+          トーナメント・
+          <wbr />
+          リーグ
+        </strong>
         <small>大会の閲覧・作成・運営</small>
       </span>
       <svg className="tournament-link__go" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
