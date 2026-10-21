@@ -7,6 +7,7 @@
 | 単体・結合テスト（68 件） | `dist/*/Code.gs` をそのまま、Apps Script の模擬実装（`tests/gas-mock.mjs`）上で実行 | `cd tournament-poc && npm test` | Node.js 22 |
 | 画面テスト（10 シナリオ × PC / スマートフォン = 20 件） | `dist/*/Index.html` と `Code.gs` をローカル確認用サーバーで動かし、Chromium で操作 | `npm run e2e` | Chromium（Playwright）、1366×768 / 390×844 |
 | 実環境での確認 | Google にデプロイした 2 つの Web アプリ | 下記「4. 実環境での確認項目」を手作業で | **未実施** |
+| ポータル「トーナメント・リーグ」（v0.7.0） | `portal-api`（公開一覧は公開中の大会だけ・非公開 / 削除済みは出ない・要約に非公開情報なし・notModified・キャッシュから返し大会ごとの読み込みなし・未作成の段階があれば 100% にしない・作成した大会は本人のものだけ・送られたメールアドレスを使わない・未ログイン / スタッフ / 期限切れ / 偽のセッションは拒否・他人の大会は管理パスワードで）、`portal-client`（検索の正規化・絞り込み・並び順・開催日の読み取り・進捗の帯・ログインの記憶）、`security`（ポータルの CSP・Cookie なし・URL に秘密なし）、e2e `portal.spec.mjs` 14 件 × PC / スマートフォン（一覧と並び順・検索と IME・絞り込み・モーダルの Esc / フォーカス / キーボード・大会を見る・管理パスワード・Google ログインと作成した大会・他人の大会・ログイン後に続ける・作成ボタン → 作成 → 一覧・期限切れ・ログアウト・通信エラー・空の状態・n02 への戻り） | 合格（模擬）／**実際の Google ログイン・本番 Apps Script では未検証** |
 | 50 人同時閲覧 | 閲覧者用 Web アプリ | [load-test.md](load-test.md) | **未実施** |
 
 ### 模擬環境の限界
@@ -51,8 +52,8 @@
 ## 3. 実行結果（本作業時点）
 
 ```
-npm test      → tests 106 / pass 106 / fail 0
-npm run e2e   → 40 passed（desktop 20・mobile 20）
+npm test      → tests 126 / pass 126 / fail 0（v0.7.0）
+npm run e2e   → 68 passed（desktop 34・mobile 34。v0.7.0）
 node tools/build.mjs --check → dist/ is up to date.
 リポジトリ直下 npx eslint . → エラーなし（既存 n02 への影響なし）
 ```

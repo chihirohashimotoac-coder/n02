@@ -487,5 +487,5 @@ test('ポータル（events/）: インラインのスクリプトなし・CSP �
   assert.equal((js.match(/credentials: 'omit'/g) || []).length, 2, 'すべての通信で Cookie を送らない');
   // セッションを URL に載せない（運営画面へは大会 ID だけを渡す）
   assert.doesNotMatch(js, /[?&#](session|token|password|key)=/i);
-  assert.match(js, /'\.\.\/admin\/#e=' \+ encodeURIComponent\(id\)/);
+  assert.match(js, /'\.\.\/admin\/' \+ index \+ '#e=' \+ encodeURIComponent\(id\)/);
 });

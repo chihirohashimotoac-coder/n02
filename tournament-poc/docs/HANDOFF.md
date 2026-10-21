@@ -1,6 +1,6 @@
 # 引き継ぎ（Handoff）— n02 Tournament / League Manager PoC
 
-最終更新: 2026-10-21 / 対象版: **v0.6.0**（本番反映・動作確認済み）
+最終更新: 2026-10-21 / 対象版: **v0.7.0**（ポータル「トーナメント・リーグ」。**本番未反映**。v0.6.0 までは本番反映・動作確認済み）
 
 次のセッションは、まずこのファイルと [README.md](../README.md)・[test-plan.md](test-plan.md) を読んでから作業してください。
 作業を始める前に、ユーザーに次の依頼内容を確認してください（現時点で未着手の依頼はありません）。
@@ -11,7 +11,7 @@
 
 | リポジトリ | 役割 | ブランチ | 備考 |
 | --- | --- | --- | --- |
-| **chihirohashimotoac-coder/n02** | **ソースの正本**（`tournament-poc/` 配下だけを触る） | `claude/confident-carson-4jh0g5`（最新） | `claude/bold-albattani-5vsk78`（v0.4.1 まで）から派生。未マージ。**PR は未作成**（ユーザーの指示があるまで作らない） |
+| **chihirohashimotoac-coder/n02** | **ソースの正本**（`tournament-poc/` 配下。v0.7.0 では n02 本体のトップ画面に入口のリンクも追加） | `claude/gifted-bardeen-eistmm`（最新。`claude/confident-carson-4jh0g5` に main をマージして派生） | `claude/bold-albattani-5vsk78`（v0.4.1 まで）から派生。未マージ。**PR は未作成**（ユーザーの指示があるまで作らない） |
 | chihirohashimotoac-coder/n02-tournament-viewer | GitHub Pages の公開先（`dist/pages/` のコピー置き場） | `main` | 手で編集しないで `dist/pages/` からコピーする。例外は `config.js`・`admin/config.js`（Web アプリの URL と OAuth クライアント ID。コピーで上書きしない）と `README.md`（`admin/` の行が手で足されている）。負荷テスト用に `.github/workflows/loadtest.yml`（← `tournament-poc/tools/pages-loadtest.yml`）と `tools/loadtest.mjs`（← `tournament-poc/tools/loadtest.mjs`）も置いてある |
 
 - 新しいセッションの作業ブランチがシステムから指定された場合は、そのブランチを `origin/claude/confident-carson-4jh0g5` から作って push する（このセッションでもそうした）。
@@ -60,7 +60,18 @@
 - Apps Script の画面（HtmlService）は複数 Google アカウントのブラウザで開けないため、画面はすべて GitHub Pages。
 - GAS プロジェクトはマイドライブ直下からフォルダに移しても動く（ファイル ID・デプロイ ID は変わらない）とユーザーに回答済み。
 
-## 4. 現在の状態（2026-10-21 時点。すべて反映・確認済み）
+## 3.5 v0.7.0（ポータル）の要点
+
+- ポータル: `portal/src/client/*` → `dist/pages/events/`。設定は既存の `../config.js` と `../admin/config.js` を読む（新しい設定ファイルは不要）
+- 閲覧者用 Apps Script: `?format=list`（PublicSnapshots から全公開大会の要約。キャッシュ・notModified）。公開関数は doGet と getPublicSnapshot のまま
+- 運営用 Apps Script: 操作 `myEvents`（scope `google`）。公開データに `event.playerCount` を追加
+- 要約の計算は `shared/summary.js`（両方の Code.gs の末尾に入る）
+- 運営画面: `#new`（作成欄へ移る）、上部にポータルへのリンク
+- n02 本体: `src/components/tournament/TournamentPortalLink.tsx`・`src/styles/tournament-link.css`。トップ画面のヘッダー直下に専用の帯。リンク先は `VITE_TOURNAMENT_PORTAL_URL`（既定は本番の `…/n02-tournament-viewer/events/`）
+- 確認用プレビュー: `node tools/preview-site/build-preview-site.mjs <出力先>`。実物の Code.gs をブラウザ内の模擬環境で動かす静的サイト（Google 非接続）。claude.ai の Artifact に公開済み: https://claude.ai/artifact/XcYhUQcBWLY7tJ6hUmzZeN
+- 反映手順は [deploy.md](deploy.md) の「v0.7.0 に更新するとき」（Apps Script を先に、Pages を後に）
+
+## 4. 現在の状態（2026-10-21 時点。v0.6.0 まで反映・確認済み。v0.7.0 は未反映）
 
 | 項目 | 状態 |
 | --- | --- |

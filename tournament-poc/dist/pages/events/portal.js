@@ -278,15 +278,18 @@
     var viewerEndpoint = config.viewerEndpoint;
     var adminEndpoint = config.adminEndpoint;
     var googleClientId = config.googleClientId;
+    // 既存の閲覧ページ・運営画面の URL は変えない（GitHub Pages はフォルダの index.html を返す）。
+    // index.html を明示しないと開けない置き場所（確認用のプレビュー）だけ、設定の pageIndex で付ける
+    var index = config.pageIndex === 'index.html' ? 'index.html' : '';
     var urls = {
       n02: config.n02Url || DEFAULT_N02_URL,
       view: function (id) {
-        return '../?event=' + encodeURIComponent(id);
+        return '../' + index + '?event=' + encodeURIComponent(id);
       },
       admin: function (id) {
-        return '../admin/#e=' + encodeURIComponent(id);
+        return '../admin/' + index + '#e=' + encodeURIComponent(id);
       },
-      create: '../admin/#new',
+      create: '../admin/' + index + '#new',
     };
     var params = new win.URLSearchParams(win.location.search);
     var state = {
@@ -1136,6 +1139,7 @@
         adminEndpoint: admin.endpoint,
         googleClientId: admin.googleClientId,
         n02Url: admin.n02Url,
+        pageIndex: admin.pageIndex,
       });
     };
     if (global.document.readyState === 'loading') global.document.addEventListener('DOMContentLoaded', go);
