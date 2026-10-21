@@ -7,6 +7,8 @@ n02 から外部リンクで使う「トーナメント・ロビン・リーグ�
 - 運営者用と閲覧者用は**別々の Apps Script プロジェクト**です。閲覧者用は読み取り専用の権限しか持ちません。
 - 既存の n02 本体（`src/` など）と League Order には一切手を加えていません。このフォルダ（`tournament-poc/`）だけで完結しています。
 
+> 作業を引き継ぐ場合は、まず [docs/HANDOFF.md](docs/HANDOFF.md) を読んでください。
+
 > 現時点の位置づけ: ローカルの模擬環境（Apps Script のサービスを Node.js で模したもの）では、自動テストで動作を確認済みです。
 > **Google の実環境（Apps Script へのデプロイ・実機・50 人同時閲覧）では未検証**です。確認手順は [docs/deploy.md](docs/deploy.md)・[docs/test-plan.md](docs/test-plan.md)・[docs/load-test.md](docs/load-test.md) にあります。
 
