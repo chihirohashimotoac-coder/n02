@@ -3977,8 +3977,9 @@ function actionBootstrap_(ctx) {
     events = c.table('Events').rows.filter(function (e) {
       return canManageEvent_(user, e, c);
     }).map(function (e) {
+      // 不戦（スイス式の Bye の記録）は試合に数えない（閲覧ページ・ポータルの数え方と同じ）
       var ms = matches.filter(function (m) {
-        return m.event_id === e.event_id;
+        return m.event_id === e.event_id && m.result_type !== RESULT_TYPE.BYE;
       });
       return {
         id: e.event_id,

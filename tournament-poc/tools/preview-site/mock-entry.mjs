@@ -8,8 +8,9 @@
 import { createStore, SPREADSHEET_ID } from '../../tests/gas-mock.mjs';
 import { sha256Bytes, md5Bytes } from './hash.mjs';
 
-const LOG_KEY = 'tpoc-preview-log-v1';
-const SEED_KEY = 'tpoc-preview-seeded-at-v1';
+// v2: v0.8 のサンプルを足した（サンプルが変わると記録の再生が合わなくなるので、キーを変えて作り直す）
+const LOG_KEY = 'tpoc-preview-log-v2';
+const SEED_KEY = 'tpoc-preview-seeded-at-v2';
 export const PREVIEW_ADMIN_KEY = 'preview-admin-key-0123456789-abcdefghij';
 export const PREVIEW_CLIENT_ID = '000000000000-preview0mock.apps.googleusercontent.com';
 export const VIEWER_ENDPOINT = 'https://script.google.com/macros/s/PREVIEW-VIEWER/exec';
@@ -317,7 +318,139 @@ function seed(w, at) {
   setEvent(b, cup, { isPublic: true, status: 'finished', dateLabel: '2026/10/12' });
   const ev = c('eventDetail', { eventId: cup }, b).event;
   c('setStaffPassword', { eventId: cup, rev: ev.rev, password: STAFF_PASSWORD }, b);
+  // 大会の作成は主催者 1 人あたり 1 時間に 5 件まで（本番と同じ制限）。模擬の時計を進めてから作る
+  const jump = () => (t += 61 * 60 * 1000);
+  seedV08(a, b, c, setEvent, jump);
+  jump();
   return t;
+}
+
+/* ---------- v0.8 の形式のサンプル（形式ごとに、途中まで進めた状態） ---------- */
+
+function matchesOf(st) {
+  if (st.groups) return st.groups.flatMap((g) => g.matches);
+  if (st.sides) return st.sides.flatMap((s) => s.rounds.flatMap((r) => r.matches));
+  if (st.nights) return st.nights.flatMap((n) => n.rounds.flatMap((r) => r.matches));
+  return st.rounds.flatMap((r) => r.matches);
+}
+
+function seedV08(a, b, c, setEvent, jump) {
+  jump();
+  const detail = (auth, id) => c('eventDetail', { eventId: id }, auth);
+  // 未確定の試合を limit 試合まで確定する（上の選手が勝つ。固定 Leg は 3-1・2-2・1-3 を順に）
+  const play = (auth, id, stageIndex, limit, filter) => {
+    for (let n = 0; n < limit; n++) {
+      const st = detail(auth, id).stages[stageIndex];
+      const m = matchesOf(st).find((x) => x.status === 'scheduled' && (!filter || filter(x)));
+      if (!m) return n;
+      const spec = m.spec || { format: 'legs', bestOf: m.bestOf };
+      let legs;
+      if (spec.format === 'fixed') legs = [[3, 1], [2, 2], [1, 3]][n % 3];
+      else {
+        const need = Math.floor(m.bestOf / 2) + 1;
+        legs = [need, n % 2 ? need - 1 : 0];
+      }
+      c('saveMatchResult', { matchId: m.id, rev: m.rev, status: 'final', p1Legs: legs[0], p2Legs: legs[1] }, auth);
+    }
+    return limit;
+  };
+  const people = (prefix, n, affs) => Array.from({ length: n }, (_, i) => ({ name: prefix + (i + 1), affiliation: affs ? affs[i % affs.length] : '', rating: String(20 - i) }));
+  const notice = (auth, id, text, ruleDisplay) => {
+    const ev = detail(auth, id).event;
+    c('updateEventSettings', { eventId: id, rev: ev.rev, announcement: text, ruleDisplay: ruleDisplay || null, publicFields: { affiliation: true, rating: false }, autoFinish: true, timezone: 'Asia/Tokyo' }, auth);
+  };
+
+  // 1. 予選ロビン→決勝トーナメント: 3 人の組で全員 1 勝 1 敗（同順位）→ 主催者が順位を決めるまで進出できない
+  const rk = c('createEvent', { name: 'サンプル: 予選ロビン→決勝（同順位あり）', template: 'robin_ko', groupCount: 2, advanceCount: 1, rule: { format: 'legs', bestOf: 3 } }, a).eventId;
+  c('importPlayers', { eventId: rk, players: people('ロビン', 6, ['東店', '西店', '南店']) }, a);
+  let d = detail(a, rk);
+  c('autoAssign', { eventId: rk, stageId: d.stages[0].id, method: 'balanced', useSeeds: true, useRating: true, spreadAffiliation: true }, a);
+  c('generateMatches', { eventId: rk, stageId: d.stages[0].id }, a);
+  play(a, rk, 0, 99);
+  notice(a, rk, '予選が終わりました。各組の 1 位を運営が決めてから決勝トーナメントを組みます。', { category: 'steel', startScore: 501, inMode: 'open', outMode: 'double', bull: 'separate', roundLimit: '', note: '' });
+  setEvent(a, rk, { isPublic: true, status: 'running', dateLabel: '2026/10/25' });
+
+  // 2. ダブルエリミネーション 5 名（途中まで）
+  const de = c('createEvent', { name: 'サンプル: ダブルエリミネーション 5 名', template: 'double_elimination', grandFinal: 'reset', rule: { format: 'legs', bestOf: 3 } }, a).eventId;
+  c('addPlayers', { eventId: de, names: ['DE 1', 'DE 2', 'DE 3', 'DE 4', 'DE 5'] }, a);
+  d = detail(a, de);
+  c('setEntrants', { eventId: de, stageId: d.stages[0].id, playerIds: d.players.map((p) => p.id) }, a);
+  c('generateBracket', { eventId: de, stageId: d.stages[0].id }, a);
+  play(a, de, 0, 3);
+  setEvent(a, de, { isPublic: true, status: 'running' });
+
+  // 3. 複数段階ロビン: 予選が終わり 2 次ロビン（成績は持ち越さない）を作成済み
+  const mr = c('createEvent', { name: 'サンプル: 複数段階ロビン→決勝', template: 'multi_robin_ko', groupCount: 2, advanceCount: 2, groupCount2: 1, advanceCount2: 2, rule: { format: 'legs', bestOf: 3 } }, a).eventId;
+  c('addPlayers', { eventId: mr, names: ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8'] }, a);
+  d = detail(a, mr);
+  c('autoAssign', { eventId: mr, stageId: d.stages[0].id }, a);
+  c('generateMatches', { eventId: mr, stageId: d.stages[0].id }, a);
+  play(a, mr, 0, 99);
+  c('confirmAdvancement', { eventId: mr, stageId: d.stages[0].id }, a);
+  c('generateMatches', { eventId: mr, stageId: d.stages[1].id }, a);
+  play(a, mr, 1, 2);
+  setEvent(a, mr, { isPublic: true, status: 'running' });
+
+  jump();
+  // 4. ポイントシリーズ 8 名・4 節: 第 1 節は終了（不戦勝あり）・第 2 節は中止・第 3 節は途中
+  const se = c('createEvent', { name: 'サンプル: ポイントシリーズ 8 名・4 節', template: 'series_playoff', nights: 4, playoff: 4, nightPoints: [5, 3, 2, 0], rule: { format: 'legs', bestOf: 3 } }, a).eventId;
+  c('importPlayers', { eventId: se, players: people('シリーズ', 8, ['A 店', 'B 店']) }, a);
+  d = detail(a, se);
+  const ss = d.stages[0];
+  c('autoAssign', { eventId: se, stageId: ss.id }, a);
+  c('generateNight', { eventId: se, groupId: ss.nights[0].id }, a);
+  const firstNight = detail(a, se).stages[0].nights[0].rounds[0].matches.find((m) => m.status === 'scheduled');
+  c('saveMatchResult', { matchId: firstNight.id, rev: firstNight.rev, status: 'final', resultType: 'walkover', winnerSide: 1, note: '相手の当日不在（プレビューの例）' }, a);
+  play(a, se, 0, 99);
+  d = detail(a, se);
+  c('cancelNight', { eventId: se, groupId: d.stages[0].nights[1].id, rev: d.stages[0].nights[1].rev, reason: '会場の都合（プレビューの例）' }, a);
+  c('generateNight', { eventId: se, groupId: d.stages[0].nights[2].id }, a);
+  play(a, se, 0, 2);
+  notice(a, se, '第 2 節は会場の都合で中止しました（点なし）。');
+  setEvent(a, se, { isPublic: true, status: 'running', dateLabel: '2026/09〜2026/12' });
+
+  // 5. スイス式 7 名（毎回 1 人が不戦）: 第 1 回戦が終わり、第 2 回戦を組んだところ
+  const sw = c('createEvent', { name: 'サンプル: スイス式 7 名（不戦あり）', template: 'swiss', swissRounds: 3, playoff: 0, rule: { format: 'legs', bestOf: 3 } }, a).eventId;
+  c('addPlayers', { eventId: sw, names: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'] }, a);
+  d = detail(a, sw);
+  c('autoAssign', { eventId: sw, stageId: d.stages[0].id }, a);
+  c('generateSwissRound', { eventId: sw, stageId: d.stages[0].id }, a);
+  play(a, sw, 0, 99);
+  c('generateSwissRound', { eventId: sw, stageId: d.stages[0].id }, a);
+  setEvent(a, sw, { isPublic: true, status: 'running' });
+
+  // 6. 回戦ごとの抽選・途中回戦から出場するシード: 12 名のうち上位 4 名が 2 回戦から。1 回戦が終わり、2 回戦の抽選待ち
+  const rd = c('createEvent', { name: 'サンプル: 回戦ごとの抽選（シードは 2 回戦から）', template: 'elimination', rule: { format: 'legs', bestOf: 3 } }, a).eventId;
+  c('importPlayers', { eventId: rd, players: people('R', 12).map((p, i) => ({ ...p, seed: i < 4 ? String(i + 1) : '' })) }, a);
+  d = detail(a, rd);
+  c('setEntrants', { eventId: rd, stageId: d.stages[0].id, entrants: d.players.map((p, i) => ({ playerId: p.id, startRound: i < 4 ? 2 : 1 })) }, a);
+  d = detail(a, rd);
+  c('updateStage', { stageId: d.stages[0].id, rev: d.stages[0].rev, drawMode: 'redraw', fixedRounds: 0 }, a);
+  c('generateBracket', { eventId: rd, stageId: d.stages[0].id }, a);
+  play(a, rd, 0, 99);
+  setEvent(a, rd, { isPublic: false, status: 'running' });
+
+  // 7. 主催者 B: リーグ（2 ディビジョン・固定 4 Legs で引き分けあり）。予定・延期あり
+  const lg = c('createEvent', { name: 'サンプル: 2 ディビジョンのリーグ（固定 4 Legs）', template: 'league', divisions: 2, rule: { format: 'fixed', bestOf: 4 } }, b).eventId;
+  c('importPlayers', { eventId: lg, players: people('L', 8, ['北', '南']) }, b);
+  d = detail(b, lg);
+  c('autoAssign', { eventId: lg, stageId: d.stages[0].id }, b);
+  c('generateMatches', { eventId: lg, stageId: d.stages[0].id }, b);
+  c('applyWeeklySchedule', { eventId: lg, stageId: d.stages[0].id, startDate: '2026-11-04', weekdays: [3], intervalWeeks: 1, skipDates: ['2026-11-25'], time: '20:00', venue: 'n02 ダーツバー' }, b);
+  play(b, lg, 0, 5);
+  const later = matchesOf(detail(b, lg).stages[0]).find((m) => m.status === 'scheduled');
+  if (later) c('postponeMatch', { matchId: later.id, rev: later.rev, reason: '選手の都合（プレビューの例）' }, b);
+  notice(b, lg, '毎週水曜 20:00 から。延期した試合は日程が決まりしだいお知らせします。', { category: 'soft', startScore: 501, inMode: 'open', outMode: 'open', bull: 'fat', roundLimit: 15, note: '' });
+  setEvent(b, lg, { isPublic: true, status: 'running', dateLabel: '2026/11/04〜' });
+
+  // 8. 主催者 B: リーグ→プレーオフ。リーグ戦が終わり、上位 4 名のプレーオフへの進出を確認できる
+  const lp = c('createEvent', { name: 'サンプル: リーグ→プレーオフ', template: 'league_playoff', divisions: 1, playoff: 4, rule: { format: 'legs', bestOf: 3 } }, b).eventId;
+  c('addPlayers', { eventId: lp, names: ['LP1', 'LP2', 'LP3', 'LP4', 'LP5', 'LP6'] }, b);
+  d = detail(b, lp);
+  c('autoAssign', { eventId: lp, stageId: d.stages[0].id }, b);
+  c('generateMatches', { eventId: lp, stageId: d.stages[0].id }, b);
+  play(b, lp, 0, 99);
+  setEvent(b, lp, { isPublic: true, status: 'running' });
 }
 
 function readLog() {
@@ -332,7 +465,8 @@ function readLog() {
 function boot() {
   let seededAt = Number(load(SEED_KEY));
   if (!seededAt) {
-    seededAt = Date.now() - 30 * 60 * 1000;
+    // サンプルは数時間前に作ったことにする（作成数の制限の 1 時間に、サンプルの分を数えないように）
+    seededAt = Date.now() - 5 * 60 * 60 * 1000;
     save(SEED_KEY, String(seededAt));
     save(LOG_KEY, '[]');
   }

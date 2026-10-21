@@ -4,9 +4,9 @@ name: Tournament PoC
 on:
   push:
     branches: ['**']
-    paths: ['tournament-poc/**', '.github/workflows/tournament-poc.yml']
+    paths: ['tournament-poc/**', '.github/workflows/tournament-poc.yml', 'vercel.json', 'package.json', 'vite.config.ts']
   pull_request:
-    paths: ['tournament-poc/**', '.github/workflows/tournament-poc.yml']
+    paths: ['tournament-poc/**', '.github/workflows/tournament-poc.yml', 'vercel.json', 'package.json', 'vite.config.ts']
 
 concurrency:
   group: tournament-poc-${{ github.ref }}
@@ -42,3 +42,14 @@ jobs:
       - name: End-to-end tests
         working-directory: tournament-poc
         run: npm run e2e
+
+      # PR プレビュー（Vercel）のビルド: n02 本体 + 大会運営の確認用プレビュー（web/dist/tournament/）。
+      # 追跡しているファイル（本番の GitHub Pages の成果物・tournament-poc/dist）を書き換えないこと
+      - name: PR preview build leaves tracked files untouched
+        run: |
+          git status --porcelain > /tmp/tree-before-preview.txt
+          VERCEL_ENV=preview npm run build:preview-host
+          git status --porcelain > /tmp/tree-after-preview.txt
+          diff /tmp/tree-before-preview.txt /tmp/tree-after-preview.txt
+          test -f web/dist/tournament/index.html
+          test -f web/dist/tournament/site/events/index.html
