@@ -49,7 +49,10 @@ export default defineConfig({
         // ...and the navigation fallback must not swallow them: an award asset request is not a
         // navigation, and answering it with index.html would break the <video> rather than let it
         // fall back cleanly.
-        navigateFallbackDenylist: [/\/awards\//, /\/tower\//],
+        // The PR preview host also serves the tournament preview site under /tournament/ (see
+        // tournament-poc/tools/preview-site/vercel-build.mjs); only that build sets the variable, so
+        // the production service worker is unchanged.
+        navigateFallbackDenylist: [/\/awards\//, /\/tower\//, ...(process.env.N02_TOURNAMENT_PREVIEW ? [/\/tournament\//] : [])],
         runtimeCaching: [
           {
             // TOWER scenery: fetched when a band is first shown, then served from the cache. A

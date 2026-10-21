@@ -245,13 +245,49 @@ function assertCanCreate_(user) {
   throw appError_('AUTH_REQUIRED', '大会を作るには、Google でログインしてください。');
 }
 
-/** その大会を運営できるか（管理者・作った本人・その大会の管理パスワードでログインした人） */
-function canManageEvent_(user, event) {
-  if (!user || !event) return false;
-  if (user.isPlatformAdmin) return true;
-  if (user.kind === 'google') return !!event.owner_email && event.owner_email === user.email;
-  if (user.kind === 'staff') return user.eventId === event.event_id;
-  return false;
+/**
+ * 大会ごとの共同主催者（v0.8）のメールアドレス。ctx ごとに 1 回だけ作る。
+ * 毎回シートから読むので、解除するとその人の古いセッションでもすぐに操作できなくなる。
+ */
+function collaboratorIndex_(ctx) {
+  if (!ctx) return {};
+  if (ctx._collab) return ctx._collab;
+  var index = {};
+  ctx.table('Collaborators').rows.forEach(function (r) {
+    var email = normalizeEmail_(r.email);
+    if (!email || !isValidId_(r.event_id)) return;
+    if (!index[r.event_id]) index[r.event_id] = [];
+    if (index[r.event_id].indexOf(email) === -1) index[r.event_id].push(email);
+  });
+  ctx._collab = index;
+  return index;
+}
+
+/**
+ * その大会での役割。admin = 管理者 / owner = 作った本人 / editor = 共同主催者 / staff = 管理パスワード / '' = 権限なし
+ */
+function eventRole_(user, event, ctx) {
+  if (!user || !event) return '';
+  if (user.isPlatformAdmin) return 'admin';
+  if (user.kind === 'google') {
+    if (event.owner_email && event.owner_email === user.email) return 'owner';
+    var list = collaboratorIndex_(ctx)[event.event_id] || [];
+    return list.indexOf(user.email) !== -1 ? 'editor' : '';
+  }
+  if (user.kind === 'staff') return user.eventId === event.event_id ? 'staff' : '';
+  return '';
+}
+
+/** その大会を運営できるか（管理者・作った本人・共同主催者・その大会の管理パスワードでログインした人） */
+function canManageEvent_(user, event, ctx) {
+  return eventRole_(user, event, ctx) !== '';
+}
+
+/** 大会の削除・管理パスワード・共同主催者の管理は、作った本人と管理者だけ */
+function assertOwnerRole_(ctx, eventId, what) {
+  var event = ctx.table('Events').byKey[eventId];
+  var role = eventRole_(ctx.user, event, ctx);
+  if (role !== 'owner' && role !== 'admin') throw appError_('FORBIDDEN', what + 'は、大会を作った本人（Google ログイン）か管理者だけが行えます。');
 }
 
 /**
@@ -275,7 +311,7 @@ function authorizeEventPayload_(ctx, payload) {
   }
   var user = ctx.user;
   var events = ctx.table('Events');
-  if (!canManageEvent_(user, events.duplicates[eventId] ? null : events.byKey[eventId])) {
+  if (!canManageEvent_(user, events.duplicates[eventId] ? null : events.byKey[eventId], ctx)) {
     // 他の大会の存在を知らせないよう「見つからない」と同じ扱いにする
     throw appError_('NOT_FOUND', '大会が見つからないか、この大会を管理する権限がありません。');
   }

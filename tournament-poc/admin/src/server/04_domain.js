@@ -102,7 +102,21 @@ var TIEBREAKERS = Object.freeze({
   set_diff: 'セット差',
   sets_for: '得セット',
   head_to_head: '直接対決',
+  points: '勝ち点', // v0.8: 勝・分・負の点（段階の設定）と手動の加減点
+  buchholz: 'Buchholz', // v0.8: スイス式。対戦相手の勝ち点の合計（不戦は 0）
+  night_wins: '節優勝回数', // v0.8: ポイントシリーズ
 });
+/** 段階の種類ごとに選べる項目（運営画面の選択肢・サーバーの検証） */
+var TIEBREAKERS_FOR_ = {
+  round_robin: ['wins', 'points', 'leg_diff', 'legs_for', 'set_diff', 'sets_for', 'head_to_head'],
+  league: ['wins', 'points', 'leg_diff', 'legs_for', 'set_diff', 'sets_for', 'head_to_head'],
+  swiss: ['points', 'buchholz', 'wins', 'leg_diff', 'legs_for', 'set_diff', 'sets_for', 'head_to_head'],
+  series: ['points', 'night_wins', 'leg_diff', 'legs_for'],
+};
+/** v0.8 で作る段階の既定の順位の決め方（提案値。主催者が変えられる。既存の段階の設定は変えない） */
+var DEFAULT_POINTS_TIEBREAKERS_ = ['points', 'leg_diff', 'head_to_head', 'legs_for'];
+var DEFAULT_SWISS_TIEBREAKERS_ = ['points', 'buchholz', 'leg_diff', 'legs_for'];
+var DEFAULT_SERIES_TIEBREAKERS_ = ['points', 'night_wins', 'leg_diff', 'legs_for'];
 var DEFAULT_TIEBREAKERS_ = ['wins', 'leg_diff', 'head_to_head', 'legs_for'];
 var MAX_ROUND_LABEL_LENGTH_ = 30;
 
@@ -110,15 +124,30 @@ function isPositiveInt_(n) {
   return typeof n === 'number' && isFinite(n) && Math.floor(n) === n && n >= 1;
 }
 
-/** 段階の設定（config_json）を読み、欠けている項目を既定値で補う */
-function stageConfig_(stage) {
-  var c = {};
+function safeJson_(text, fallback) {
+  if (!text) return fallback;
   try {
-    c = stage && stage.config_json ? JSON.parse(stage.config_json) : {};
+    var v = JSON.parse(text);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : fallback;
   } catch (e) {
-    c = {};
+    return fallback;
   }
-  if (!c || typeof c !== 'object' || Array.isArray(c)) c = {};
+}
+
+function isValidPoints_(p) {
+  var ok = function (n) {
+    return typeof n === 'number' && isFinite(n) && Math.floor(n) === n && n >= -99 && n <= 99;
+  };
+  return !!p && ok(p.win) && ok(p.draw) && ok(p.loss);
+}
+
+/**
+ * 段階の設定（config_json）を読み、欠けている項目を既定値で補う。
+ * v0.7 までの段階には v0.8 の項目がないので、従来どおりの動き（勝ち点なし・固定の表など）になる。
+ */
+function stageConfig_(stage) {
+  var c = safeJson_(stage && stage.config_json, {});
+  var type = stage ? stage.type : '';
   var intMap = function (obj, valid) {
     var out = {};
     if (obj && typeof obj === 'object') {
@@ -129,13 +158,22 @@ function stageConfig_(stage) {
     }
     return out;
   };
+  var defaultTb = type === STAGE_TYPE.SWISS ? DEFAULT_SWISS_TIEBREAKERS_ : type === STAGE_TYPE.SERIES ? DEFAULT_SERIES_TIEBREAKERS_ : DEFAULT_TIEBREAKERS_;
+  var allowedTb = TIEBREAKERS_FOR_[type] || Object.keys(TIEBREAKERS);
+  var points = isValidPoints_(c.points) ? { win: c.points.win, draw: c.points.draw, loss: c.points.loss } : null;
+  if (!points && type === STAGE_TYPE.SWISS) points = { win: 2, draw: 1, loss: 0 };
+  var nightPoints = Array.isArray(c.nightPoints)
+    ? c.nightPoints.filter(function (n) {
+        return typeof n === 'number' && isFinite(n) && Math.floor(n) === n && n >= 0 && n <= 999;
+      })
+    : [];
   return {
     cycles: c.cycles === 2 ? 2 : 1,
     tiebreakers: Array.isArray(c.tiebreakers)
       ? c.tiebreakers.filter(function (k, i, arr) {
-          return Object.prototype.hasOwnProperty.call(TIEBREAKERS, k) && arr.indexOf(k) === i;
+          return Object.prototype.hasOwnProperty.call(TIEBREAKERS, k) && allowedTb.indexOf(k) !== -1 && arr.indexOf(k) === i;
         })
-      : DEFAULT_TIEBREAKERS_.slice(),
+      : defaultTb.slice(),
     advancement: Array.isArray(c.advancement)
       ? c.advancement.filter(function (r) {
           return r && isPositiveInt_(r.fromRank) && isPositiveInt_(r.toRank) && r.fromRank <= r.toRank && isValidId_(r.targetStageId);
@@ -148,15 +186,53 @@ function stageConfig_(stage) {
     roundLabels: intMap(c.roundLabels, function (v) {
       return typeof v === 'string' && v.length > 0 && v.length <= MAX_ROUND_LABEL_LENGTH_;
     }),
+    // v0.8: 勝ち点（null は勝ち点を使わない従来の段階）と手動の加減点
+    points: points,
+    adjustments: Array.isArray(c.adjustments)
+      ? c.adjustments.filter(function (a) {
+          return a && isValidId_(a.playerId) && typeof a.points === 'number' && isFinite(a.points) && Math.floor(a.points) === a.points && a.points !== 0;
+        })
+      : [],
+    // 不戦勝の試合の Leg 数: exclude = 数えない（既定）/ award = 勝者に勝利に必要な Leg 数・敗者に 0
+    walkoverLegs: c.walkoverLegs === 'award' ? 'award' : 'exclude',
+    // トーナメント: fixed = 最初に表を作る / redraw = 指定した回戦から回戦ごとに抽選
+    drawMode: c.drawMode === 'redraw' ? 'redraw' : 'fixed',
+    fixedRounds: typeof c.fixedRounds === 'number' && c.fixedRounds >= 0 && c.fixedRounds <= 7 ? Math.floor(c.fixedRounds) : 0,
+    avoidSameGroup: c.avoidSameGroup === true,
+    maxEntrants: isPositiveInt_(c.maxEntrants) && c.maxEntrants <= ADMIN_CONFIG.MAX_ELIMINATION_ENTRANTS ? c.maxEntrants : 0,
+    // ダブルエリミ: reset = 敗者側の選手が勝ったらもう 1 試合 / single = 1 試合のみ
+    grandFinal: c.grandFinal === 'single' ? 'single' : 'reset',
+    // スイス式
+    rounds: isPositiveInt_(c.rounds) && c.rounds <= ADMIN_CONFIG.MAX_SWISS_ROUNDS ? c.rounds : type === STAGE_TYPE.SWISS ? 5 : 0,
+    byePoints: typeof c.byePoints === 'number' && isFinite(c.byePoints) ? c.byePoints : points ? points.win : 0,
+    firstRound: c.firstRound === 'random' ? 'random' : 'seed',
+    pairingLog: Array.isArray(c.pairingLog) ? c.pairingLog : [],
+    // ポイントシリーズ
+    nights: isPositiveInt_(c.nights) && c.nights <= ADMIN_CONFIG.MAX_SERIES_NIGHTS ? c.nights : type === STAGE_TYPE.SERIES ? 16 : 0,
+    nightPoints: nightPoints.length ? nightPoints : [5, 3, 2, 0],
+    nightDraw: c.nightDraw === 'standing' || c.nightDraw === 'seed' ? c.nightDraw : 'random',
+    // 進出（ロビン → ロビン）: 進出先のグループへの配り方
+    distribution: c.distribution === 'rank' ? 'rank' : 'snake',
+    lastDraw: c.lastDraw && typeof c.lastDraw === 'object' ? c.lastDraw : null,
   };
 }
 
 function isGroupStage_(stage) {
+  return !!stage && (stage.type === STAGE_TYPE.ROUND_ROBIN || stage.type === STAGE_TYPE.LEAGUE || stage.type === STAGE_TYPE.SWISS);
+}
+
+/** 総当たり（ロビン・リーグ）。グループの全員が当たる対戦カードを一度に作る段階 */
+function isRoundRobinStage_(stage) {
   return !!stage && (stage.type === STAGE_TYPE.ROUND_ROBIN || stage.type === STAGE_TYPE.LEAGUE);
 }
 
 function isEliminationStage_(stage) {
   return !!stage && stage.type === STAGE_TYPE.SINGLE_ELIMINATION;
+}
+
+/** 勝者（・敗者）が次の試合へ進む段階（トーナメント・ダブルエリミ・シリーズの各節） */
+function isBracketStage_(stage) {
+  return !!stage && (stage.type === STAGE_TYPE.SINGLE_ELIMINATION || stage.type === STAGE_TYPE.DOUBLE_ELIMINATION || stage.type === STAGE_TYPE.SERIES);
 }
 
 /* ---------- 試合ルール（Leg 制・セット制、ラウンドごとの Best of） ---------- */
@@ -173,9 +249,9 @@ function matchSpec_(bundle, match) {
   var stage = bundle.stageById[match.stage_id];
   var rule = (match.rule_id && bundle.ruleById[match.rule_id]) || stageRule_(bundle, stage);
   if (!rule) return null;
-  var format = rule.format === RULE_FORMAT.BEST_OF_SETS ? 'sets' : 'legs';
+  var format = rule.format === RULE_FORMAT.BEST_OF_SETS ? 'sets' : rule.format === RULE_FORMAT.FIXED_LEGS ? 'fixed' : 'legs';
   var bestOf = rule.best_of;
-  if (isEliminationStage_(stage)) {
+  if (isEliminationStage_(stage) && format !== 'fixed') {
     var override = stageConfig_(stage).roundBestOf[String(match.round)];
     if (override) bestOf = override;
   }
@@ -190,6 +266,7 @@ function matchSpec_(bundle, match) {
  */
 function evaluateMatchInput_(status, input, spec) {
   if (!spec) return { ok: false, winnerSide: 0, problems: ['ルールが見つかりません'] };
+  if (spec.format === 'fixed') return evaluateFixedLegs_(status, input.p1Legs, input.p2Legs, spec.bestOf);
   if (spec.format !== 'sets') return evaluateResult_(status, input.p1Legs, input.p2Legs, spec.bestOf);
   if (!isValidBestOf_(spec.setBestOf)) return { ok: false, winnerSide: 0, problems: ['ルールのセット内 Best of 値が不正です'] };
   var base = evaluateResult_(status, input.p1Sets, input.p2Sets, spec.bestOf);
@@ -213,14 +290,46 @@ function evaluateMatchInput_(status, input, spec) {
   return base;
 }
 
+/**
+ * v0.8: 固定 Leg 数（N Legs をすべて投げる。同数なら引き分け）。勝ち抜き戦では使わない（進む選手が決まらないため）
+ *   未開始: 0-0 / 進行中: 合計 < N / 確定: 合計 = N（多い方の勝ち、同数は引き分け winnerSide 0・draw true）
+ */
+function isValidFixedLegs_(n) {
+  return typeof n === 'number' && Math.floor(n) === n && n >= 1 && n <= ADMIN_CONFIG.BEST_OF_MAX;
+}
+
+function evaluateFixedLegs_(status, l1, l2, legs) {
+  if (!isValidFixedLegs_(legs)) return { ok: false, winnerSide: 0, problems: ['ルールの Leg 数が不正です'] };
+  if (l1 === null || l2 === null || l1 === undefined || l2 === undefined || isNaN(l1) || isNaN(l2) || l1 < 0 || l2 < 0 || Math.floor(l1) !== l1 || Math.floor(l2) !== l2) {
+    return { ok: false, winnerSide: 0, problems: ['取得 Leg 数は 0 以上の整数で入力してください'] };
+  }
+  var sum = l1 + l2;
+  if (status === MATCH_STATUS.SCHEDULED) {
+    return l1 === 0 && l2 === 0 ? { ok: true, winnerSide: 0, problems: [] } : { ok: false, winnerSide: 0, problems: ['未開始の試合に Leg 数が入力されています'] };
+  }
+  if (status === MATCH_STATUS.LIVE) {
+    return sum < legs ? { ok: true, winnerSide: 0, problems: [] } : { ok: false, winnerSide: 0, problems: ['合計が ' + legs + ' Leg に達しています。確定済みにしてください'] };
+  }
+  if (status === MATCH_STATUS.FINAL) {
+    if (sum !== legs) return { ok: false, winnerSide: 0, problems: ['確定するには、合計がちょうど ' + legs + ' Leg 必要です（固定 ' + legs + ' Legs）'] };
+    return { ok: true, winnerSide: l1 > l2 ? 1 : l2 > l1 ? 2 : 0, draw: l1 === l2, problems: [] };
+  }
+  return { ok: false, winnerSide: 0, problems: ['試合状態が不正です'] };
+}
+
 /* ---------- 順位 ---------- */
 
 function emptyStats_(pid) {
-  return { playerId: pid, played: 0, won: 0, lost: 0, legsFor: 0, legsAgainst: 0, setsFor: 0, setsAgainst: 0 };
+  return { playerId: pid, played: 0, won: 0, lost: 0, drawn: 0, legsFor: 0, legsAgainst: 0, setsFor: 0, setsAgainst: 0, points: 0, adjustment: 0 };
 }
 
-/** 確定した試合だけで成績を数える */
-function tallyStats_(memberIds, finals) {
+/**
+ * 確定した試合だけで成績を数える。
+ * finals: [{ p1, p2, winner, draw, l1, l2, s1, s2, countLegs }]（countLegs=false は不戦勝などで Leg 数を数えない試合）
+ * cfg.points があれば勝ち点（勝・分・負の点 + 手動の加減点）も数える。ない段階（v0.7 までの大会）は従来どおり
+ */
+function tallyStats_(memberIds, finals, cfg) {
+  var pts = cfg && cfg.points ? cfg.points : null;
   var stats = {};
   memberIds.forEach(function (pid) {
     stats[pid] = emptyStats_(pid);
@@ -231,22 +340,47 @@ function tallyStats_(memberIds, finals) {
     if (!a || !b) return;
     a.played++;
     b.played++;
-    a.legsFor += f.l1 || 0;
-    a.legsAgainst += f.l2 || 0;
-    b.legsFor += f.l2 || 0;
-    b.legsAgainst += f.l1 || 0;
-    a.setsFor += f.s1;
-    a.setsAgainst += f.s2;
-    b.setsFor += f.s2;
-    b.setsAgainst += f.s1;
-    if (f.winner === f.p1) {
+    if (f.countLegs !== false) {
+      a.legsFor += f.l1 || 0;
+      a.legsAgainst += f.l2 || 0;
+      b.legsFor += f.l2 || 0;
+      b.legsAgainst += f.l1 || 0;
+      a.setsFor += f.s1 || 0;
+      a.setsAgainst += f.s2 || 0;
+      b.setsFor += f.s2 || 0;
+      b.setsAgainst += f.s1 || 0;
+    }
+    if (f.draw) {
+      a.drawn++;
+      b.drawn++;
+      if (pts) {
+        a.points += pts.draw;
+        b.points += pts.draw;
+      }
+    } else if (f.winner === f.p1) {
       a.won++;
       b.lost++;
+      if (pts) {
+        a.points += pts.win;
+        b.points += pts.loss;
+      }
     } else {
       b.won++;
       a.lost++;
+      if (pts) {
+        b.points += pts.win;
+        a.points += pts.loss;
+      }
     }
   });
+  if (pts && cfg.adjustments) {
+    cfg.adjustments.forEach(function (adj) {
+      var s = stats[adj.playerId];
+      if (!s) return;
+      s.points += adj.points;
+      s.adjustment += adj.points;
+    });
+  }
   return stats;
 }
 
@@ -257,14 +391,17 @@ function tiebreakValue_(key, pid, block, stats, finals) {
   if (key === 'legs_for') return s.legsFor;
   if (key === 'set_diff') return s.setsFor - s.setsAgainst;
   if (key === 'sets_for') return s.setsFor;
+  if (key === 'points') return s.points || 0;
+  if (key === 'buchholz') return s.buchholz || 0;
+  if (key === 'night_wins') return s.nightWins || 0;
   if (key === 'head_to_head') {
-    // 並んでいる選手どうしの試合だけで数えた勝数
+    // 並んでいる選手どうしの試合だけで数えた勝数（引き分けは数えない）
     var inBlock = {};
     block.forEach(function (id) {
       inBlock[id] = true;
     });
     return finals.filter(function (f) {
-      return f.winner === pid && inBlock[f.p1] && inBlock[f.p2];
+      return !f.draw && !f.bye && f.winner === pid && inBlock[f.p1] && inBlock[f.p2];
     }).length;
   }
   return 0;
@@ -318,29 +455,40 @@ function splitTies_(ids, keys, stats, finals, manual) {
 
 /**
  * グループ（ロビン・リーグ）の順位表。
- * 戻り値: [{ playerId, rank, tied, played, won, lost, legsFor, legsAgainst, setsFor, setsAgainst }]
+ * 戻り値: [{ playerId, rank, tied, played, won, lost, drawn, legsFor, legsAgainst, setsFor, setsAgainst, points? }]
  * tied=true は、設定した項目と手動順位でも決まらず同順位になっている選手。
  */
-function computeStandings_(memberIds, finals, tiebreakers, manual) {
-  var stats = tallyStats_(memberIds, finals);
+function computeStandings_(memberIds, finals, tiebreakers, manual, cfg) {
+  return computeStandingsFromStats_(memberIds, tallyStats_(memberIds, finals, cfg), finals, tiebreakers, manual || {}, cfg);
+}
+
+function computeStandingsFromStats_(memberIds, stats, finals, tiebreakers, manual, cfg) {
   var blocks = splitTies_(memberIds.slice(), tiebreakers, stats, finals, manual || {});
+  var withPoints = !!(cfg && cfg.points) || tiebreakers.indexOf('points') !== -1;
   var out = [];
   var position = 1;
   blocks.forEach(function (b) {
     b.forEach(function (pid) {
       var s = stats[pid];
-      out.push({
+      var row = {
         playerId: pid,
         rank: position,
         tied: b.length > 1,
         played: s.played,
         won: s.won,
         lost: s.lost,
+        drawn: s.drawn || 0,
         legsFor: s.legsFor,
         legsAgainst: s.legsAgainst,
         setsFor: s.setsFor,
         setsAgainst: s.setsAgainst,
-      });
+      };
+      if (withPoints) row.points = s.points || 0;
+      if (s.adjustment) row.adjustment = s.adjustment;
+      if (s.buchholz !== undefined) row.buchholz = s.buchholz;
+      if (s.byes) row.byes = s.byes;
+      if (s.nightWins !== undefined) row.nightWins = s.nightWins;
+      out.push(row);
     });
     position += b.length;
   });
@@ -370,67 +518,7 @@ function roundLabelForElimination_(round, rounds) {
   return round + '回戦';
 }
 
-/**
- * シード順に並んだ出場者からトーナメント表を作る（試合レコードの元データ）。
- * 出場者が 2 のべき乗に満たない枠は不戦勝（Bye）とし、その選手は 2 回戦の枠に直接入れる。
- * 戻り値: [{ key, round, order, label, p1, p2, nextKey, nextSlot, loserNextKey, loserNextSlot }]
- */
-function planBracket_(entrantIds, thirdPlace) {
-  var n = entrantIds.length;
-  if (n < 2) return [];
-  var size = 1;
-  while (size < n) size *= 2;
-  var rounds = Math.round(Math.log(size) / Math.LN2);
-  var pos = seedPositions_(size);
-  var plan = {};
-  var list = [];
-  for (var r = 1; r <= rounds; r++) {
-    var count = size / Math.pow(2, r);
-    for (var k = 0; k < count; k++) {
-      var m = {
-        key: r + '-' + k,
-        round: r,
-        order: k + 1,
-        label: roundLabelForElimination_(r, rounds),
-        p1: '',
-        p2: '',
-        nextKey: r < rounds ? r + 1 + '-' + Math.floor(k / 2) : '',
-        nextSlot: r < rounds ? (k % 2) + 1 : null,
-        loserNextKey: '',
-        loserNextSlot: null,
-        bye: false,
-      };
-      plan[m.key] = m;
-      list.push(m);
-    }
-  }
-  if (thirdPlace && rounds >= 2) {
-    var third = { key: 'third', round: rounds, order: 2, label: '3位決定戦', p1: '', p2: '', nextKey: '', nextSlot: null, loserNextKey: '', loserNextSlot: null, bye: false };
-    plan.third = third;
-    list.push(third);
-    [0, 1].forEach(function (k) {
-      plan[rounds - 1 + '-' + k].loserNextKey = 'third';
-      plan[rounds - 1 + '-' + k].loserNextSlot = k + 1;
-    });
-  }
-  for (var j = 0; j < size / 2; j++) {
-    var first = plan['1-' + j];
-    var a = entrantIds[pos[2 * j] - 1] || '';
-    var b = entrantIds[pos[2 * j + 1] - 1] || '';
-    if (a && b) {
-      first.p1 = a;
-      first.p2 = b;
-    } else {
-      // 不戦勝: 1 回戦は作らず、次の回戦の枠に入れる
-      first.bye = true;
-      var next = plan[first.nextKey];
-      if (next) next['p' + first.nextSlot] = a || b;
-    }
-  }
-  return list.filter(function (m) {
-    return !m.bye;
-  });
-}
+/* planBracket_ は 04b_bracket.js（v0.8 の汎用の組み立て）に移した */
 
 /* ---------- 大会の組み立て ---------- */
 
@@ -501,29 +589,6 @@ function storedInput_(m) {
   return { p1Legs: n(m.player1_legs), p2Legs: n(m.player2_legs), p1Sets: z(m.player1_sets), p2Sets: z(m.player2_sets) };
 }
 
-/**
- * 1 試合の状態を公開用に判定する。シートを直接いじられた場合に備え、保存済みデータも再検証する。
- * 状態: scheduled / live / final / check（要確認）/ pending（トーナメントで対戦相手が未確定）
- */
-function judgeMatch_(bundle, match, playerById, members) {
-  var stage = bundle.stageById[match.stage_id];
-  var input = storedInput_(match);
-  if (isEliminationStage_(stage) && (!match.player1_id || !match.player2_id)) {
-    if (!matchStarted_(match)) return { state: 'pending', input: null, winnerSide: 0, problems: [] };
-  }
-  var problems = [];
-  if (!playerById[match.player1_id] || !playerById[match.player2_id]) problems.push('選手が見つかりません');
-  if (match.player1_id === match.player2_id) problems.push('同じ選手同士の対戦です');
-  if (members && (!members[match.player1_id] || !members[match.player2_id])) {
-    problems.push('この段階・グループに属していない選手が含まれています');
-  }
-  var status = match.status || MATCH_STATUS.SCHEDULED;
-  var result = evaluateMatchInput_(status, input, matchSpec_(bundle, match));
-  problems = problems.concat(result.problems);
-  if (problems.length) return { state: 'check', input: null, winnerSide: 0, problems: problems };
-  return { state: status, input: input, winnerSide: result.winnerSide, problems: [] };
-}
-
 function emptyProgress_() {
   return { total: 0, scheduled: 0, live: 0, final: 0, check: 0, pending: 0 };
 }
@@ -537,6 +602,9 @@ function addProgress_(into, from) {
 function ruleView_(rule) {
   if (!rule) return null;
   var sets = rule.format === RULE_FORMAT.BEST_OF_SETS;
+  if (rule.format === RULE_FORMAT.FIXED_LEGS) {
+    return { name: rule.name, format: 'fixed', bestOf: rule.best_of, setBestOf: null, legsToWin: null, setsToWin: null, provisional: rule.is_provisional };
+  }
   return {
     name: rule.name,
     format: sets ? 'sets' : 'legs',
@@ -548,255 +616,4 @@ function ruleView_(rule) {
   };
 }
 
-/**
- * 運営画面・公開画面の両方で使う、大会の組み立て済みビュー。
- * includePrivate=false のとき、閲覧者に出してよい項目だけを含む。
- */
-function buildEventView_(bundle, includePrivate) {
-  var playerById = {};
-  bundle.players.forEach(function (p) {
-    playerById[p.player_id] = p;
-  });
-  var nameOf = function (pid) {
-    if (!pid) return '';
-    return playerById[pid] ? playerById[pid].display_name : '（不明な選手）';
-  };
-
-  var matchView = function (m, judge, label) {
-    var spec = matchSpec_(bundle, m);
-    var sets = spec && spec.format === 'sets';
-    var out = {
-      id: m.match_id,
-      round: m.round,
-      order: m.order,
-      label: label,
-      bestOf: spec ? spec.bestOf : null,
-      p1: { id: m.player1_id, name: nameOf(m.player1_id), legs: judge.input ? judge.input.p1Legs : null, sets: sets && judge.input ? judge.input.p1Sets : null },
-      p2: { id: m.player2_id, name: nameOf(m.player2_id), legs: judge.input ? judge.input.p2Legs : null, sets: sets && judge.input ? judge.input.p2Sets : null },
-      status: judge.state,
-      winnerId: judge.winnerSide === 1 ? m.player1_id : judge.winnerSide === 2 ? m.player2_id : null,
-    };
-    if (includePrivate) {
-      out.rev = m.rev || 0;
-      out.stageId = m.stage_id;
-      out.groupId = m.group_id;
-      out.storedStatus = m.status;
-      out.storedP1Legs = m.player1_legs;
-      out.storedP2Legs = m.player2_legs;
-      out.storedP1Sets = m.player1_sets;
-      out.storedP2Sets = m.player2_sets;
-      out.problems = judge.problems;
-      out.updatedAt = m.updated_at;
-      out.confirmedAt = m.confirmed_at;
-      out.spec = spec;
-    }
-    return out;
-  };
-
-  var allProgress = emptyProgress_();
-  var stages = bundle.stages.map(function (stage) {
-    var cfg = stageConfig_(stage);
-    var stageMatches = bundle.matches.filter(function (m) {
-      return m.stage_id === stage.stage_id;
-    });
-    var stageEntries = bundle.entries.filter(function (e) {
-      return e.stage_id === stage.stage_id;
-    });
-    var progress = emptyProgress_();
-    var view = {
-      id: stage.stage_id,
-      name: stage.name,
-      type: stage.type,
-      order: stage.order,
-      rule: ruleView_(stageRule_(bundle, stage)),
-    };
-
-    if (isGroupStage_(stage)) {
-      var league = stage.type === STAGE_TYPE.LEAGUE;
-      view.tiebreakers = cfg.tiebreakers;
-      view.advanced = cfg.advanced;
-      view.cycles = cfg.cycles;
-      view.groups = bundle.groups
-        .filter(function (g) {
-          return g.stage_id === stage.stage_id;
-        })
-        .map(function (g) {
-          var groupEntries = stageEntries.filter(function (e) {
-            return e.group_id === g.group_id;
-          });
-          var members = groupEntries.map(function (e) {
-            return e.player_id;
-          });
-          var memberSet = {};
-          var manual = {};
-          groupEntries.forEach(function (e) {
-            memberSet[e.player_id] = true;
-            if (e.manual_order) manual[e.player_id] = e.manual_order;
-          });
-          var gProgress = emptyProgress_();
-          var finals = [];
-          var matches = stageMatches
-            .filter(function (m) {
-              return m.group_id === g.group_id;
-            })
-            .map(function (m) {
-              var judge = judgeMatch_(bundle, m, playerById, memberSet);
-              gProgress.total++;
-              gProgress[judge.state]++;
-              if (judge.state === MATCH_STATUS.FINAL) {
-                finals.push({
-                  p1: m.player1_id,
-                  p2: m.player2_id,
-                  l1: judge.input.p1Legs,
-                  l2: judge.input.p2Legs,
-                  s1: judge.input.p1Sets,
-                  s2: judge.input.p2Sets,
-                  winner: judge.winnerSide === 1 ? m.player1_id : m.player2_id,
-                });
-              }
-              var label = cfg.roundLabels[String(m.round)] || (league ? '第' + m.round + '節' : 'R' + m.round);
-              return matchView(m, judge, label);
-            });
-          addProgress_(progress, gProgress);
-          var standings = computeStandings_(members, finals, cfg.tiebreakers, manual);
-          var group = {
-            id: g.group_id,
-            name: g.name,
-            players: members.map(function (pid) {
-              return { id: pid, name: nameOf(pid) };
-            }),
-            standings: standings,
-            // 互換用（旧閲覧ページは summary を読む）
-            summary: standings,
-            complete: gProgress.total > 0 && gProgress.final === gProgress.total,
-            progress: gProgress,
-            matches: matches,
-          };
-          if (includePrivate) group.rev = g.rev || 0;
-          return group;
-        });
-    } else if (isEliminationStage_(stage)) {
-      view.thirdPlace = cfg.thirdPlace;
-      view.roundBestOf = cfg.roundBestOf;
-      var rounds = {};
-      var champion = null;
-      stageMatches.forEach(function (m) {
-        var judge = judgeMatch_(bundle, m, playerById, null);
-        progress.total++;
-        progress[judge.state]++;
-        var key = String(m.round);
-        if (!rounds[key]) rounds[key] = { round: m.round, label: '', matches: [] };
-        var mv = matchView(m, judge, m.label || m.round + '回戦');
-        rounds[key].matches.push(mv);
-        if (m.label === '決勝' && mv.winnerId) champion = { id: mv.winnerId, name: nameOf(mv.winnerId) };
-      });
-      view.rounds = Object.keys(rounds)
-        .map(function (k) {
-          var r = rounds[k];
-          var main = r.matches.filter(function (x) {
-            return x.label !== '3位決定戦';
-          })[0];
-          r.label = main ? main.label : r.matches[0].label;
-          return r;
-        })
-        .sort(function (a, b) {
-          return a.round - b.round;
-        });
-      view.champion = champion;
-      view.entrants = stageEntries.map(function (e) {
-        return { id: e.player_id, name: nameOf(e.player_id), seed: e.seed, source: e.source_label || '' };
-      });
-    }
-    addProgress_(allProgress, progress);
-    view.progress = progress;
-    if (includePrivate) {
-      var rule = stageRule_(bundle, stage);
-      view.rev = stage.rev || 0;
-      view.config = cfg;
-      view.ruleId = rule ? rule.rule_id : '';
-      view.ruleRev = rule ? rule.rev || 0 : 0;
-      view.ruleProvisional = rule ? rule.is_provisional : false;
-      view.matchCount = stageMatches.length;
-      view.hasResults = stageMatches.some(matchStarted_);
-      view.entryCount = stageEntries.length;
-      view.entries = stageEntries.map(function (e) {
-        return { playerId: e.player_id, groupId: e.group_id, seed: e.seed, manualOrder: e.manual_order, source: e.source_label || '' };
-      });
-      view.feeds = bundle.stages
-        .filter(function (s) {
-          return stageConfig_(s).advancement.some(function (r) {
-            return r.targetStageId === stage.stage_id;
-          });
-        })
-        .map(function (s) {
-          return s.stage_id;
-        });
-    }
-    return view;
-  });
-
-  var lastUpdated = '';
-  bundle.matches.forEach(function (m) {
-    if (m.updated_at && m.updated_at > lastUpdated) lastUpdated = m.updated_at;
-  });
-  if (bundle.event.updated_at > lastUpdated) lastUpdated = bundle.event.updated_at;
-
-  var firstGroupStage = stages.filter(function (s) {
-    return s.groups;
-  })[0];
-  var view = {
-    event: {
-      id: bundle.event.event_id,
-      name: bundle.event.name,
-      dateLabel: bundle.event.date_label,
-      status: bundle.event.status,
-      // 登録選手の人数（名前やメモは含まない。ポータルの一覧に出す）
-      playerCount: bundle.players.length,
-    },
-    rule: ruleView_(bundle.rule),
-    stages: stages,
-    // 互換用（旧閲覧ページ・旧運営画面は最初のロビンの groups を読む）
-    stage: bundle.stage ? { id: bundle.stage.stage_id, name: bundle.stage.name, type: bundle.stage.type } : null,
-    groups: firstGroupStage ? firstGroupStage.groups : [],
-    progress: allProgress,
-    dataUpdatedAt: lastUpdated,
-  };
-  if (includePrivate) {
-    view.event.rev = bundle.event.rev || 0;
-    view.event.isPublic = bundle.event.is_public;
-    view.event.isFeatured = bundle.event.is_featured;
-    view.event.isSample = bundle.event.is_sample;
-    view.event.organizerName = bundle.event.organizer_name;
-    view.event.ownerEmail = bundle.event.owner_email;
-    view.event.staffPasswordSet = !!bundle.event.staff_pass_hash;
-    view.event.staffPasswordSetAt = bundle.event.staff_pass_set_at;
-    view.event.notes = bundle.event.notes;
-    if (view.rule && bundle.rule) {
-      view.rule.id = bundle.rule.rule_id;
-      view.rule.rev = bundle.rule.rev || 0;
-      view.rule.notes = bundle.rule.notes;
-    }
-    view.tiebreakerLabels = TIEBREAKERS;
-    view.players = bundle.players.map(function (p) {
-      var memberships = bundle.entries.filter(function (e) {
-        return e.player_id === p.player_id;
-      });
-      var first = memberships.filter(function (e) {
-        return firstGroupStage && e.stage_id === firstGroupStage.id;
-      })[0];
-      return {
-        id: p.player_id,
-        name: p.display_name,
-        rev: p.rev || 0,
-        groupId: first ? first.group_id : '',
-        stageIds: memberships.map(function (e) {
-          return e.stage_id;
-        }),
-        matchCount: bundle.matches.filter(function (m) {
-          return m.player1_id === p.player_id || m.player2_id === p.player_id;
-        }).length,
-      };
-    });
-  }
-  return view;
-}
+/* buildEventView_ は 04e_view.js（v0.8）に移した */

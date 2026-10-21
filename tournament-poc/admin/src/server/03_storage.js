@@ -41,14 +41,30 @@ function headerOf_(sheet) {
   return header;
 }
 
+/** 列の定義のうち、その版のスキーマで追加された列か（移行前のシートにはない） */
+function columnSince_(col) {
+  return col[2] || 1;
+}
+
+/** 移行前でも読めるよう、表の定義のうち since が新しいシート・列は無くてもよい */
+function isOptionalColumn_(col) {
+  return columnSince_(col) > 1;
+}
+
 /**
  * シートを読み、列定義に従って型をそろえたレコードの配列にする。
  * 見出しで列を引くので、列の順番が変わっても動く。主キーが空の行は無視する。
+ *
+ * v0.8: 読んだ表はメモリ上で変更し（appendRecords_ / updateRecord_ / deleteRecords_）、操作の最後に
+ * commitContext_ でまとめて書き込む。途中で検証に失敗した操作は何も書き込まない。
  */
 function readTable_(ss, name) {
   var def = SCHEMA[name];
   var sheet = ss.getSheetByName(name);
-  if (!sheet) throw appError_('NOT_INITIALIZED', 'シート「' + name + '」がありません。初期化を実行してください。');
+  if (!sheet) {
+    if ((def.since || 1) > 1) return emptyTable_(name, null);
+    throw appError_('NOT_INITIALIZED', 'シート「' + name + '」がありません。初期化を実行してください。');
+  }
   var lastRow = sheet.getLastRow();
   var lastCol = sheet.getLastColumn();
   if (lastRow < 1 || lastCol < 1) {
@@ -62,43 +78,63 @@ function readTable_(ss, name) {
   headers.forEach(function (h, i) {
     if (h && index[h] === undefined) index[h] = i;
   });
+  var missing = [];
   def.columns.forEach(function (c) {
-    if (index[c[0]] === undefined) {
-      throw appError_('NOT_INITIALIZED', 'シート「' + name + '」に列「' + c[0] + '」がありません。初期化を実行してください。');
-    }
+    if (index[c[0]] !== undefined) return;
+    if (isOptionalColumn_(c)) missing.push(c[0]);
+    else throw appError_('NOT_INITIALIZED', 'シート「' + name + '」に列「' + c[0] + '」がありません。初期化を実行してください。');
   });
 
-  var rows = [];
-  var byKey = {};
-  var duplicates = {};
+  var table = emptyTable_(name, sheet);
+  table.headers = headers;
+  table.index = index;
+  table.width = lastCol;
+  table.lastRow = lastRow;
+  table.missing = missing;
   for (var r = 1; r < values.length; r++) {
     var raw = values[r];
     var key = coerceCell_(raw[index[def.key]], 'text').trim();
     if (!key) continue;
     var rec = { _row: r + 1, _raw: raw };
     def.columns.forEach(function (c) {
-      rec[c[0]] = coerceCell_(raw[index[c[0]]], c[1]);
+      rec[c[0]] = coerceCell_(index[c[0]] === undefined ? '' : raw[index[c[0]]], c[1]);
     });
     rec[def.key] = key;
-    if (byKey[key]) {
-      duplicates[key] = true;
-    } else {
-      byKey[key] = rec;
-    }
-    rows.push(rec);
+    table.rows.push(rec);
   }
+  reindexTable_(table);
+  return table;
+}
+
+function emptyTable_(name, sheet) {
   return {
     name: name,
-    def: def,
+    def: SCHEMA[name],
     sheet: sheet,
-    headers: headers,
-    index: index,
-    width: lastCol,
-    lastRow: lastRow,
-    rows: rows,
-    byKey: byKey,
-    duplicates: duplicates,
+    headers: [],
+    index: {},
+    width: 0,
+    lastRow: 1,
+    missing: [],
+    rows: [],
+    byKey: {},
+    duplicates: {},
+    // 書き込み待ち
+    added: [],
+    deleted: [],
+    changed: false,
   };
+}
+
+/** 主キーの索引を作り直す（行の追加・削除の後） */
+function reindexTable_(table) {
+  var key = table.def.key;
+  table.byKey = {};
+  table.duplicates = {};
+  table.rows.forEach(function (rec) {
+    if (table.byKey[rec[key]]) table.duplicates[rec[key]] = true;
+    else table.byKey[rec[key]] = rec;
+  });
 }
 
 /** 主キーで 1 件取り出す。重複している ID は壊れたデータとして扱い、書き込ませない。 */
@@ -122,6 +158,7 @@ function rowValues_(table, rec, base) {
   var out = base ? base.slice(0, table.width) : [];
   while (out.length < table.width) out.push('');
   table.def.columns.forEach(function (c) {
+    if (table.index[c[0]] === undefined) return;
     if (Object.prototype.hasOwnProperty.call(rec, c[0])) {
       out[table.index[c[0]]] = toCell_(rec[c[0]], c[1]);
     }
@@ -129,34 +166,81 @@ function rowValues_(table, rec, base) {
   return out;
 }
 
-/** 既存行を 1 行まるごと書き戻す（定義外の列は読み込んだ値のまま残す）。 */
+/** 既存行の変更を書き込み待ちにする（定義外の列は読み込んだ値のまま残す）。 */
 function updateRecord_(table, rec) {
+  if (rec._new) return; // まだ書いていない行は、追加のときに今の値で書く
   if (!rec._row) throw appError_('INTERNAL', '更新対象の行が不明です。');
-  table.sheet.getRange(rec._row, 1, 1, table.width).setValues([rowValues_(table, rec, rec._raw)]);
+  rec._dirty = true;
+  table.changed = true;
 }
 
 function appendRecords_(table, records) {
   if (!records.length) return;
-  var sheet = table.sheet;
-  var start = sheet.getLastRow() + 1;
-  var needed = start + records.length - 1 - sheet.getMaxRows();
-  if (needed > 0) {
-    var firstNew = sheet.getMaxRows() + 1;
-    sheet.insertRowsAfter(sheet.getMaxRows(), needed);
-    applyTextFormats_(sheet, table.def, table.index, firstNew, needed);
-  }
-  var values = records.map(function (rec) {
-    return rowValues_(table, rec, null);
+  records.forEach(function (rec) {
+    rec._new = true;
+    table.rows.push(rec);
+    table.added.push(rec);
   });
-  sheet.getRange(start, 1, values.length, table.width).setValues(values);
+  table.changed = true;
+  reindexTable_(table);
+}
+
+/** 行を削除待ちにする（書き込みは commitContext_）。 */
+function deleteRecords_(table, records) {
+  if (!records.length) return;
+  var gone = [];
+  records.forEach(function (rec) {
+    if (!rec || rec._deleted) return;
+    rec._deleted = true;
+    gone.push(rec);
+    if (rec._new) {
+      table.added = table.added.filter(function (x) {
+        return x !== rec;
+      });
+    } else {
+      table.deleted.push(rec);
+    }
+  });
+  if (!gone.length) return;
+  table.rows = table.rows.filter(function (rec) {
+    return !rec._deleted;
+  });
+  table.changed = true;
+  reindexTable_(table);
+}
+
+/* ---------- 書き込み（まとめて） ---------- */
+
+function writeUpdates_(table) {
+  var dirty = table.rows
+    .filter(function (rec) {
+      return rec._dirty && rec._row && !rec._deleted;
+    })
+    .sort(function (a, b) {
+      return a._row - b._row;
+    });
+  var i = 0;
+  while (i < dirty.length) {
+    var block = [dirty[i]];
+    while (i + 1 < dirty.length && dirty[i + 1]._row === block[block.length - 1]._row + 1) {
+      i++;
+      block.push(dirty[i]);
+    }
+    table.sheet.getRange(block[0]._row, 1, block.length, table.width).setValues(
+      block.map(function (rec) {
+        return rowValues_(table, rec, rec._raw);
+      })
+    );
+    i++;
+  }
 }
 
 /**
  * 行を消す。行番号の大きい順に、連続した行はまとめて消す（先に上を消すと下の行番号がずれるため）。
  * 見出し以外の行をすべて消すとスプレッドシートがエラーにするので、その場合は先に空の行を 1 行足しておく。
  */
-function deleteRecords_(table, records) {
-  var rows = records
+function writeDeletes_(table) {
+  var rows = table.deleted
     .map(function (r) {
       return r._row;
     })
@@ -179,6 +263,61 @@ function deleteRecords_(table, records) {
   }
 }
 
+function writeAppends_(table) {
+  var records = table.added;
+  if (!records.length) return;
+  var sheet = table.sheet;
+  var start = sheet.getLastRow() + 1;
+  var needed = start + records.length - 1 - sheet.getMaxRows();
+  if (needed > 0) {
+    var firstNew = sheet.getMaxRows() + 1;
+    sheet.insertRowsAfter(sheet.getMaxRows(), needed);
+    applyTextFormats_(sheet, table.def, table.index, firstNew, needed);
+  }
+  var values = records.map(function (rec) {
+    return rowValues_(table, rec, null);
+  });
+  sheet.getRange(start, 1, values.length, table.width).setValues(values);
+}
+
+/**
+ * 書き込み待ちの変更をシートへ書く。順番は、途中で止まっても後からやり直しやすいように
+ * 公開データの削除 → 大会に属する行 → 大会の行 → 履歴 → 公開データの更新。
+ * 各表の中では 更新 → 削除 → 追加（更新は読み込んだときの行番号で書くため、削除より先）。
+ */
+var COMMIT_ORDER_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators', 'Events', 'History'];
+
+function commitContext_(ctx) {
+  var tables = ctx.loadedTables();
+  var pending = Object.keys(tables).filter(function (n) {
+    return tables[n].changed;
+  });
+  if (!pending.length) return { tables: [] };
+  pending.forEach(function (n) {
+    if (!tables[n].sheet) throw appError_('MIGRATION_REQUIRED', 'データの保存先の更新（移行）が終わっていません。管理者に連絡してください。');
+    if (tables[n].missing.length) throw appError_('MIGRATION_REQUIRED', 'データの保存先の更新（移行）が終わっていません。管理者に連絡してください。');
+  });
+  var snap = tables.PublicSnapshots;
+  var snapOnlyDeletes = snap && snap.changed && !snap.added.length && !snap.rows.some(function (r) {
+    return r._dirty;
+  });
+  var order = (snapOnlyDeletes ? ['PublicSnapshots'] : []).concat(COMMIT_ORDER_).concat(snap && snap.changed && !snapOnlyDeletes ? ['PublicSnapshots'] : []);
+  pending.forEach(function (n) {
+    if (order.indexOf(n) === -1) order.push(n);
+  });
+  var done = [];
+  order.forEach(function (n) {
+    var table = tables[n];
+    if (!table || !table.changed) return;
+    writeUpdates_(table);
+    writeDeletes_(table);
+    writeAppends_(table);
+    table.changed = false;
+    done.push(n);
+  });
+  return { tables: done };
+}
+
 function applyTextFormats_(sheet, def, index, fromRow, count) {
   if (count < 1) return;
   def.columns.forEach(function (c) {
@@ -194,7 +333,7 @@ function applyTextFormats_(sheet, def, index, fromRow, count) {
  * - まだ初期化されていないスプレッドシートに管理対象外のデータがあれば中止する
  *   （既存の大会ファイルなどを誤って指定した場合に書き込まないため）
  */
-function initializeStorage_(ss) {
+function initializeStorage_(ss, options) {
   var sheets = ss.getSheets();
   var byName = {};
   sheets.forEach(function (s) {
@@ -205,7 +344,7 @@ function initializeStorage_(ss) {
   var alreadyInitialized = !!byName.Events && headerOf_(byName.Events).indexOf('event_id') !== -1;
   if (!alreadyInitialized) {
     sheets.forEach(function (s) {
-      if (SCHEMA[s.getName()]) return;
+      if (SCHEMA[s.getName()] || s.getName().indexOf(BACKUP_PREFIX_) === 0) return;
       if (s.getLastRow() > 0 || s.getLastColumn() > 0) {
         problems.push('管理対象外のシート「' + s.getName() + '」にデータがあります');
       }
@@ -260,7 +399,11 @@ function initializeStorage_(ss) {
     if (sheet.getMaxRows() > 1) applyTextFormats_(sheet, def, index, 2, sheet.getMaxRows() - 1);
   });
 
-  PropertiesService.getScriptProperties().setProperty('SCHEMA_VERSION', String(ADMIN_CONFIG.SCHEMA_VERSION));
+  // 空の保存先を初めて初期化したときは、データの移し替えが要らないので最新の版にする。
+  // 既存のデータがある保存先の版は migrateStorage_ が（バックアップと件数の確認の後に）上げる
+  if (!(options && options.keepVersion) && !alreadyInitialized) {
+    PropertiesService.getScriptProperties().setProperty('SCHEMA_VERSION', String(ADMIN_CONFIG.SCHEMA_VERSION));
+  }
   return { created: created, extended: extended };
 }
 
@@ -270,6 +413,9 @@ function getStorageStatus_() {
     configured: false,
     accessible: false,
     initialized: false,
+    migrationRequired: false,
+    schemaVersion: storedSchemaVersion_(),
+    appSchemaVersion: ADMIN_CONFIG.SCHEMA_VERSION,
     spreadsheetId: '',
     spreadsheetName: '',
     missing: [],
@@ -291,24 +437,112 @@ function getStorageStatus_() {
   }
   status.accessible = true;
   status.spreadsheetName = ss.getName();
+  var required = [];
   SHEET_ORDER.forEach(function (name) {
     var sheet = ss.getSheetByName(name);
+    var def = SCHEMA[name];
     if (!sheet) {
       status.missing.push(name);
+      if ((def.since || 1) <= 1) required.push(name);
       return;
     }
     var header = headerOf_(sheet);
-    var lacking = SCHEMA[name].columns.filter(function (c) {
+    var lacking = def.columns.filter(function (c) {
       return header.indexOf(c[0]) === -1;
     });
     if (lacking.length) status.missing.push(name + '（列不足）');
+    if (lacking.some(function (c) { return !isOptionalColumn_(c); })) required.push(name);
   });
-  status.initialized = status.missing.length === 0;
-  status.message = status.initialized ? '' : '初期化が必要です。';
+  // v0.7 までの列がそろっていれば、移行前でも画面は開ける（書き込みだけを移行まで止める）
+  status.initialized = required.length === 0;
+  status.migrationRequired = status.initialized && (status.missing.length > 0 || status.schemaVersion < ADMIN_CONFIG.SCHEMA_VERSION);
+  status.message = !status.initialized ? '初期化が必要です。' : status.migrationRequired ? '保存先の更新（移行）が必要です。' : '';
   return status;
 }
 
-/** 1 リクエスト内でテーブルの読み込みを使い回すための入れ物 */
+function storedSchemaVersion_() {
+  var v = Number(PropertiesService.getScriptProperties().getProperty('SCHEMA_VERSION') || 0);
+  return isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+
+/** 書き込みの前に、保存先がこの版のスキーマに移行済みかを確かめる */
+function assertSchemaCurrent_() {
+  if (storedSchemaVersion_() < ADMIN_CONFIG.SCHEMA_VERSION) {
+    throw appError_('MIGRATION_REQUIRED', '新しい版に合わせた保存先の更新（移行）が終わるまで、変更は保存できません。しばらくしてからもう一度お試しください（閲覧はできます）。');
+  }
+}
+
+/* ---------- 移行（スキーマの版を上げる） ---------- */
+
+var BACKUP_PREFIX_ = 'bak-';
+
+/**
+ * 保存先を ADMIN_CONFIG.SCHEMA_VERSION に移行する。管理者の鍵でだけ呼べる（migrateStorage 操作）。
+ * 1. 移行前の件数を数える  2. 各シートを同じスプレッドシート内に複製してバックアップ
+ * 3. 足りないシート・列を追加（initializeStorage_ と同じ。既存の列・値は動かさない）
+ * 4. 件数が変わっていないことを確かめてから SCHEMA_VERSION を上げる
+ * 何度呼んでも安全（移行済みなら何もしない）。途中で失敗しても、既存の列・値は変わっていない。
+ * 公開閲覧（閲覧者用 Web アプリ）からは呼ばれない。
+ */
+function migrateStorage_(ss, actor) {
+  var props = PropertiesService.getScriptProperties();
+  var from = storedSchemaVersion_();
+  var to = ADMIN_CONFIG.SCHEMA_VERSION;
+  var status = getStorageStatus_();
+  if (!status.initialized) throw appError_('NOT_INITIALIZED', '保存先が初期化されていません。先に「初期化する」を実行してください。');
+  if (from >= to && !status.migrationRequired) return { from: from, to: to, migrated: false, message: '移行済みです。' };
+
+  var counts = {};
+  SHEET_ORDER.forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    counts[name] = sheet ? readTable_(ss, name).rows.length : 0;
+  });
+  var stamp = nowIso_().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  var state = { from: from, to: to, status: 'running', startedAt: nowIso_(), backups: [], counts: counts, by: actor };
+  props.setProperty('MIGRATION_STATE', JSON.stringify(state));
+  SHEET_ORDER.forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    var copy = sheet.copyTo(ss);
+    var backupName = BACKUP_PREFIX_ + 's' + from + '-' + stamp + '-' + name;
+    copy.setName(backupName);
+    state.backups.push(backupName);
+  });
+  props.setProperty('MIGRATION_STATE', JSON.stringify(state));
+  var init = initializeStorage_(ss, { keepVersion: true });
+  var after = {};
+  var mismatch = [];
+  SHEET_ORDER.forEach(function (name) {
+    after[name] = readTable_(ss, name).rows.length;
+    if (after[name] !== counts[name]) mismatch.push(name + ' ' + counts[name] + '→' + after[name]);
+  });
+  if (mismatch.length) {
+    state.status = 'failed';
+    state.problem = mismatch.join(', ');
+    props.setProperty('MIGRATION_STATE', JSON.stringify(state));
+    throw appError_('MIGRATION_FAILED', '移行後の件数が一致しません（' + state.problem + '）。バックアップ（' + state.backups.join('、') + '）から確認してください。');
+  }
+  props.setProperty('SCHEMA_VERSION', String(to));
+  state.status = 'done';
+  state.finishedAt = nowIso_();
+  state.added = init;
+  props.setProperty('MIGRATION_STATE', JSON.stringify(state));
+  return { from: from, to: to, migrated: true, backups: state.backups, added: init, counts: after };
+}
+
+function migrationState_() {
+  try {
+    return JSON.parse(PropertiesService.getScriptProperties().getProperty('MIGRATION_STATE') || 'null');
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * 1 リクエスト内でテーブルの読み込みを使い回す入れ物。
+ * v0.8: 変更はメモリ上の表に入り、commitContext_ でまとめて書く。invalidate は互換のために残しているが、
+ * 表はいつも書き込み待ちの変更を含めた最新の内容なので、読み直しはしない。
+ */
 function createContext_(ss, actor, user) {
   var cache = {};
   return {
@@ -321,9 +555,9 @@ function createContext_(ss, actor, user) {
       if (!cache[name]) cache[name] = readTable_(ss, name);
       return cache[name];
     },
-    invalidate: function (name) {
-      if (name) delete cache[name];
-      else cache = {};
+    invalidate: function () {},
+    loadedTables: function () {
+      return cache;
     },
   };
 }
@@ -352,7 +586,6 @@ function flushHistory_(ctx) {
   });
   appendRecords_(table, ctx.history);
   ctx.history = [];
-  ctx.invalidate('History');
 }
 
 /** 記録から画面・履歴に出す値だけを取り出す（_row などの内部情報を除く） */

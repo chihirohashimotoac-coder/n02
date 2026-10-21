@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/deploy-to-root.mjs",
     "build:preview": "tsc -b && vite build",
+    "build:preview-host": "node tournament-poc/tools/preview-site/vercel-build.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc -b --force",

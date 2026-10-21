@@ -78,7 +78,7 @@ test('公開一覧の要約: 人数・試合数・確定数・進捗率・形式
   assert.equal(s.finalCount, d.progress.final);
   assert.equal(s.liveCount, d.progress.live);
   assert.equal(s.progress.percent, Math.floor((d.progress.final * 100) / d.progress.total));
-  assert.deepEqual(s.format, { kind: 'robin', label: 'ロビン', flow: 'ロビン' });
+  assert.deepEqual(s.format, { kind: 'robin', label: 'ロビン', flow: 'ロビン', id: 'robin' });
   assert.equal(s.currentStage.name, d.stages[0].name);
   assert.equal(s.currentStage.state, 'running');
   assert.match(s.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -146,7 +146,7 @@ test('進捗率: まだトーナメント表がない段階があるときは 10
   assert.ok(s.progress.percent < 100, `percent=${s.progress.percent}`);
   assert.equal(s.progress.pendingStages, 2);
   assert.equal(s.progress.partial, true);
-  assert.deepEqual(s.format, { kind: 'mixed', label: '複合', flow: 'ロビン → トーナメント' });
+  assert.deepEqual(s.format, { kind: 'mixed', label: '複合', flow: 'ロビン → トーナメント', id: 'robin_ab' });
   assert.equal(s.currentStage.name, A.name);
   assert.equal(s.currentStage.state, 'ungenerated');
 
@@ -184,7 +184,7 @@ test('作成した大会: Google でログインした本人の大会だけを�
   const priv = mine.events.find((e) => e.id === a2);
   assert.equal(priv.isPublic, false);
   assert.equal(priv.status, 'draft');
-  assert.deepEqual(priv.format, { kind: 'tournament', label: 'トーナメント', flow: 'トーナメント' });
+  assert.deepEqual(priv.format, { kind: 'tournament', label: 'トーナメント', flow: 'トーナメント', id: 'elimination' });
   assert.equal(priv.playerCount, 0);
   assert.equal(mine.events.find((e) => e.id === a1).isPublic, true);
   assert.ok(!JSON.stringify(mine).includes('BOB-SECRET'));

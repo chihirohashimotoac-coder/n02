@@ -1316,3 +1316,32 @@ body.qr-forced .qr-panel {
     opacity: 0;
   }
 }
+
+/* v0.8: お知らせ・ルールの表示 */
+.notice-board { display: grid; gap: 8px; margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+.notice-board__title { margin: 0 0 4px; font-size: 15px; }
+.notice-board__text { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.notice-board__rule { margin: 0; font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
+
+/* v0.8: 試合の予定・延期・特殊な結果 */
+.match__schedule { grid-column: 1 / -1; font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
+.match--postponed .match__schedule { color: var(--live, #a45a00); font-weight: 700; }
+.match--bye { opacity: .75; }
+.status--bye, .status--void { background: var(--sched-bg, #ecebe6); color: var(--ink-2); }
+.summary__aff { display: block; font-size: 11px; font-weight: 400; color: var(--ink-2); }
+
+/* v0.8: ダブルエリミネーション・ポイントシリーズ */
+.side-title { margin: 16px 0 6px; font-size: 15px; }
+.round-columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 6px; }
+.round-columns__col { min-width: 0; }
+.table-scroll { overflow-x: auto; }
+.series-table .series__night { text-align: center; min-width: 2.2em; font-variant-numeric: tabular-nums; }
+.night { margin-top: 14px; }
+
+/* v0.8: 印刷するときは、更新ボタン・QR・絞り込みを出さない */
+@media print {
+  .statusbar, .refresh, .qr-panel, .qr-overlay, .filter, .player-search, .to-portal, .banner { display: none !important; }
+  body { background: #fff; color: #000; }
+  .group, .stage, .night { break-inside: avoid-page; }
+  .bracket__scroll, .round-columns, .table-scroll { overflow: visible; }
+}

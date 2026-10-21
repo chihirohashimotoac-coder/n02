@@ -19,6 +19,8 @@ function buildPublicSnapshot_(bundle) {
  * 大会の公開状態をシートへ反映する。書き込み系の操作の最後に必ず呼ぶ。
  * - 公開中: 公開データを作り直して保存（内容が同じなら書き込まない）
  * - 非公開: 公開データの行を削除する（閲覧画面から消える）
+ * v0.8: 他の変更と同じく書き込み待ちにするだけで、シートへは commitContext_ が書く。
+ * 公開データが上限を超えるときは、その操作ごと保存しない（TOO_LARGE）。
  */
 function syncPublication_(ctx, eventId) {
   ctx.invalidate();
@@ -37,6 +39,7 @@ function syncPublication_(ctx, eventId) {
   }
 
   var json = JSON.stringify(buildPublicSnapshot_(bundle));
+  assertSnapshotSize_(json);
   var version = md5Hex_(json);
   var existing = rows[0] || null;
   if (rows.length > 1) {
@@ -53,9 +56,7 @@ function syncPublication_(ctx, eventId) {
   var size = ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE;
   var chunks = [];
   for (var i = 0; i < json.length; i += size) chunks.push(SNAPSHOT_CHUNK_PREFIX_ + json.slice(i, i + size));
-  if (chunks.length > ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS) {
-    throw appError_('TOO_LARGE', '公開データが大きすぎます（' + json.length + ' 文字）。');
-  }
+  if (chunks.length > ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS) assertSnapshotSize_(json, true);
   var rec = {
     event_id: eventId,
     is_default: bundle.event.is_featured,
@@ -76,6 +77,24 @@ function syncPublication_(ctx, eventId) {
   }
   ctx.invalidate('PublicSnapshots');
   return { published: true, version: version, publishedAt: ctx.now, unchanged: false };
+}
+
+/** 公開データの大きさの確認。上限を超えるなら、その操作を保存しない */
+function assertSnapshotSize_(json, force) {
+  var limit = Math.min(ADMIN_CONFIG.MAX_SNAPSHOT_CHARS, ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE * ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS);
+  if (force || json.length > limit) {
+    throw appError_(
+      'TOO_LARGE',
+      '閲覧ページの公開データが上限を超えるため、この変更は保存していません（' + json.length + ' 文字 / 上限 ' + limit + ' 文字）。段階・グループを分けるか、大会を非公開にしてから操作してください。'
+    );
+  }
+}
+
+/** 公開データの大きさの目安（運営画面の表示用。公開していない大会でも、公開したときの大きさを返す） */
+function snapshotBudget_(bundle) {
+  var limit = Math.min(ADMIN_CONFIG.MAX_SNAPSHOT_CHARS, ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE * ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS);
+  var size = JSON.stringify(buildPublicSnapshot_(bundle)).length;
+  return { size: size, limit: limit, percent: Math.floor((size * 100) / limit) };
 }
 
 /** 公開状態の概要（運営画面の表示用） */
