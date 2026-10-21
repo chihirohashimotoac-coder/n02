@@ -47,7 +47,7 @@
 | 閲覧者用 Web アプリ | Apps Script「n02 Tournament Viewer」…`AKfycbyI8B7e…/exec`（Pages の `config.js`） |
 | 運営用 Web アプリ | Apps Script「n02 Tournament Admin」…`AKfycbwC41CD…/exec`（Pages の `admin/config.js`） |
 | 保存先 | スプレッドシート「Tournament PoC」（ID はスクリプト プロパティ `SPREADSHEET_ID`。ソースに書かない） |
-| ユーザー向け手順ページ | https://claude.ai/artifact/KekprKNKYKrHwd1MuaVke5 （コピーボタン付き。更新のたびに作り直している） |
+| ユーザー向け手順ページ | v0.5.0: https://claude.ai/artifact/T1DVKPSYzyE2EU93ox7Uon （G: Google Cloud・A: Apps Script・C: 連絡・T: 動作確認。コピーボタン付き）。v0.4.1 までは https://claude.ai/artifact/KekprKNKYKrHwd1MuaVke5 。生成スクリプトはスクラッチパッドにあり、セッションをまたぐと消える |
 
 - 運営用: `appsscript.json` のスコープは `spreadsheets` と `script.external_request`（v0.5.0〜。tokeninfo でログイン確認）、実行「自分」・アクセス「全員」。スクリプト プロパティ `SPREADSHEET_ID` `ADMIN_KEY` `GOOGLE_CLIENT_ID`（v0.5.0〜必須）`VIEWER_URL`。`CREATE_CODE` は v0.5.0 で廃止。
 - Google Cloud: OAuth クライアント ID（ウェブ アプリケーション、承認済みの JavaScript 生成元 `https://chihirohashimotoac-coder.github.io`）。同じ ID を `GOOGLE_CLIENT_ID` と Pages の `admin/config.js` の `googleClientId` に書く（秘密ではない）。
