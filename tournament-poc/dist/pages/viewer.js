@@ -551,7 +551,8 @@
     }
 
     /**
-     * QR コード: 広い画面（店内モニターなど）では右下に固定表示し、スクロールしても追従する。
+     * QR コード: 内容の右に余白がある広い画面（店内モニターなど）では右下に固定表示し、スクロールしても追従する。
+     * 内容は動かさない。余白がなければ固定表示は出さない（CSS）。
      * スマートフォンでは「QR コード」ボタンで大きく表示する。?qr=0 で固定表示をやめ、?qr=1 で幅に関係なく固定表示する。
      */
     function renderQr(d) {
@@ -568,7 +569,6 @@
       ui.qrOverlayUrl.textContent = url;
       ui.qrPanel.hidden = params.qr === '0';
       if (params.qr === '1') doc.body.classList.add('qr-forced');
-      if (!ui.qrPanel.hidden) doc.body.classList.add('has-qr');
       ui.qrButton.hidden = false;
     }
 

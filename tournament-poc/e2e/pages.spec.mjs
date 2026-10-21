@@ -45,7 +45,7 @@ test('?event= で大会を指定でき、通信失敗時は再試行して復旧
   expect(seen.some((s) => s.url.includes('known='))).toBe(true);
 });
 
-test('QR コード: 広い画面は右下に固定表示（スクロールしても追従・内容と重ならない）、狭い画面はボタンで拡大表示', async ({ page, request }, testInfo) => {
+test('QR コード: 内容の右に余白がある画面だけ右下に固定表示（余白に収まる大きさ・内容は動かさない・スクロールに追従）、ボタンで拡大表示', async ({ page, request }, testInfo) => {
   const detail = await publishedSample(request);
   const violations = [];
   page.on('console', (m) => {
@@ -56,20 +56,35 @@ test('QR コード: 広い画面は右下に固定表示（スクロールして
   await expect(page.locator('.match')).toHaveCount(24);
   const url = new URL(`/pages/index.html?event=${detail.event.id}`, page.url()).href;
   const panel = page.locator('#qr-panel');
-  const wide = page.viewportSize().width >= 1100;
-  if (wide) {
-    await expect(panel.locator('svg')).toBeVisible();
+  // 既定の画面（1366 幅・スマートフォン）は内容の右に余白がないので出さない
+  await expect(panel).toBeHidden();
+  if (testInfo.project.name === 'desktop') {
+    const contentBox = () => page.locator('.content').boundingBox();
+    const groupsRight = () => page.locator('.group').evaluateAll((els) => Math.max(...els.map((e) => e.getBoundingClientRect().right)));
+    for (const [width, height, expected] of [[1920, 1080, 200], [1600, 900, 168], [1504, 900, 120]]) {
+      await page.setViewportSize({ width, height });
+      await expect(panel.locator('svg')).toBeVisible();
+      const box = await panel.boundingBox();
+      expect(box.width).toBeCloseTo(expected, 0); // 余白に合わせた大きさ（上限 200px）
+      // 内容は中央のまま（QR の分だけ左に寄せない）
+      const content = await contentBox();
+      expect(content.x + content.width / 2).toBeCloseTo(width / 2, 0);
+      expect(await groupsRight()).toBeLessThanOrEqual(box.x - 16);
+      expect(box.x + box.width).toBeLessThanOrEqual(width - 16);
+      await page.screenshot({ path: testInfo.outputPath(`viewer-qr-${width}.png`) });
+    }
+    // スクロールしても画面上の同じ位置にある
     const before = await panel.boundingBox();
     await page.mouse.wheel(0, 2000);
     await page.waitForFunction(() => window.scrollY > 500);
     const after = await panel.boundingBox();
-    expect(after.y).toBeCloseTo(before.y, 0); // 画面上の同じ位置にある
-    // どのグループの枠とも重ならない
-    const groups = await page.locator('.group').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().right));
-    expect(Math.max(...groups)).toBeLessThanOrEqual(after.x);
-    await page.screenshot({ path: testInfo.outputPath('viewer-qr.png') });
-  } else {
-    await expect(panel).toBeHidden();
+    expect(after.y).toBeCloseTo(before.y, 0);
+    // 縦長の窓（余白なし）・余白が 120px 未満では出さない
+    for (const [width, height] of [[1080, 1920], [1500, 900]]) {
+      await page.setViewportSize({ width, height });
+      await expect(panel).toBeHidden();
+    }
+    await page.setViewportSize({ width: 1366, height: 768 });
   }
   // ボタンで拡大表示（スマートフォンで他の人に見せる用）
   await page.getByRole('button', { name: 'QR コード' }).click();

@@ -607,7 +607,7 @@ body {
   }
 }
 
-/* QR コード（v0.4.1）: 広い画面では右下に固定表示し、スクロールしても追従する */
+/* QR コード: 内容の右に余白がある画面では右下に固定表示し、スクロールしても追従する */
 .statusbar__actions {
   display: flex;
   flex-wrap: wrap;
@@ -659,25 +659,36 @@ body.qr-forced .qr-panel {
   width: 150px;
 }
 
-@media (min-width: 1100px) {
-  .qr-panel {
+/*
+ * 内容（最大 1200px・中央寄せ）は動かさず、右側の空いた余白に収まる大きさで出す。
+ * 幅 = 余白 −（右端 16px ＋ 内容との間 16px）、上限 200px。窓の高さにも合わせる。
+ * 余白が 120px に満たない幅（縦長の窓など）では出さない（上の「QR コード」ボタンで表示できる）。
+ */
+@media (min-width: 1504px) and (min-height: 360px) {
+  .qr-panel,
+  body.qr-forced .qr-panel {
     display: block;
+    width: min(200px, calc((100vw - 1200px) / 2 - 32px), calc(100vh - 140px));
   }
 
-  body.has-qr .content {
-    padding-right: 236px;
+  .qr-panel__title {
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  /* 余白が狭いうちは説明文を省き、QR を小さくしすぎない */
+  .qr-panel__hint {
+    display: none;
   }
 }
 
-/* 大きなモニター: 離れた席からも読み取れるよう大きくする */
-@media (min-width: 1600px) {
-  .qr-panel,
-  body.qr-forced .qr-panel {
-    width: 260px;
+@media (min-width: 1600px) and (min-height: 360px) {
+  .qr-panel__title {
+    font-size: 16px;
   }
 
-  body.has-qr .content {
-    padding-right: 296px;
+  .qr-panel__hint {
+    display: block;
   }
 }
 
