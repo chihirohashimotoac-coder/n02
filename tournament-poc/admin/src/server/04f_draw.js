@@ -165,7 +165,10 @@ function assignGroups_(players, groupCount, opts) {
     }
   }
   var after = affiliationClashes_(groups);
-  if (o.spreadAffiliation) {
+  var hasAffiliation = players.some(function (p) {
+    return p.affiliation;
+  });
+  if (o.spreadAffiliation && G > 1 && hasAffiliation) {
     notes.push(
       after.total
         ? '同じ所属の選手が同じ組に残っています（' +

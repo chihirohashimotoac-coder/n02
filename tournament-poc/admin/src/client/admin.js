@@ -2875,7 +2875,7 @@
       var assigned = st.entries.length > 0;
       var run = function (confirmRedraw) {
         syncUi();
-        mutate('autoAssign', { eventId: d.event.id, stageId: st.id, method: ui.method, useSeeds: ui.useSeeds, useRating: ui.useRating, spreadAffiliation: ui.spreadAffiliation, confirmRedraw: confirmRedraw }, function (r) {
+        mutate('autoAssign', { eventId: d.event.id, stageId: st.id, method: ui.method, useSeeds: ui.useSeeds, useRating: ui.useRating, spreadAffiliation: ui.method !== 'registration' && ui.spreadAffiliation, confirmRedraw: confirmRedraw }, function (r) {
           return r.assigned + ' 名を割り当てました。';
         }).then(function (data) {
           if (data && data.report) state.ui.lastDraw = { stageId: st.id, report: data.report };
@@ -3173,7 +3173,7 @@
       if (n.status === 'cancelled') {
         parts.push(el('p', { className: 'muted small', text: '中止（点なし）' + (n.cancelReason ? ': ' + n.cancelReason : '') }));
         parts.push(el('div', { className: 'btn-row' }, [el('button', { className: 'btn', type: 'button', 'data-mut': true, text: '中止を取り消す', onClick: function () { mutate('cancelNight', { eventId: d.event.id, groupId: n.id, rev: n.rev, undo: true }, '中止を取り消しました。'); } })]));
-        return el('section', { className: 'panel' }, [el('div', { className: 'stack stack--tight' }, parts)]);
+        return el('section', { className: 'panel night-card night-card--cancelled' }, [el('div', { className: 'stack stack--tight' }, parts)]);
       }
       var date = el('input', { className: 'input input--auto', type: 'date', value: n.date || '', 'aria-label': n.name + ' の開催日' });
       parts.push(el('div', { className: 'row row--tight' }, [field('開催日', date), el('button', { className: 'btn btn--small', type: 'button', 'data-mut': true, text: '保存', onClick: function () { mutate('updateNight', { eventId: d.event.id, groupId: n.id, rev: n.rev, date: date.value }, '保存しました。'); } })]));
@@ -3692,7 +3692,7 @@
           })
           .map(function (x) {
             var sch = x.m.schedule || {};
-            return [sch.date ? sch.date.replace(/-/g, '/') + (sch.time ? ' ' + sch.time : '') : sch.status === 'postponed' ? '日程未定' : '未定', x.st.name + '・' + x.sec.name, x.m.label || 'R' + x.m.round, (x.m.p1.name || '未定') + ' vs ' + (x.m.p2.name || (x.m.status === 'bye' ? '（不戦）' : '未定')), sch.board || '', sch.referee || '', PHASE_LABEL[matchPhase(x.m)] + (sch.status ? '（' + SCHEDULE_STATUS_LABEL[sch.status] + '）' : '')];
+            return [sch.date ? sch.date.replace(/-/g, '/') + (sch.time ? ' ' + sch.time : '') : sch.status === 'postponed' ? '日程未定' : '未定', x.st.name + '・' + x.sec.name, x.m.label || 'R' + x.m.round, (x.m.p1.name || '未定') + ' vs ' + (x.m.p2.name || (x.m.status === 'bye' ? '（不戦）' : '未定')), sch.board || '', sch.referee || '', PHASE_LABEL[matchPhase(x.m)] + (sch.status ? '・' + SCHEDULE_STATUS_LABEL[sch.status] : '')];
           });
         root.appendChild(printTable('予定一覧', ['日時', '段階・組', '試合', '対戦', 'ボード', '審判', '状態'], rows));
         return root;

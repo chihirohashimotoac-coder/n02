@@ -139,7 +139,7 @@ function actionGenerateSwissRound_(ctx, payload) {
     relaxed: res.relaxed,
     rematches: res.rematches,
   });
-  return { eventId: eventId, round: round, created: records.length, relaxed: res.relaxed, rematches: log.rematches, bye: log.bye };
+  return { eventId: eventId, round: round, created: res.pairs.length, relaxed: res.relaxed, rematches: log.rematches, bye: log.bye };
 }
 
 /** 最新の回戦の組み合わせを消す（その回戦の試合がどれも始まっていないときだけ。前の回戦の訂正のため） */
