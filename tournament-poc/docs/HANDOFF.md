@@ -1,174 +1,143 @@
-# 引き継ぎ（Handoff）— n02 Tournament / League Manager PoC
+# 引き継ぎ（Handoff）— n02 Tournament / League Manager
 
-最終更新: 2026-10-21 / 対象版: **v0.8.0**（大会形式 10 種・F01〜F21・PR プレビュー・マージ連動の本番反映。**本番未反映**。v0.7.x も未反映。v0.6.0 までは本番反映・動作確認済み）
+最終更新: 2026-10-26 / 本番の版: **v0.8.0**（コミット `344c91f`。2026-10-26 01:11 UTC に GitHub Actions で本番反映・利用者が画面で確認済み）
 
-次のセッションは、まずこのファイルと [README.md](../README.md)・[test-plan.md](test-plan.md) を読んでから作業してください。
-作業を始める前に、ユーザーに次の依頼内容を確認してください。v0.8.0 は Draft PR（ブランチ `claude/zen-ride-35c2c3`）で、マージ前に [deploy.md](deploy.md) の「最初に 1 回だけ行う設定」が必要です。作業記録は [v0.8-work.md](v0.8-work.md)。
+次のセッションは、まずこのファイルと [README.md](../README.md)・[test-plan.md](test-plan.md)・[deploy.md](deploy.md) を読んでから作業してください。
+現時点で未着手の依頼はありません。作業を始める前に、ユーザーに次の依頼内容を確認してください。
 
 ---
 
-## 1. リポジトリとブランチ
+## 1. 今の状態（要点）
 
-| リポジトリ | 役割 | ブランチ | 備考 |
-| --- | --- | --- | --- |
-| **chihirohashimotoac-coder/n02** | **ソースの正本**（`tournament-poc/` 配下。v0.7.0 では n02 本体のトップ画面に入口のリンクも追加） | `claude/gifted-bardeen-eistmm`（最新。`claude/confident-carson-4jh0g5` に main をマージして派生） | `claude/bold-albattani-5vsk78`（v0.4.1 まで）から派生。未マージ。**PR は未作成**（ユーザーの指示があるまで作らない） |
-| chihirohashimotoac-coder/n02-tournament-viewer | GitHub Pages の公開先（`dist/pages/` のコピー置き場） | `main` | 手で編集しないで `dist/pages/` からコピーする。例外は `config.js`・`admin/config.js`（Web アプリの URL と OAuth クライアント ID。コピーで上書きしない）と `README.md`（`admin/` の行が手で足されている）。負荷テスト用に `.github/workflows/loadtest.yml`（← `tournament-poc/tools/pages-loadtest.yml`）と `tools/loadtest.mjs`（← `tournament-poc/tools/loadtest.mjs`）も置いてある |
+| 項目 | 状態 |
+| --- | --- |
+| ソースの正本 | `chihirohashimotoac-coder/n02` の `main`（`tournament-poc/` 配下） |
+| 本番反映 | **main へのマージで自動**（`.github/workflows/tournament-deploy.yml`。`tournament-poc/**` が変わったとき）。手動で `dry-run` / `deploy` / `rollback` も実行できる |
+| 運営用 Apps Script | v0.8.0。反映前は版 12（v0.7.1） |
+| 閲覧者用 Apps Script | v0.8.0。反映前は版 5（v0.7.1） |
+| スキーマ | v2（移行済み。移行前の内容は同じスプレッドシートの `bak-s1-…` シートに残る） |
+| GitHub Pages | `n02-tournament-viewer` の `main`（反映コミット `1bf4921`「deploy: n02 344c91f…」）。`release.json` = `{ sha: 344c91f…, version: 0.8.0 }`（GitHub 上で確認） |
+| PR プレビュー | Vercel。PR ごとに `<プレビュー>/tournament/` で操作できる（模擬データ。本番には保存しない） |
 
-- v0.8.0: `claude/zen-ride-35c2c3`（main `20431d3` から派生）。Draft PR。n02-tournament-viewer には push していない（本番反映はマージ後のワークフローが行う）。
-- 新しいセッションの作業ブランチがシステムから指定された場合は、そのブランチを `origin/claude/confident-carson-4jh0g5` から作って push する（このセッションでもそうした）。
-- Pages を更新するときだけ `add_repo` で n02-tournament-viewer を追加し（push 権限。ユーザーの許可が要る）、`/home/user/n02-tournament-viewer` に clone する。
-- GitHub の操作は MCP（`mcp__github__*`）。Pages の公開状況は `actions_list`（workflow `390482601` = pages build and deployment）で確認できる。この環境から github.io・script.google.com へは直接つながらない。
+反映後の新しい GAS の版番号は、Actions「Tournament deploy」の 2026-10-26 01:10 UTC の実行（mode `deploy`）の Summary に出ている（このセッションからは Summary の本文を読めなかったため、ここには書いていない）。
 
-## 2. 守ること
+## 2. リポジトリとブランチ
 
-最初の依頼の制約（原文）:
-- 「既存n02のソースコードは変更しない」（`tournament-poc/` 以外は触らない。ルートの package.json なども不可）
-- 「既存League Orderにも変更を加えない」
-- 「既存のGoogleファイルを削除・上書きしない」
-- 「既存の実大会データは使用しない」
-- 「課金が必要なサービスを導入しない」
-- 「不明なAPI仕様やテスト結果を推測で補完しない」（未検証は「未検証」と書く）
-- 「Googleの認証情報や秘密情報をソースコードに埋め込まない」
-- 「Googleアカウントへの接続・書き込みができない場合は、接続したと偽らず、ユーザーがApps Scriptエディタに貼り付けられる形で成果物を出力すること」
-- 「今回の作業では本番公開やn02への組み込みは行わない」（n02 本体への組み込みはしていない。GitHub Pages・Apps Script への反映はユーザーの依頼・了承のもとで行っている）
+| リポジトリ | 役割 | 備考 |
+| --- | --- | --- |
+| **chihirohashimotoac-coder/n02** | ソースの正本（`tournament-poc/`）。n02 本体のトップ画面に入口のリンク（`src/components/tournament/TournamentPortalLink.tsx`） | 作業はシステムから指定されたブランチで行い、PR を作る。マージはユーザーが行う |
+| chihirohashimotoac-coder/n02-tournament-viewer | GitHub Pages の公開先 | **手で編集しない**。ワークフローが `dist/pages/` を写して push する（Deploy key）。`config.js`・`admin/config.js`・`README.md`・`CNAME`・`.nojekyll` は写さない（残す） |
+
+- v0.8.0 は PR [chihirohashimotoac-coder/n02#31](https://github.com/chihirohashimotoac-coder/n02/pull/31)（ブランチ `claude/zen-ride-35c2c3`）でマージ。
+- GitHub の操作は MCP（`mcp__github__*`）。公開リポジトリの状態は `api.github.com` を curl でも読める。この環境から github.io・script.google.com・vercel.app へは直接つながらない（プロキシで拒否）。
+
+## 3. 守ること
+
+ユーザーの指示（要点）:
+- マージ・自動マージの設定・本番反映の有効化は、ユーザーの指示なしにしない。
+- 認証情報・refresh token・管理者の鍵・管理パスワードを、ソース・ログ・成果物・会話に出さない。ユーザーに貼らせない（GitHub の画面に直接入れてもらう）。
+- PR で Secrets を使わない（`pull_request_target` を使わない）。匿名の管理 API を作らない。推測した ID・URL を書かない。保護設定を緩めない。有料サービスを契約しない。
+- 不明な仕様・未実施のテストを推測で補わない（未検証は「未検証」と書く）。既存の画面のデザインは変えず、機能を足す。
+- リポジトリ直下の [AGENTS.md](../../AGENTS.md)（依存の追加・更新、秘密情報の扱い）に従う。
 
 運用上の約束:
-- ユーザーへの返答は**日本語**（丁寧語・簡潔・正直）。手順はわかりやすく短く（長い手順は「わかりにくい」と言われたことがある。こちらでできることはこちらでやる）。
-- 外部への操作（Google 側の変更、公開リポジトリへの追加、ワークフローの実行など）は**事前に承認を得る**。
-- 管理者の鍵（ADMIN_KEY）・管理パスワード・クライアント シークレットは**会話に貼らないよう**案内済み。こちらからも求めない。OAuth クライアント ID と大会 ID は秘密ではないので、会話でもらってよい。
+- 返答は日本語（丁寧語・簡潔・正直）。手順は短く（長い手順は「わかりにくい」と言われたことがある）。こちらでできることはこちらでやる。
+- 外部への操作（Google 側の変更・閲覧リポジトリへの push・ワークフローの実行など）は事前に承認を得る。
+- OAuth クライアント ID・大会 ID・スクリプト ID は秘密ではない（会話でもらってよい）。
 
-## 2.5 v0.8.0 の要点（2026-10-21 の依頼「大会運営の拡張・大会形式追加・PR プレビュー・マージ連動公開」）
-
-- 依頼の制約（原文の要点）: マージ・自動マージ設定・本番デプロイ・本番データ変更をしない。マージまで本番 GAS・シート移行・Pages を更新しない（viewer/main への先行 push 禁止）。
-  認証情報・refresh token・管理者キーをソース・ログ・プレビュー・成果物に含めない。トークンやパスワードをチャットに貼らせない。PR で Secrets を使わない（`pull_request_target` を使わない）。
-  移行のための匿名 API を作らない。推測した ID・URL を書かない。保護設定を緩めない。有料サービスを契約しない。既存の画面のデザインは変えず機能を足す
-- この依頼は既存の Vercel の PR プレビューを使うことを求めたため、リポジトリ直下の `vercel.json`・`package.json`（`build:preview-host` を追加）・`vite.config.ts`（プレビューのビルドだけ Service Worker が `/tournament/` を置き換えない）・`docs/preview-deployment.md` を変更した。本番（GitHub Pages）の n02 の成果物は変わらない（CI で確認）
-- 形式の定義は `shared/formats.js` だけ（順・説明・流れ・見積もり）。ブラケットは汎用の組み立て（`04b_bracket.js`。SE・DE・シリーズの節）、スイス式は `04c_swiss.js`、表示は `04e_view.js`、組分けは `04f_draw.js`、運営機能は `06b_ops.js`
-- 保存はまとめて書き込み（`commitContext_`）。スキーマ v2（`SCHEMA_VERSION`）。移行は `migrateStorage`（管理者の鍵のみ）。旧版の画面の「初期化する」も移行として動く
-- 本番反映: `.github/workflows/tournament-deploy.yml` + `tools/deploy/`。手順・初期設定・戻し方は [deploy.md](deploy.md)。PR プレビュー: `tools/preview-site/vercel-build.mjs`（[../../docs/preview-deployment.md](../../docs/preview-deployment.md)）
-
-## 3. 構成（v0.6.0）
+## 4. 構成
 
 ```
-閲覧者 ─ GitHub Pages（/）──fetch(Cookie なし)──▶ 閲覧者用 Web アプリ（?format=json, readonly）──────────┐
-主催者（Google ログイン）・店舗スタッフ（管理パスワード）                                                  │
-       ─ GitHub Pages（/admin/、/admin/#e=大会ID）─POST─▶ 運営用 Web アプリ（doPost, セッションを毎回検証）─┼─▶ スプレッドシート「Tournament PoC」
-管理者 ─ GitHub Pages（/admin/#admin）──── ADMIN_KEY ─┘                                                   ┘
+閲覧者 ─ GitHub Pages（/・/events/）──fetch(Cookie なし)──▶ 閲覧者用 Web アプリ（?format=json / list / version、readonly）──┐
+主催者（Google ログイン）・共同主催者・店舗スタッフ（管理パスワード）                                                    │
+       ─ GitHub Pages（/admin/、#e=大会ID）──POST──▶ 運営用 Web アプリ（doPost。セッション・鍵を毎回確認）────────────┼─▶ スプレッドシート「Tournament PoC」
+管理者 ─ GitHub Pages（/admin/#admin）── ADMIN_KEY ─┘                                                               ┘
 ```
 
 | 対象 | URL・名前 |
 | --- | --- |
-| 閲覧ページ | https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/ （`?event=EVT-…`、`&qr=0/1`、`&interval=秒` で間隔固定） |
+| ポータル | https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/events/ |
+| 閲覧ページ | https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/ （`?event=EVT-…`、`&qr=0/1`、`&interval=秒`） |
 | 運営画面 | https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/admin/ （大会は `#e=EVT-…`、管理者は `#admin`） |
-| 閲覧者用 Web アプリ | Apps Script「n02 Tournament Viewer」…`AKfycbyI8B7e…/exec`（Pages の `config.js`）。**v0.2.0 以降コード変更なし** |
-| 運営用 Web アプリ | Apps Script「n02 Tournament Admin」…`AKfycbwC41CD…/exec`（Pages の `admin/config.js`）。v0.6.0 |
+| 反映の確認 | https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/release.json （今の Pages のコミット） |
+| 閲覧者用 Web アプリ | Apps Script「n02 Tournament Viewer」…`AKfycbyI8B7e…/exec`（Pages の `config.js`）。`?format=version` で版と release（コミット） |
+| 運営用 Web アプリ | Apps Script「n02 Tournament Admin」…`AKfycbwC41CD…/exec`（Pages の `admin/config.js`）。GET で版・スキーマ・release |
 | 保存先 | スプレッドシート「Tournament PoC」（マイドライブ「n02 Tournament」フォルダ。共有なし。ID はスクリプト プロパティ `SPREADSHEET_ID`） |
-| Google Cloud | プロジェクト `n02-tournament`。OAuth クライアント ID `99512252323-um86…apps.googleusercontent.com`（ウェブ、承認済みの JavaScript 生成元 `https://chihirohashimotoac-coder.github.io`）。同じ ID を運営用のスクリプト プロパティ `GOOGLE_CLIENT_ID` と Pages の `admin/config.js` の `googleClientId` に設定済み |
-| ユーザー向け手順ページ | https://claude.ai/artifact/T1DVKPSYzyE2EU93ox7Uon （今は v0.6.0 の手順。コピーボタン付き）。生成スクリプトはスクラッチパッドにあったので次のセッションでは消えている。作り直すときは `Artifact read` で読んでから同じ URL に公開するか、新しいページを作って URL をここに書く |
+| Google Cloud | プロジェクト `n02-tournament`。OAuth クライアント ID `99512252323-um86…apps.googleusercontent.com`（承認済みの JavaScript 生成元 `https://chihirohashimotoac-coder.github.io`） |
 
-- 運営用: スコープ `spreadsheets` と `script.external_request`（Google ログインの確認に tokeninfo を呼ぶ）。実行「自分」・アクセス「全員」。スクリプト プロパティ `SPREADSHEET_ID` `ADMIN_KEY` `GOOGLE_CLIENT_ID` `VIEWER_URL`。
-- 閲覧者用: スコープ `spreadsheets.readonly`、高度なサービス Sheets API（`SpreadsheetApp.openById` は readonly では使えない）。
-- Apps Script の画面（HtmlService）は複数 Google アカウントのブラウザで開けないため、画面はすべて GitHub Pages。
-- GAS プロジェクトはマイドライブ直下からフォルダに移しても動く（ファイル ID・デプロイ ID は変わらない）とユーザーに回答済み。
+- 運営用: スコープ `spreadsheets`・`script.external_request`（tokeninfo）。実行「自分」・アクセス「全員」。スクリプト プロパティ `SPREADSHEET_ID` `ADMIN_KEY` `GOOGLE_CLIENT_ID` `VIEWER_URL`、`SCHEMA_VERSION`（=2）、`WRITE_JOURNAL`（書き込み中だけ）。
+- 閲覧者用: スコープ `spreadsheets.readonly`、高度なサービス Sheets API。
+- 公開関数は運営用 `doGet`・`doPost`、閲覧者用 `doGet`・`getPublicSnapshot` だけ（`tests/security.test.mjs` で固定）。
 
-## 3.5 v0.7.0（ポータル）の要点
+## 5. 本番反映の仕組み（v0.8.0〜）
 
-- ポータル: `portal/src/client/*` → `dist/pages/events/`。設定は既存の `../config.js` と `../admin/config.js` を読む（新しい設定ファイルは不要）
-- 閲覧者用 Apps Script: `?format=list`（PublicSnapshots から全公開大会の要約。キャッシュ・notModified）。公開関数は doGet と getPublicSnapshot のまま
-- 運営用 Apps Script: 操作 `myEvents`（scope `google`）。公開データに `event.playerCount` を追加
-- 要約の計算は `shared/summary.js`（両方の Code.gs の末尾に入る）
-- 運営画面: `#new`（作成欄へ移る）、上部にポータルへのリンク
-- 閲覧ページ（Pages 版だけ）: 右上に「大会一覧」、大会の進み具合、選手を探す（候補）、更新された試合の強調、引っぱって更新、トースト、読み込み中のスケルトン、優勝者の名前の演出（`viewer/src/pages/viewer-plus.js`。viewer.js は描画のたびに `tpoc:viewer` イベントを出すだけで、取得・自動更新の規則は変えていない）。Apps Script の閲覧画面には足さない
-- 共通部品: `shared/client/ux-kit.js`・`ux-kit.css`（トースト・引っぱって更新・数え上げ・文字の演出・候補）。ポータルと閲覧ページが使う
-- ユーザーの指示（2026-10-21）: プルトゥリフレッシュ・スケルトン・トースト・オートコンプリート・キネティックタイポグラフィ・UI/UX アニメーション・インフォグラフィックアニメーションを「適した場所に」使う（無理に全部は入れない）。ポータルではキネティックタイポグラフィは使っていない
-- n02 本体: `src/components/tournament/TournamentPortalLink.tsx`・`src/styles/tournament-link.css`。トップ画面の上部バーの右側（ユーザーが案 B を選択。案 A・C は不採用）。リンク先は `VITE_TOURNAMENT_PORTAL_URL`（既定は本番の `…/n02-tournament-viewer/events/`）
-- 確認用プレビュー: `node tools/preview-site/build-preview-site.mjs <出力先>`。実物の Code.gs をブラウザ内の模擬環境で動かす静的サイト（Google 非接続）。claude.ai の Artifact に公開済み: https://claude.ai/artifact/XcYhUQcBWLY7tJ6hUmzZeN
-- 反映手順は [deploy.md](deploy.md) の「v0.7.0 に更新するとき」（Apps Script を先に、Pages を後に）
+手順・初期設定・戻し方の詳細は [deploy.md](deploy.md) の「v0.8.0 から: main へのマージで本番に反映する」。
 
-## 4. 現在の状態（2026-10-21 時点。v0.6.0 まで反映・確認済み。v0.7.0 は未反映）
+- 順序: 検証（Secrets なし）→ main が先に進んでいないか → 設定の確認 → **管理者の確認**（今の運営用 GAS の `bootstrap` を管理者の鍵で呼ぶ。鍵・保存先の異常なら何も書かずに止まる）→ バックアップ（コード・版番号。成果物 `tournament-backup-<SHA>`）→ 運営用 GAS → スキーマの移行 → 閲覧者用 GAS → 動作確認 → Pages → 公開確認（`release.json`）。
+- 既存のデプロイの版を差し替える（URL は変わらない。新しいデプロイは作らない）。デプロイ ID は Pages の `config.js`・`admin/config.js` から読む。権限（スコープ）・公開設定が変わる版は自動では反映せず止まる（所有者がエディタで承認し直してから）。
+- GitHub の設定（済み）: 環境 `tournament-production`（main のみ）に Variables `TOURNAMENT_ADMIN_SCRIPT_ID`・`TOURNAMENT_VIEWER_SCRIPT_ID`・`TOURNAMENT_PAGES_URL`・`TOURNAMENT_VIEWER_REPO`、Secrets `TOURNAMENT_CLASPRC_JSON`（clasp 3.4.1 の `.clasprc.json`）・`TOURNAMENT_ADMIN_KEY`・`TOURNAMENT_VIEWER_DEPLOY_KEY`。閲覧リポジトリに書き込み可の Deploy key。**リポジトリ**の変数 `TOURNAMENT_DEPLOY_ENABLED=true`（消すか `true` 以外にすると自動反映が止まる。手動の dry-run はできる）。
+- 戻す: Actions「Tournament deploy」を mode `rollback`（運営用・閲覧者用の版番号）。v0.8.0 の前は運営用 版 12・閲覧者用 版 5。旧版（v0.6.0・v0.7.1）は移行後のシートでも読み書きできる（`tests/storage.test.mjs`）。Pages は閲覧リポジトリの `deploy: …` コミットを revert。
+- 注意: `tournament-poc/**` を変える PR（ドキュメントだけでも）をマージすると、同じ内容でも反映が走り、GAS に新しい版ができる（害はない）。
+- Actions の注意表示: `actions/checkout@v4`・`setup-node@v4`・`upload-artifact@v4` の Node.js 20 の終了予告（今は Node.js 24 で動いている）。版を上げるときは AGENTS.md の手順（目的・版・公開日の確認と承認）で。
 
-| 項目 | 状態 |
-| --- | --- |
-| ソース（n02 ブランチ） | v0.6.0 まで push 済み |
-| 運営用 Apps Script | v0.6.0。ユーザーが貼り替え・新バージョンでデプロイ済み（v0.5.0 のときは Drive コネクタで読み出してビルドと完全一致を確認） |
-| 閲覧者用 Apps Script | v0.2.0 のまま（Drive コネクタでビルドと一致を確認済み） |
-| GitHub Pages | 運営画面 v0.6.0（`8b5a4b4`）、閲覧ページ v0.5.1（`bf7e070`）。pages build and deployment 成功 |
-| 実環境の確認 | R-01〜R-05・R-07・R-08・R-14・R-17〜R-23 合格（[test-plan.md](test-plan.md)）。v0.6.0 の削除もユーザーが「全て問題なく完了」と報告 |
+## 6. v0.8.0 の要点（コードの地図）
 
-### 版の履歴（要点）
-- v0.1.x: GAS + スプレッドシートの PoC、閲覧者用を Sheets API に変更
-- v0.2.0: 閲覧ページを GitHub Pages に（複数アカウント問題の回避）
-- v0.3.0: 誰でも主催・大会ごとの秘密の運営用 URL（v0.5.0 で廃止）
-- v0.4.0: 大会形式を主催者が組める（段階・ロビン/リーグ/トーナメント・A/B 進出・順位の決め方・2 回総当たり・節名・段階/回戦ごとの Best of・セット制・3 位決定戦・シード・不戦勝）
-- v0.4.1: 結果の「まとめて確定」・入力途中の値の保持・QR コード
-- v0.4.2: 閲覧ページの QR を右余白に収まる大きさで（内容は動かさない・余白がなければ出さない）
-- v0.4.3: 閲覧ページのトーナメントを、回戦ごとの列に並べて線でつなぐトーナメント表に
-- v0.5.0: 作成・運営を Google ログイン（作った本人）＋大会ごとの管理パスワード（店舗スタッフ）に。運営用 URL（鍵）と作成コードを廃止。tokeninfo でログイン確認 → 6 時間のセッション（CacheService）
-- v0.5.1: 閲覧ページの自動更新を最後の更新からの時間で延ばす（60 分まで約 60 秒・3 時間まで 5 分・24 時間まで 30 分・14 日まで 60 分・以降停止。終了・全試合確定で停止。表示に戻ったとき・手動更新で再開）。Apps Script の「実行数」を抑えるため
-- v0.6.0: 大会ごとの削除（アーカイブ）。主催者と管理者が全データを JSON で保存 → 大会名を入力 → 削除
+- 形式 10 種（作成画面の順）: `robin_ko`（既定）・`elimination`・`robin_ab`・`double_elimination`・`robin`・`league`・`league_playoff`・`multi_robin_ko`・`series_playoff`・`swiss`。定義は `shared/formats.js` だけ（順・説明・流れ・予定試合数の見積もり）。
+- サーバー（`admin/src/server/`）: 設定 `00_config.js`、保存 `03_storage.js`（まとめて書き込み `commitContext_`・スキーマ v2・`migrateStorage`）、勝敗・順位 `04_domain.js`、ブラケットの汎用の組み立て `04b_bracket.js`（SE・DE・シリーズの節・回戦ごとの抽選）、スイス式 `04c_swiss.js`、表示 `04e_view.js`、組分け `04f_draw.js`、操作 `06_actions.js`・`06b_ops.js`（F01〜F21）、API `07_api.js`。
+- 画面: 運営 `admin/src/client/admin.js`（CSV `admin-io.js`・印刷 `print-landscape.css`）、閲覧 `viewer/src/client/`、ポータル `portal/src/client/`、一覧の要約 `shared/summary.js`。
+- 回戦ごとの抽選（drawMode=redraw）の訂正: 抽選済みの後の試合が未開始なら勝者（と 3 位決定戦の敗者）を差し替え、始まっていれば拒否。後の回戦があれば確定の取り消しは拒否（`propagateRedrawn_`）。
+- PR プレビュー: `tools/preview-site/`（`vercel-build.mjs`・`build-preview-site.mjs`・`mock-entry.mjs` のサンプル）。説明は [../../docs/preview-deployment.md](../../docs/preview-deployment.md)。リポジトリ直下の `vercel.json`・`package.json`（`build:preview-host`）・`vite.config.ts`（プレビューのビルドだけ Service Worker が `/tournament/` を置き換えない）も v0.8.0 で変更した（ユーザーの依頼による。本番の n02 の成果物は変わらない）。
+- 本番反映: `tools/deploy/deploy.mjs`・`gas-api.mjs`。作業の記録は [v0.8-work.md](v0.8-work.md)。
 
-## 5. 開発・テスト
+## 7. 開発・テスト
 
 ```bash
 cd /home/user/n02 && npm ci            # 初回のみ（Playwright を使うため）
 cd tournament-poc
 node tools/build.mjs                   # src → dist（dist もコミットする）
-node tools/build.mjs --check           # dist が最新か
-npm test                               # 187 件（node:test + tests/gas-mock.mjs。v0.8.0）
-npm run e2e                            # 画面テスト（件数は test-plan.md の 3.）
-cd .. && npx eslint .                  # ルートの lint（既存への影響確認として実行）
+node tools/build.mjs --check           # dist が最新か（CI でも確認）
+npm test                               # 単体・結合 194 件（node:test + tests/gas-mock.mjs）
+npm run e2e                            # 画面テスト（PC・スマートフォン。件数は test-plan.md の 3.）
+cd .. && npx eslint .                  # ルートの lint
 ```
 
-- 画面テストは `tools/preview-server.mjs`（模擬 Apps Script）と `page.route` で script.google.com を振り替える。Google のログインボタンは `fakeGoogle(page, request, email)`・`googleLogin(page)`（e2e/helpers.mjs）で模擬し、tokeninfo は gas-mock の `UrlFetchApp` が模擬する（`fakeIdToken`）。
+- 画面テストは `tools/preview-server.mjs`（模擬 Apps Script、ポート 4180）。Google のログインは `fakeGoogle`・`googleLogin`（`e2e/helpers.mjs`）で模擬。
 - Playwright を単体スクリプトで使うときは `chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })`（`playwright install` はしない）。
-- 模擬サーバーを別ポートで立てるときは 4190 など fetch が禁止しているポートを避ける（4185 は使えた）。
-- `tests/gas-mock.mjs` の `loadProject(app, { codePath })` で別の版のコードを動かせる（版の更新の確認用）。
+- `tests/gas-mock.mjs` の `loadProject(app, { codePath })` で旧版のコード（`tests/fixtures/admin-v0.6.0.gs`・`admin-v0.7.1.gs`・`viewer-v0.2.0.gs`）を動かせる（移行・ロールバックの確認用）。
+- `tests/deploy.test.mjs` は Google を模擬して本番反映の順序と止める条件を確かめる（実物の旧版コードに `bootstrap` を答えさせる）。
 
-## 6. Google 側・Pages への反映手順（毎回これ）
+## 8. 実環境の確認状況・残り
 
-v0.8.0 以降、初期設定（[deploy.md](deploy.md)）が済んでいれば **main へのマージで自動で反映**します（下の手作業の手順は、初期設定の前か、自動の反映が使えないときのもの）。
+確認済み（実環境）:
+- R-01〜R-05・R-07・R-08・R-14・R-17〜R-23（v0.6.0 まで。[test-plan.md](test-plan.md)）
+- R-24（dry-run）・R-25（本番反映）: 2026-10-26 合格。ユーザーが画面を見て「問題なさそう」と報告
 
-1. `node tools/build.mjs` → 運営用の変更があれば `dist/admin/Code.gs`（権限が変われば `appsscript.json` も）を、手順ページ（コピーボタン付き）でユーザーに貼り付けてもらう。
-2. ユーザーが「デプロイを管理」→ 鉛筆 →「**新バージョン**」→「デプロイ」。**「新しいデプロイ」は URL が変わるので禁止**（過去に 2 回誤操作あり）。
-3. 列を増やした版では、管理者画面（`/admin/#admin`）で「初期化する」。権限が増えた版では、エディタで `doGet` を実行して「すべて選択」で承認し直す。
-4. Pages は `dist/pages/` の該当ファイルを n02-tournament-viewer にコピーして push（`config.js`・`admin/config.js`・`README.md` は上書きしない）。サーバーに操作を追加した版は、Apps Script 更新前だとその操作だけ「不明な操作です。」になる。既存の操作を変える版は順番に注意して伝える。
-5. 反映を HANDOFF・test-plan に記録する。
+未検証（模擬環境・Chromium では合格）:
+- R-26: 新しい形式（DE・スイス式・シリーズ・ディビジョンのリーグ）を本番で作って数試合入力
+- R-27: 印刷（実際のプリンター・Safari）・CSV（Excel）
+- Apps Script 上での大人数の処理時間（128 名・448 試合など。模擬環境では 1 操作数十 ms・公開データは上限の約 82%）
+- 実機（iPhone・Android）、アプリ内ブラウザでの Google ログイン、R-09〜R-13、2 大会の同時進行
 
-Drive コネクタ（`mcp__Google_Drive__*`）でできること・できないこと（確認済み）:
-- できる: Apps Script プロジェクト・フォルダの検索、`download_file_content`（`exportMimeType: application/vnd.google-apps.script+json`）で中身の読み出し → 貼り付け結果の照合、ファイルの共有設定の確認。
-- できない: スクリプトの中身の書き換え、デプロイ。Apps Script API や clasp はユーザーの認証情報を渡す必要があるため使っていない。
+範囲外（依頼があれば見積もりから）: n02 との試合結果の連携、共同主催者への招待メール、祝日の自動判定。
 
-## 7. 未検証・残タスク・相談済みの事項
+相談済みの数値: 作成は 1 人 1 時間 5 件・全体 1 時間 10 件、ログイン（tokeninfo）は全体で 1 分 30 回、管理パスワードは 10 回間違いで 10 分停止、大会は全体で 200 件、1 大会の選手は 128 名、公開データは 40 万文字。スプレッドシートは 1 ファイル 1,000 万セル（二次情報）。
 
-実環境で未検証（[test-plan.md](test-plan.md)）:
-- R-09〜R-13（文字列の保存・不正な結果の拒否・同時更新・通信失敗・運営画面だけで一通り）。手順はユーザーに一度渡したが「わかりにくい」と言われ、R-14 の方を先に進めた
-- 2 大会の同時進行、アプリ内ブラウザ（LINE など）での Google ログイン
-- R-14 の残り: 段階 4（50 人一斉アクセス）、実機・店内回線、閲覧者用 Apps Script の「実行数」でのクォータ系エラーの確認
-- v0.5.1 の自動更新の休止・停止の表示（実環境で画面を見ていない）
-- R-15・R-16 は「全て問題なく出来ました」との報告のみで、項目ごとの結果は未記録
+## 9. 版の履歴（要点）
 
-ユーザーと相談済みの数値・判断:
-- 容量: スプレッドシートは 1 ファイル 1,000 万セル（二次情報）。実測で 16 名・24 試合の大会 1 つ ≒ 120 行 ≒ 3,100 セル。アプリの上限 `MAX_EVENTS_TOTAL` 200 件（Google ログインの人の作成のみ制限）。運営画面は操作ごとに全シートを読むので、データが増えると遅くなる見込み（未計測）。公開中の大会が多いほど閲覧者用の読み込みが重くなるので、終わった大会は非公開か削除を勧めた
-- 実行数: Web アプリの実行回数に日次上限の記載はなく料金も発生しない（公式の割り当て表）。増えたのは負荷テストと開きっぱなしの閲覧ページが原因と説明し、v0.5.1 で抑えた
-- 作成の上限: 1 人 1 時間 5 件・全体 1 時間 10 件。ログイン（tokeninfo）は全体で 1 分 30 回まで。管理パスワードは 10 回間違いで 10 分停止
+- v0.1〜v0.2: GAS + スプレッドシートの PoC、閲覧ページを GitHub Pages に
+- v0.4: 大会形式を主催者が組める（段階・A/B 進出・順位の決め方・セット制・3 位決定戦など）。v0.4.1〜v0.4.3: まとめて確定・QR コード・トーナメント表
+- v0.5: Google ログイン＋大会ごとの管理パスワード。v0.5.1: 自動更新の間隔を延ばす
+- v0.6: 大会の削除（JSON で保存してから）
+- v0.7: ポータル「トーナメント・リーグ」・n02 本体の入口。v0.7.1: レビュー指摘の修正
+- v0.8.0: 大会形式 10 種・F01〜F21・スキーマ v2・PR プレビュー・マージで本番反映（2026-10-26 本番反映）
 
-v0.8.0 で未検証（模擬環境・Chromium では合格）:
-- 実際の Apps Script API・clasp の認証・スプレッドシートでの移行・GitHub Pages への push（初期設定の後に dry-run → deploy で確認。test-plan の R-24〜R-27）
-- 反映の途中の数分間（GAS は新しい版・Pages は前の版）の旧画面と新 API の組み合わせ
-- Apps Script 上での処理時間（128 名・448 試合など。模擬環境では 1 操作数十 ms）、実際のプリンター・Safari の印刷、実機
+## 10. ハマりどころ
 
-未対応（範囲外）:
-- n02 との結果連携、招待メール、祝日の自動判定
-- 大会形式の追加について質問あり（2026-10-21）。既存の段階の組み合わせ（ひな形）の追加は軽い（`TEMPLATES_`・`createEventRecords_` と運営画面の `TEMPLATES`）。新しい段階の種類（ダブルエリミ・スイスなど）は組み合わせ・順位・表示・テストを新しく作る必要があり重い、と回答
-
-## 8. ハマりどころ
-
-- CSS の `display` が `hidden` 属性を上書きする → 両方の CSS に `[hidden] { display: none !important; }` を入れてある。
-- 閲覧ページの CSP は `style-src 'self'` なので `style` 属性は使えない（CSSOM の `el.style.x =` は可）。運営ページは Google のログイン用に `accounts.google.com/gsi/` を CSP に許可し、Referrer は `strict-origin`（Google がオリジンを確かめるため）。
-- スマートフォン用の `.status { grid-area }` がトーナメント表の札にも効いた → `.bmatch .bmatch__status` で上書き。
-- 公開データの項目は `tests/security.test.mjs` の ALLOWED で固定。項目を足すときはここも更新。
-- 全試合確定の判定は「試合のない段階がないこと」も条件（ロビン → A/B でトーナメント表を作る前に止まらないように）。
-- 行の削除は `deleteRecords_` で連続行をまとめて消す。見出し以外の全行を消すとスプレッドシートがエラーにするので空行を足してから消している。
-- 負荷テストツールは既定で `interval=60` に固定（v0.5.1 の間隔の延長を避けるため）。
-- 画面テストで「大会を作成」ボタンを探すときは `exact: true`（「サンプル大会を作成」に部分一致する）。
+- CSS の `display` が `hidden` 属性を上書きする → 両方の CSS に `[hidden] { display: none !important; }`。
+- 閲覧ページの CSP は `style-src 'self'`（`style` 属性は不可、CSSOM は可）。運営ページは `accounts.google.com/gsi/` を許可。
+- 公開データの項目は `tests/security.test.mjs`・`tests/v08-public.test.mjs` の許可リストで固定。項目を足すときはここも更新。
+- 閲覧者用 GAS は公開データを 20 秒キャッシュする（反映の確認や画面テストでは待つ）。
+- プレビューのサンプル作成は本番と同じ「1 人 1 時間 5 件」の制限に当たるので、模擬の時計を進めてから作っている（`mock-entry.mjs`）。
+- 行の削除は `deleteRecords_`。見出し以外の全行を消すとスプレッドシートがエラーにするので空行を足してから消す。
+- 画面テストで「大会を作成」ボタンを探すときは `exact: true`。
 - スクラッチパッドのファイルはセッションをまたいで消える。
