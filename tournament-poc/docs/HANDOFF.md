@@ -4,10 +4,10 @@
 
 次のセッションは、まずこのファイルと [README.md](../README.md)・[test-plan.md](test-plan.md)・[deploy.md](deploy.md) を読んでから作業してください。
 
-**進行中（未反映）: v0.9.0**（ブランチ `claude/adoring-gates-m4ne8d`）。主催者・共同主催者を Google の `sub` で識別し、スキーマ v3 へ移行、
-ログアウトの成否の表示。設計・移行・ロールバックの境界・本番に移す手順は [v0.9-identity.md](v0.9-identity.md)。
-**マージすると自動で反映・移行され、Google でログイン中の全員が再ログインになる**ので、マージの前に同文書の「8.」の手順（自動反映を止める）を確認すること。
-ユーザーの指示により、main へのマージ・本番反映・本番シートの移行はこのセッションでは行っていない。
+**v0.9.0**（PR [chihirohashimotoac-coder/n02#34](https://github.com/chihirohashimotoac-coder/n02/pull/34)。ユーザーの確認・指示を受けてマージ）: 主催者・共同主催者を Google の `sub` で識別し、スキーマ v3 へ移行、
+ログアウトの成否の表示。設計・移行表・ロールバックの境界・本番での確認手順は [v0.9-identity.md](v0.9-identity.md)。
+マージで自動反映（移行・Google でログイン中の全員の再ログインを含む）。反映の結果と戻すための版番号は Actions「Tournament deploy」の Summary を見ること。
+下の表の「本番の版」は v0.8.0 時点の記録で、v0.9.0 の反映後の実環境の確認（test-plan.md の R-28・R-29、v0.9-identity.md の「8.」の 6）は未記録。
 
 ---
 
