@@ -15,7 +15,8 @@ URL だけを知っていても開けません。
 Google ログインの確認方法: 運営画面（GitHub Pages）で Google Identity Services のボタンから ID トークンを受け取り、運営用 Apps Script が
 Google の tokeninfo エンドポイントに問い合わせて、宛先（`aud` = スクリプト プロパティ `GOOGLE_CLIENT_ID`）・発行元・有効期限・メール確認済み・`sub` を確かめます。
 v0.9.0 から、主催者・共同主催者は `sub`（Google アカウントごとに不変）で識別し、メールアドレスの一致だけでは権限を与えません。
-既存の大会・招待は本人のログインで紐付け、Google が持ち主を保証しないアドレス（`@gmail.com` でも Google Workspace（`hd`）でもない）は承認が必要です（[v0.9-identity.md](v0.9-identity.md)）。
+新しく作る大会は、作った人の `sub` がその場で主催者になります（承認は不要）。既存の大会（v0.8.0 以前）・管理者が付け替えた大会・共同主催者の招待は本人のログインで紐付け、
+Google が持ち主を保証しないアドレス（`@gmail.com` でも Google Workspace（`hd`）でもない）の場合だけ承認が必要です（共同主催者は主催者が、既存の大会の主催者は管理者が承認。[v0.9-identity.md](v0.9-identity.md)）。
 Google は tokeninfo を「開発・デバッグ用」と位置づけ、本番では検証ライブラリを推奨していますが、Apps Script ではそのライブラリを使えないため、
 ログインの瞬間だけ tokeninfo を使い、以後はサーバーが発行するセッションで確かめます
 （[Verify the Google ID token](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)）。
