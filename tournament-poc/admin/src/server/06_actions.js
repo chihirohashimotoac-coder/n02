@@ -2310,6 +2310,48 @@ function propagateElimination_(ctx, match, beforeWinner, afterWinner) {
   });
   var meta = matchMeta_(match);
   if (meta.gf === 1) syncGrandFinalReset_(ctx, match);
+  if (!match.next_match_id) propagateRedrawn_(ctx, match, beforeWinner, afterWinner);
+}
+
+/**
+ * 回戦ごとの抽選（drawMode=redraw）: 後の回戦は勝者を抽選して作るため、次の試合へのつながり（next_match_id）がない。
+ * 抽選済みの後の回戦がある試合の結果を変えるときは、固定の表と同じ規則にそろえる:
+ * 勝者が入った後の試合（と 3 位決定戦の敗者）が始まっていなければ差し替え、始まっていれば変えさせない。
+ * 確定の取り消しは、後の回戦のどの枠を空けるかが決まらないため受け付けない。
+ */
+function propagateRedrawn_(ctx, match, beforeWinner, afterWinner) {
+  if (!beforeWinner || beforeWinner === afterWinner) return;
+  var stage = ctx.table('Stages').byKey[match.stage_id];
+  if (!stage || stage.type !== STAGE_TYPE.SINGLE_ELIMINATION || stageConfig_(stage).drawMode !== 'redraw') return;
+  var table = ctx.table('Matches');
+  var later = table.rows.filter(function (m) {
+    return m.stage_id === match.stage_id && (m.round || 0) > (match.round || 0);
+  });
+  if (!later.length) return;
+  var name = match.label || match.round + ' 回戦';
+  if (!afterWinner) {
+    throw appError_('LOCKED', '後の回戦を抽選済みのため、' + name + 'の確定は取り消せません（勝者を変える訂正は、後の試合が始まっていなければできます）。');
+  }
+  var beforeLoser = beforeWinner === match.player1_id ? match.player2_id : match.player1_id;
+  var afterLoser = afterWinner === match.player1_id ? match.player2_id : match.player1_id;
+  var swap = {};
+  swap[beforeWinner] = afterWinner;
+  swap[beforeLoser] = afterLoser;
+  var targets = later.filter(function (m) {
+    return swap[m.player1_id] !== undefined || swap[m.player2_id] !== undefined;
+  });
+  targets.forEach(function (m) {
+    if (matchStarted_(m)) {
+      throw appError_('LOCKED', '後の試合（' + (m.label || m.round + '回戦') + '）が始まっているため、' + name + 'の勝者は変更できません。先に後の試合を「未開始」に戻してください。');
+    }
+  });
+  targets.forEach(function (m) {
+    if (swap[m.player1_id] !== undefined) m.player1_id = swap[m.player1_id];
+    else if (swap[m.player2_id] !== undefined) m.player2_id = swap[m.player2_id];
+    m.rev = (m.rev || 0) + 1;
+    m.updated_at = ctx.now;
+    updateRecord_(table, m);
+  });
 }
 
 /**

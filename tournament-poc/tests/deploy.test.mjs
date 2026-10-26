@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runGas, runPages, runRollback, runVerifyPages, summaryMarkdown, createRecorder, stampRelease } from '../tools/deploy/deploy.mjs';
 import { parseClasprc, accessToken } from '../tools/deploy/gas-api.mjs';
+import { createStore, createClock, loadProject, fakeIdToken, SPREADSHEET_ID, ADMIN_KEY as GAS_ADMIN_KEY, GOOGLE_CLIENT_ID, ROOT } from './gas-mock.mjs';
 
 const SHA = 'a'.repeat(40);
 const ADMIN_SCRIPT = 'ADMINscript0123456789abcdefghij';
@@ -88,9 +89,17 @@ function fakeGoogle(opts = {}) {
     }
     if (u.host === 'script.google.com') {
       const dep = u.pathname.split('/')[3];
+      if (dep === ADMIN_DEP && method === 'POST' && JSON.parse(init.body).action === 'bootstrap') {
+        // 既存の読み取り API。opts.gas があれば実物の Code.gs（模擬環境）に答えさせる
+        if (opts.bootstrap) return opts.bootstrap(JSON.parse(init.body));
+        if (opts.gas) return { ok: true, status: 200, text: async () => JSON.stringify(opts.gas.post(JSON.parse(init.body))) };
+        const req = JSON.parse(init.body);
+        if (req.auth.adminKey !== ADMIN_KEY) return json(200, { ok: false, error: { code: 'AUTH_INVALID', message: '管理者の鍵が違います。' } });
+        return json(200, { ok: true, data: { role: { kind: 'admin', isPlatformAdmin: true }, storage: { configured: true, accessible: true, initialized: true, spreadsheetId: 'SHEET-ID-PRIVATE' }, events: [{ name: '非公開の大会名' }] } });
+      }
       if (dep === ADMIN_DEP && method === 'POST') {
         const req = JSON.parse(init.body);
-        if (req.auth.adminKey !== ADMIN_KEY || req.action !== 'migrateStorage') return json(200, { ok: false, error: { code: 'FORBIDDEN', message: 'x' } });
+        if ((req.auth.adminKey !== ADMIN_KEY && req.auth.adminKey !== GAS_ADMIN_KEY) || req.action !== 'migrateStorage') return json(200, { ok: false, error: { code: 'FORBIDDEN', message: 'x' } });
         const res = { ok: true, data: { migrateResult: { migrated: !migrated, from: 1, to: 2 }, storage: { migrationRequired: false } } };
         migrated = true;
         return json(200, res);
@@ -113,7 +122,9 @@ function io(g, extra = {}) {
   return { fetch: g.fetch, sleep: async () => {}, remoteMain: () => SHA, isAncestor: () => true, log: (m) => logs.push(m), logs, ...extra };
 }
 
-const writes = (g) => g.calls.filter((c) => c.method !== 'GET' && !c.url.startsWith('https://oauth2'));
+// 書き込みの呼び出し（トークンの取得と、読み取りの bootstrap は除く）
+const isBootstrap = (c) => c.method === 'POST' && c.url.includes('/macros/s/') && c.body.includes('"action":"bootstrap"');
+const writes = (g) => g.calls.filter((c) => c.method !== 'GET' && !c.url.startsWith('https://oauth2') && !isBootstrap(c));
 
 test('clasp の認証情報: 3.x と 2.x の形式を読める。読めない・トークンが取れないときに秘密を出さない', async () => {
   assert.equal(parseClasprc(CLASPRC).refreshToken, REFRESH);
@@ -262,4 +273,94 @@ test('対象の確認: 本番で動いている版（運営用 v0.6.0・閲覧�
   assert.throws(() => checkCurrentContent('admin', content(fx('admin-v0.6.0.gs'), narrow), gasFiles('admin', SHA)), /権限が増えます（https:\/\/www\.googleapis\.com\/auth\/script\.external_request）/);
   // 運営用と閲覧者用の取り違えは止める
   assert.throws(() => checkCurrentContent('viewer', content(fx('admin-v0.6.0.gs').replace(/VIEWER_CONFIG/g, ''), vman), gasFiles('viewer', SHA)), /このアプリではない/);
+});
+
+/* ---------- GAS への最初の書き込みの前の確認（管理者の認証・保存先） ---------- */
+
+/** 実物の運営用 Code.gs（模擬環境）。state: initialized（既定）/ unset / missing（開けない ID）/ empty（未初期化）/ legacy（v0.7.1 で作った保存先を新しい版で開く = 移行が必要） */
+function realAdmin(codeFile, state = 'initialized') {
+  const store = createStore();
+  const clock = createClock();
+  store.add();
+  const props = { ADMIN_KEY: GAS_ADMIN_KEY, GOOGLE_CLIENT_ID };
+  if (state !== 'unset') props.SPREADSHEET_ID = state === 'missing' ? '1MissingSheet0123456789abcdefghijklmnopqrstu' : SPREADSHEET_ID;
+  const code = state === 'legacy' ? join(ROOT, 'tests', 'fixtures', 'admin-v0.7.1.gs') : codeFile;
+  let gas = loadProject('admin', { store, clock, properties: props, codePath: code });
+  let n = 0;
+  const post = (action, payload, auth = { adminKey: GAS_ADMIN_KEY }) => gas.post({ action, payload, requestId: 'fixture-request-' + String(++n).padStart(6, '0'), auth });
+  if (state === 'initialized' || state === 'legacy') {
+    post('initializeStorage', {});
+    // 取得した大会のデータがログに出ないことを確かめるための大会
+    const session = { session: post('login', { idToken: fakeIdToken('owner-private@example.org', clock) }, undefined).data.session };
+    post('createEvent', { name: '非公開の大会名XYZ', template: 'robin', rule: { format: 'legs', bestOf: 3 } }, session);
+  }
+  if (state === 'legacy') gas = loadProject('admin', { store, clock, properties: gas.properties.getProperties(), cache: gas.cache, codePath: codeFile });
+  return gas;
+}
+
+const PROD_ADMIN = join(ROOT, 'tests', 'fixtures', 'admin-v0.6.0.gs');
+
+function outputOf(env, i) {
+  return i.logs.join('\n') + (existsSync(env.TOURNAMENT_DEPLOY_STATE) ? readFileSync(env.TOURNAMENT_DEPLOY_STATE, 'utf8') : '');
+}
+
+test('管理者の確認: 鍵の誤り・未設定では、dry-run でも deploy でも Google の API に触れる前に止まり、鍵・保存先・大会のデータを出さない（本番の v0.6.0）', async () => {
+  for (const dryRun of [true, false]) {
+    // 誤った鍵
+    let g = fakeGoogle({ gas: realAdmin(PROD_ADMIN) });
+    let env = envFor(site(), { TOURNAMENT_ADMIN_KEY: 'wrong-admin-key-0123456789abcdef' });
+    let i = io(g);
+    await assert.rejects(runGas(env, { dryRun, io: i }), /管理者として認証できません（AUTH_INVALID）/);
+    assert.deepEqual(writes(g), [], 'GAS・シートに書き込まない');
+    assert.equal(g.calls.filter((c) => c.url.startsWith('https://script.googleapis.com') || c.url.startsWith('https://oauth2')).length, 0, 'Apps Script API・トークンにも触れない');
+    assert.equal(g.calls.filter(isBootstrap).length, 1);
+    const out = outputOf(env, i);
+    ['wrong-admin-key-0123456789abcdef', GAS_ADMIN_KEY, SPREADSHEET_ID, '非公開の大会名XYZ', 'owner-private'].forEach((x) => assert.ok(!out.includes(x), '出力に ' + x));
+    // 未設定
+    g = fakeGoogle({ gas: realAdmin(PROD_ADMIN) });
+    await assert.rejects(runGas(envFor(site(), { TOURNAMENT_ADMIN_KEY: '' }), { dryRun, io: io(g) }), /TOURNAMENT_ADMIN_KEY がありません/);
+    assert.equal(g.calls.length, 0);
+  }
+});
+
+test('管理者の確認: 保存先が未設定・開けない・未初期化、応答が JSON でない・想定外の内容なら、書き込む前に止まる', async () => {
+  const cases = [
+    [{ gas: realAdmin(PROD_ADMIN, 'unset') }, /保存先（スプレッドシート）が未設定/],
+    [{ gas: realAdmin(PROD_ADMIN, 'missing') }, /保存先（スプレッドシート）を開けません/],
+    [{ gas: realAdmin(PROD_ADMIN, 'empty') }, /初期化されていません/],
+    [{ gas: realAdmin(undefined, 'empty') }, /初期化されていません/],
+    [{ bootstrap: () => ({ ok: false, status: 200, text: async () => '<!doctype html><title>Google ログイン</title>' }) }, /JSON ではありません（HTTP 200）/],
+    [{ bootstrap: () => ({ ok: false, status: 500, text: async () => 'error' }) }, /JSON ではありません（HTTP 500）/],
+    [{ bootstrap: () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, data: { role: { kind: 'anonymous' }, storage: {} } }) }) }, /管理者の権限で応答しませんでした/],
+    [{ bootstrap: () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: false, error: { code: 'BUSY', message: 'x' } }) }) }, /確認でエラーになりました（BUSY）/],
+  ];
+  for (const [opts, pattern] of cases) {
+    for (const dryRun of [true, false]) {
+      const g = fakeGoogle(opts);
+      await assert.rejects(runGas(envFor(site(), { TOURNAMENT_ADMIN_KEY: GAS_ADMIN_KEY }), { dryRun, io: io(g) }), pattern);
+      assert.deepEqual(writes(g), [], String(pattern));
+      assert.equal(g.calls.filter((c) => c.url.startsWith('https://script.googleapis.com')).length, 0);
+    }
+  }
+});
+
+test('管理者の確認: 本番の v0.6.0（移行の要否の項目なし）と、移行が必要な保存先（v0.7.1 のデータを新しい版で開く）は通し、反映まで進める', async () => {
+  // 本番の v0.6.0: dry-run も deploy も通る
+  let g = fakeGoogle({ gas: realAdmin(PROD_ADMIN) });
+  let env = envFor(site(), { TOURNAMENT_ADMIN_KEY: GAS_ADMIN_KEY });
+  let st = await runGas(env, { dryRun: true, io: io(g) });
+  assert.match(st.steps.find((x) => x.name === '管理者の認証・保存先の確認').detail, /旧版。移行の要否は新しい版で判定/);
+  g = fakeGoogle({ gas: realAdmin(PROD_ADMIN) });
+  env = envFor(site(), { TOURNAMENT_ADMIN_KEY: GAS_ADMIN_KEY });
+  const i = io(g);
+  st = await runGas(env, { io: i });
+  assert.ok(st.steps.some((x) => x.name === 'GAS の動作確認' && x.status === 'done'));
+  // 確認は最初の書き込みより前
+  const first = g.calls.findIndex((c) => c.method === 'PUT' || (c.method === 'POST' && !isBootstrap(c) && !c.url.startsWith('https://oauth2')));
+  assert.ok(g.calls.findIndex(isBootstrap) < first);
+  assert.ok(![GAS_ADMIN_KEY, SPREADSHEET_ID, '非公開の大会名XYZ'].some((x) => outputOf(env, i).includes(x)));
+  // 移行が必要な保存先（新しい版が動いている状態での再実行など）は、移行前という理由では止めない
+  g = fakeGoogle({ gas: realAdmin(undefined, 'legacy') });
+  st = await runGas(envFor(site(), { TOURNAMENT_ADMIN_KEY: GAS_ADMIN_KEY }), { dryRun: true, io: io(g) });
+  assert.match(st.steps.find((x) => x.name === '管理者の認証・保存先の確認').detail, /スキーマの移行が必要/);
 });

@@ -201,12 +201,45 @@ async function retry(io, times, waitMs, fn) {
 
 /* ---------- gas ---------- */
 
+/**
+ * 今動いている運営用 GAS（旧版 v0.6.0 も含む）の既存の読み取り API（bootstrap）を管理者の鍵で呼び、
+ * 管理者として認証できること・保存先が設定済み・開ける・初期化済みであることを確かめる。
+ * スキーマの移行が必要なこと（新しい版で判定。旧版の応答には項目がない）は止める理由にしない。
+ * 鍵・保存先の ID・大会のデータはログに出さない（判定に使う項目だけを見る）。
+ */
+export async function checkAdminAccess(io, cfg, adminKey, rec) {
+  const body = JSON.stringify({ action: 'bootstrap', payload: {}, requestId: `deploy-check-${cfg.sha}`.slice(0, 64), auth: { adminKey } });
+  const res = await io.fetch(EXEC_URL(cfg.adminDeploymentId), { method: 'POST', redirect: 'follow', headers: { 'content-type': 'text/plain;charset=utf-8' }, body });
+  let json = null;
+  try {
+    json = JSON.parse(await res.text());
+  } catch (e) {
+    json = null;
+  }
+  if (!json || typeof json !== 'object') fail(`運営用 GAS の応答が JSON ではありません（HTTP ${res.status}）。Web アプリの URL・公開設定を確認してください。`);
+  if (!json.ok) {
+    const code = json.error && typeof json.error.code === 'string' ? json.error.code : '不明';
+    if (code === 'AUTH_INVALID' || code === 'FORBIDDEN') fail(`運営用 GAS に管理者として認証できません（${code}）。Secret TOURNAMENT_ADMIN_KEY が運営用のスクリプト プロパティ ADMIN_KEY と同じか確認してください。`);
+    fail(`運営用 GAS の確認でエラーになりました（${code}）。`);
+  }
+  const data = json.data || {};
+  const role = data.role || {};
+  const st = data.storage || {};
+  if (role.kind !== 'admin' || role.isPlatformAdmin !== true) fail('運営用 GAS に管理者として認証できません（管理者の権限で応答しませんでした）。Secret TOURNAMENT_ADMIN_KEY を確認してください。');
+  if (st.configured !== true) fail('運営用 GAS の保存先（スプレッドシート）が未設定です。');
+  if (st.accessible !== true) fail('運営用 GAS が保存先（スプレッドシート）を開けません（共有・権限を確認してください）。');
+  if (st.initialized !== true) fail('運営用 GAS の保存先が初期化されていません（管理者画面で「初期化する」を済ませてから反映してください）。');
+  rec.step('管理者の認証・保存先の確認', 'done', '管理者として認証・保存先は設定済み・開ける・初期化済み' + (st.migrationRequired === true ? '（スキーマの移行が必要）' : st.migrationRequired === false ? '' : '（旧版。移行の要否は新しい版で判定）'));
+}
+
 export async function runGas(env, { dryRun = false, io = defaultIo(), dist } = {}) {
   const rec = createRecorder(env, io.log);
   const cfg = loadConfig(env);
   rec.step('設定の確認', 'done', `運営用デプロイ ${cfg.adminDeploymentId.slice(0, 8)}…・閲覧者用デプロイ ${cfg.viewerDeploymentId.slice(0, 8)}…（閲覧リポジトリの config から）`);
   if (!env.TOURNAMENT_CLASPRC_JSON) fail('Secret TOURNAMENT_CLASPRC_JSON がありません。');
-  if (!dryRun && !env.TOURNAMENT_ADMIN_KEY) fail('Secret TOURNAMENT_ADMIN_KEY がありません（スキーマの移行に使います）。');
+  if (!env.TOURNAMENT_ADMIN_KEY) fail('Secret TOURNAMENT_ADMIN_KEY がありません（管理者としての確認とスキーマの移行に使います）。');
+  // GAS への最初の書き込みの前に、今動いている運営用 GAS に管理者として認証でき、保存先が使える状態かを確かめる（dry-run でも）
+  await checkAdminAccess(io, cfg, env.TOURNAMENT_ADMIN_KEY, rec);
   const token = await accessToken(parseClasprc(env.TOURNAMENT_CLASPRC_JSON), io.fetch);
   const api = createGasApi(token, io.fetch);
   const apps = {
