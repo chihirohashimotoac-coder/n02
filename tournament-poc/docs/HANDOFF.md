@@ -77,7 +77,7 @@
 
 手順・初期設定・戻し方の詳細は [deploy.md](deploy.md) の「v0.8.0 から: main へのマージで本番に反映する」。
 
-- 順序: 検証（Secrets なし）→ main が先に進んでいないか → 設定の確認 → **管理者の確認**（今の運営用 GAS の `bootstrap` を管理者の鍵で呼ぶ。鍵・保存先の異常なら何も書かずに止まる）→ バックアップ（コード・版番号。成果物 `tournament-backup-<SHA>`）→ 運営用 GAS → スキーマの移行 → 閲覧者用 GAS → 動作確認 → Pages → 公開確認（`release.json`）。
+- 順序: 検証（Secrets なし）→ main が先に進んでいないか → 設定の確認 → **管理者の確認**（今の運営用 GAS の `bootstrap` を管理者の鍵で呼ぶ。鍵・保存先の異常なら何も書かずに止まる）→ バックアップ（コード・版番号。成果物 `tournament-backup-<SHA>`。v0.8.0・v0.9.0 の反映では保存先が隠しフォルダだったため成果物が空。ワークフローの修正後の反映から残る）→ 運営用 GAS → スキーマの移行 → 閲覧者用 GAS → 動作確認 → Pages → 公開確認（`release.json`）。
 - 既存のデプロイの版を差し替える（URL は変わらない。新しいデプロイは作らない）。デプロイ ID は Pages の `config.js`・`admin/config.js` から読む。権限（スコープ）・公開設定が変わる版は自動では反映せず止まる（所有者がエディタで承認し直してから）。
 - GitHub の設定（済み）: 環境 `tournament-production`（main のみ）に Variables `TOURNAMENT_ADMIN_SCRIPT_ID`・`TOURNAMENT_VIEWER_SCRIPT_ID`・`TOURNAMENT_PAGES_URL`・`TOURNAMENT_VIEWER_REPO`、Secrets `TOURNAMENT_CLASPRC_JSON`（clasp 3.4.1 の `.clasprc.json`）・`TOURNAMENT_ADMIN_KEY`・`TOURNAMENT_VIEWER_DEPLOY_KEY`。閲覧リポジトリに書き込み可の Deploy key。**リポジトリ**の変数 `TOURNAMENT_DEPLOY_ENABLED=true`（消すか `true` 以外にすると自動反映が止まる。手動の dry-run はできる）。
 - 戻す: Actions「Tournament deploy」を mode `rollback`（運営用・閲覧者用の版番号）。v0.8.0 の前は運営用 版 12・閲覧者用 版 5。旧版（v0.6.0・v0.7.1）は移行後のシートでも読み書きできる（`tests/storage.test.mjs`）。Pages は閲覧リポジトリの `deploy: …` コミットを revert。
