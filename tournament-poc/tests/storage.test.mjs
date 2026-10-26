@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { createStore, createClock, loadProject, setupPair, ROOT, SPREADSHEET_ID, ADMIN_KEY, GOOGLE_CLIENT_ID, fakeIdToken } from './gas-mock.mjs';
+import { createStore, createClock, loadProject, setupPair, ROOT, SPREADSHEET_ID, ADMIN_KEY, GOOGLE_CLIENT_ID, fakeIdToken, WORKSPACE } from './gas-mock.mjs';
 
 const OLD_CODE = join(ROOT, 'tests', 'fixtures', 'admin-v0.7.1.gs');
 // 本番で動いている版（2026-10-21 時点の HANDOFF: 運営用 v0.6.0・閲覧者用 v0.2.0）
@@ -34,7 +34,13 @@ function legacyWorld(codePath = OLD_CODE) {
   const first = d.stages[0].rounds[0].matches[0];
   ok(old, 'saveMatchResult', { matchId: first.id, rev: first.rev, status: 'final', p1Legs: 2, p2Legs: 1 }, session);
   ok(old, 'setStaffPassword', { eventId: ko, rev: ok(old, 'eventDetail', { eventId: ko }, session).event.rev, password: 'legacy-pass-01' }, session);
-  return { store, clock, props, call, ok, old, session, sampleId: sample.eventId, koId: ko };
+  /** v0.9 以降のコードで同じ人がログインし直し、既存の大会を紐付ける（Workspace のアカウント = 自動で紐付く） */
+  const relogin = (project) => {
+    const auth = { session: ok(project, 'login', { idToken: fakeIdToken('legacy@example.org', clock, WORKSPACE) }, null).session };
+    ok(project, 'linkAccount', {}, auth);
+    return auth;
+  };
+  return { store, clock, props, call, ok, old, session, relogin, sampleId: sample.eventId, koId: ko };
 }
 
 /** 移行前後で変わってはいけない内容（勝敗・順位・シード・主催者・公開状態・パスワードの有無） */
@@ -75,15 +81,21 @@ test('移行: v0.7.1 で作った保存先を新しい版で開くと、閲覧�
   const blocked = w.call(next, 'addPlayers', { eventId: w.sampleId, names: ['新人'] });
   assert.equal(blocked.error.code, 'MIGRATION_REQUIRED');
   assert.equal(w.store.dump(), dump);
+  // v0.8 までの Google のセッション（sub なし）は使えず、ログインし直しを求める
+  assert.equal(w.call(next, 'eventDetail', { eventId: w.koId }, w.session).error.code, 'AUTH_EXPIRED');
   // 移行は管理者の鍵だけ。Google ログインの主催者・未認証では実行できない
-  assert.equal(w.call(next, 'migrateStorage', {}, w.session).error.code, 'FORBIDDEN');
+  const fresh = { session: w.ok(next, 'login', { idToken: fakeIdToken('legacy@example.org', w.clock, WORKSPACE) }, null).session };
+  assert.equal(w.call(next, 'migrateStorage', {}, fresh).error.code, 'FORBIDDEN');
   assert.equal(w.call(next, 'migrateStorage', {}, null).error.code, 'FORBIDDEN');
+  // 移行前は紐付け（書き込み）もできない（主催者は移行が終わるまで自分の大会を開けない。管理者・スタッフは開ける）
+  assert.equal(w.call(next, 'linkAccount', {}, fresh).error.code, 'MIGRATION_REQUIRED');
+  assert.equal(w.call(next, 'eventDetail', { eventId: w.koId }, fresh).error.code, 'NOT_FOUND');
   const migrated = w.ok(next, 'migrateStorage');
   assert.equal(migrated.migrateResult.migrated, true);
   assert.equal(migrated.migrateResult.from, 1);
-  assert.equal(migrated.migrateResult.to, 2);
+  assert.equal(migrated.migrateResult.to, 3);
   assert.equal(migrated.storage.migrationRequired, false);
-  assert.equal(next.properties.getProperty('SCHEMA_VERSION'), '2');
+  assert.equal(next.properties.getProperty('SCHEMA_VERSION'), '3');
   // バックアップ（同じスプレッドシート内の複製）が全シート分あり、元のシートは残っている
   const names = w.store.get().sheets.map((s) => s.name);
   sheetsBefore.filter((n) => n !== 'シート1').forEach((n) => {
@@ -93,14 +105,18 @@ test('移行: v0.7.1 で作った保存先を新しい版で開くと、閲覧�
   assert.ok(names.includes('Collaborators'));
   const events = w.store.get().getSheetByName('Events');
   const backup = w.store.get().sheets.find((s) => s.name.startsWith('bak-s1-') && s.name.endsWith('-Events'));
-  assert.deepEqual(backup.records(), events.records().map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'config_json'))));
+  assert.deepEqual(backup.records(), events.records().map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !['config_json', 'owner_sub', 'owner_link_json'].includes(k)))));
   // 勝敗・順位・シード・主催者・公開状態・パスワードの有無は変わらない
   assert.deepEqual(essentials(w.ok(next, 'eventDetail', { eventId: w.sampleId })), before.sample);
   assert.deepEqual(essentials(w.ok(next, 'eventDetail', { eventId: w.koId })), before.ko);
-  // 既存の大会の管理パスワード・Google ログインはそのまま使える
+  // 既存の大会の管理パスワードはそのまま使える。Google ログインは、ログインし直して紐付けると使える
   const staff = { session: w.ok(next, 'staffLogin', { eventId: w.koId, password: 'legacy-pass-01' }, null).session };
   assert.equal(w.ok(next, 'eventDetail', { eventId: w.koId }, staff).event.name, '旧トーナメント');
-  assert.equal(w.ok(next, 'addPlayers', { eventId: w.sampleId, names: ['新人'] }, w.session).added, 1);
+  assert.equal(w.call(next, 'eventDetail', { eventId: w.koId }, fresh).error.code, 'NOT_FOUND', '紐付けるまでは権限なし');
+  assert.equal(w.ok(next, 'bootstrap', {}, fresh).role.link.available, 2);
+  assert.deepEqual(w.ok(next, 'linkAccount', {}, fresh).linked, { owner: 2, collaborator: 0 });
+  assert.equal(w.ok(next, 'eventDetail', { eventId: w.koId }, fresh).event.role, 'owner');
+  assert.equal(w.ok(next, 'addPlayers', { eventId: w.sampleId, names: ['新人'] }, fresh).added, 1);
   // 2 回目は何もしない（何度呼んでも安全）
   const again = w.ok(next, 'migrateStorage');
   assert.equal(again.migrateResult.migrated, false);
@@ -114,9 +130,10 @@ test('ロールバック: 移行後に v0.7.1 のコードへ戻しても、既�
   const props = w.old.properties.getProperties();
   const next = loadProject('admin', { store: w.store, clock: w.clock, properties: props, cache: w.old.cache });
   w.ok(next, 'migrateStorage');
+  const fresh = w.relogin(next);
   // v0.8 で新しい形式の大会を 1 つ作っておく
-  const de = w.ok(next, 'createEvent', { name: '新形式', template: 'double_elimination', rule: { format: 'legs', bestOf: 3 } }, w.session).eventId;
-  w.ok(next, 'importPlayers', { eventId: de, players: [{ name: 'あ', affiliation: '東' }, { name: 'い', affiliation: '西' }, { name: 'う' }] }, w.session);
+  const de = w.ok(next, 'createEvent', { name: '新形式', template: 'double_elimination', rule: { format: 'legs', bestOf: 3 } }, fresh).eventId;
+  w.ok(next, 'importPlayers', { eventId: de, players: [{ name: 'あ', affiliation: '東' }, { name: 'い', affiliation: '西' }, { name: 'う' }] }, fresh);
   const newBefore = essentials(w.ok(next, 'eventDetail', { eventId: de }));
   // 旧版のコードに戻す（デプロイを前のバージョンに戻した状態。スクリプト プロパティは移行後のまま）
   const old = loadProject('admin', { store: w.store, clock: w.clock, properties: next.properties.getProperties(), cache: next.cache, codePath: OLD_CODE });
@@ -157,7 +174,7 @@ test('本番の版（運営用 v0.6.0・閲覧者用 v0.2.0）から: 反映の�
   // 3. 閲覧者用も新しい版
   const viewerNew = loadProject('viewer', { store: w.store, clock: w.clock, properties: { SPREADSHEET_ID }, activeUser: '' });
   assert.equal(snap(viewerNew).event.name, before.event.name);
-  w.ok(next, 'addPlayers', { eventId: w.sampleId, names: ['v0.8 で追加'] }, w.session);
+  w.ok(next, 'addPlayers', { eventId: w.sampleId, names: ['v0.8 で追加'] }, w.relogin(next));
   // 4. 運営用を v0.6.0 に戻す（デプロイの版を戻した状態）: 読み書きでき、閲覧者用（新旧どちら）も読める
   const back = loadProject('admin', { store: w.store, clock: w.clock, properties: next.properties.getProperties(), cache: next.cache, codePath: PROD_ADMIN });
   const d = w.ok(back, 'eventDetail', { eventId: w.koId }, w.session);

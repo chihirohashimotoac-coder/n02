@@ -10,9 +10,10 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.8.0',
+  APP_VERSION: '0.9.0',
   // 1 = v0.7 まで。2 = v0.8（大会設定・所属/Rt・試合の予定/特殊な結果・共同主催者など。列とシートの追加だけ）
-  SCHEMA_VERSION: 2,
+  // 3 = v0.9（主催者・共同主催者を Google の不変 ID（sub）で識別する列。共同主催者の旧 email 列は invite_email へ移す）
+  SCHEMA_VERSION: 3,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
   // 二重送信（ボタン連打・通信再試行）を requestId で弾く期間
@@ -51,6 +52,8 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_IMPORT_PLAYERS: 128,
   // ポータルの「作成した大会」に返す大会の上限（新しい順）
   MAX_MY_EVENTS: 100,
+  // v0.9: 1 つの大会・招待に記録する「確認待ちのログイン」（同じメールアドレスの別アカウント）の上限
+  MAX_LINK_CLAIMS: 5,
 });
 
 /** 試合状態（シートにはコード値で保存し、画面で日本語に変換する） */
@@ -142,7 +145,7 @@ var SCHEMA = Object.freeze({
       ['organizer_name', 'text'], // 主催者名（任意・非公開。管理者が誰の大会か分かるように）
       ['admin_key_hash', 'text'], // v0.4 までの運営用の鍵（v0.5 以降は使わない。既存のシートとの互換のため列だけ残す）
       ['admin_key_issued_at', 'text'],
-      ['owner_email', 'text'], // 大会を作った Google アカウント（小文字）。空欄の大会は管理者だけが操作できる
+      ['owner_email', 'text'], // 主催者の Google アカウントのメールアドレス（小文字）。v0.9 から表示と紐付けの手がかりだけに使い、権限は owner_sub で判定する。空欄の大会は管理者だけが操作できる
       ['staff_pass_hash', 'text'], // 店舗スタッフ用の管理パスワードのソルト付き SHA-256。空欄なら未設定
       ['staff_pass_salt', 'text'],
       ['staff_pass_set_at', 'text'],
@@ -151,6 +154,8 @@ var SCHEMA = Object.freeze({
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
+      ['owner_sub', 'text', 3], // v0.9: 主催者の Google アカウントの不変 ID（ID トークンの sub）。権限の判定に使う。画面・公開データには出さない
+      ['owner_link_json', 'text', 3], // v0.9: 紐付けた時のメールアドレス・方法、確認待ちのログイン（02b_identity.js）
     ],
   },
   Rules: {
@@ -284,6 +289,8 @@ var SCHEMA = Object.freeze({
     ],
   },
   // v0.8: 共同主催者（Google アカウント単位）。招待メールは送らない
+  // v0.9: 主催者が入力したメールアドレスは「招待」（invite_email）で、権限はない。招待先がログインして sub を紐付けると有効になる。
+  //       email 列は v0.8 の形式（メールアドレスだけで権限があった）。v0.9 は書かず、移行で invite_email へ移す（旧版に戻しても招待に権限が付かない）
   Collaborators: {
     key: 'collab_id',
     since: 2,
@@ -296,6 +303,9 @@ var SCHEMA = Object.freeze({
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
+      ['invite_email', 'text', 3], // v0.9: 招待したメールアドレス（小文字）
+      ['sub', 'text', 3], // v0.9: 紐付けた Google アカウントの不変 ID。空欄なら招待中（権限なし）
+      ['link_json', 'text', 3], // v0.9: 紐付けた時のメールアドレス・方法、確認待ちのログイン
     ],
   },
   PublicSnapshots: {

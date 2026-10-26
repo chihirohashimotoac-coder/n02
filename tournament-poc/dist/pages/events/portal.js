@@ -306,7 +306,7 @@
       pub: { events: null, version: '', error: null, loading: false, loadedAt: '' },
       mine: { events: null, error: null, loading: false, truncated: false },
       google: null,
-      notice: null, // { kind: 'info'|'error', text }
+      notice: null, // { kind: 'info'|'error', text, action?: { label, onClick } }
       pending: null, // ログイン後に続ける操作 { kind: 'create' } | { kind: 'manage', event }
       dialogEvent: null,
       dialogStep: '', // '' | 'auth'（管理画面のログイン方法を選ぶ）
@@ -361,11 +361,20 @@
       });
     }
 
-    function adminCall(action, payload, auth) {
+    function newRequestId() {
+      var bytes = new Uint8Array(16);
+      win.crypto.getRandomValues(bytes);
+      return Array.prototype.map.call(bytes, function (b) {
+        return ('0' + b.toString(16)).slice(-2);
+      }).join('');
+    }
+
+    /** requestId: 書き込みの操作（linkAccount）だけ。サーバーが二重送信を見分ける */
+    function adminCall(action, payload, auth, requestId) {
       return fetchJson(adminEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: action, payload: payload || {}, auth: auth }),
+        body: JSON.stringify({ action: action, payload: payload || {}, auth: auth, requestId: requestId }),
         credentials: 'omit',
         cache: 'no-store',
         redirect: 'follow',
@@ -414,10 +423,33 @@
       }
       state.mine.loading = true;
       render();
-      return adminCall('myEvents', {}, { session: state.google.session })
+      var session = state.google.session;
+      return adminCall('myEvents', {}, { session: session })
+        .then(function (data) {
+          // v0.9: 以前の大会・招待をこのアカウントに紐付けられるときは、紐付けてから読み直す（同じセッションで 1 回だけ）
+          if (data.link && data.link.available > 0 && !linkedSessions[session]) {
+            linkedSessions[session] = true;
+            return adminCall('linkAccount', {}, { session: session }, newRequestId()).then(
+              function (res) {
+                var n = res && res.linked ? res.linked.owner + res.linked.collaborator : 0;
+                if (n) toast('ok', 'このアカウントに ' + n + ' 件の大会（主催・共同主催）を紐付けました。');
+                return adminCall('myEvents', {}, { session: session });
+              },
+              function (err) {
+                if (err && (err.code === 'AUTH_EXPIRED' || err.code === 'AUTH_REQUIRED' || err.code === 'AUTH_INVALID')) throw err;
+                toast('error', '大会の紐付けに失敗しました。時間をおいてページを再読み込みしてください。');
+                return data;
+              }
+            );
+          }
+          return data;
+        })
         .then(function (data) {
           state.mine = { events: data.events || [], error: null, loading: false, truncated: !!data.truncated };
           if (data.email && state.google && data.email !== state.google.email) setGoogle(Object.assign({}, state.google, { email: data.email }));
+          if (data.link && data.link.pending) {
+            state.notice = { kind: 'info', text: 'このアカウントの確認待ちが ' + data.link.pending + ' 件あります（大会の主催者・共同主催者としての紐付け）。承認されると「作成した大会」に表示されます。' };
+          }
         })
         .catch(function (err) {
           state.mine.loading = false;
@@ -458,12 +490,25 @@
       // 戻ってきたら 1 回確かめる（変わっていなければ notModified で本文は来ない）
       loadPublic('visible');
       // 別のタブ（運営画面）でログイン・ログアウトしていれば反映する
+      syncGoogleFromStorage();
+    });
+
+    function syncGoogleFromStorage() {
       var g = readGoogle();
-      if ((g && g.session) !== (state.google && state.google.session)) {
-        state.google = g;
-        loadMine();
-        renderAccount();
+      if ((g && g.session) === (state.google && state.google.session)) return;
+      state.google = g;
+      if (!g) {
+        state.mine = { events: null, error: null, loading: false, truncated: false };
+        if (state.tab === 'mine') state.tab = 'public';
       }
+      loadMine();
+      renderAccount();
+      render();
+    }
+
+    // 別のタブでのログイン・ログアウトを、表示中でもすぐに反映する（同じオリジンの localStorage）
+    win.addEventListener('storage', function (e) {
+      if (e.key === null || e.key === 'tpoc-google') syncGoogleFromStorage();
     });
 
     /* ---- Google ログイン（Google Identity Services の公式ボタン） ---- */
@@ -597,9 +642,12 @@
       }
     }
 
+    /**
+     * ログアウト: 先にこの端末のログインを消し（この端末からは使えなくする）、その後でサーバーに無効化を頼む。
+     * 成功を確かめられたときだけ「サーバーでも無効にした」と伝え、失敗・時間切れなら警告と再試行を出す。
+     */
     function logout() {
       var g = state.google;
-      if (g && g.session) adminCall('logout', { session: g.session }).catch(function () {});
       setGoogle(null);
       try {
         if (win.google && win.google.accounts && win.google.accounts.id) win.google.accounts.id.disableAutoSelect();
@@ -608,9 +656,49 @@
       }
       state.mine = { events: null, error: null, loading: false, truncated: false };
       if (state.tab === 'mine') state.tab = 'public';
-      toast('ok', 'ログアウトしました。');
+      state.notice = null;
       renderAccount();
       render();
+      if (g && g.session) revokeOnServer(g);
+      else toast('ok', 'ログアウトしました。');
+    }
+
+    var LOGOUT_TIMEOUT_MS = 15000;
+    var linkedSessions = {};
+
+    function revokeOnServer(g) {
+      var timeout = new Promise(function (resolve, reject) {
+        win.setTimeout(function () {
+          reject({ code: 'TIMEOUT' });
+        }, LOGOUT_TIMEOUT_MS);
+      });
+      if (state.notice && state.notice.revoke) {
+        state.notice.action.disabled = true;
+        renderNotice();
+      }
+      Promise.race([adminCall('logout', { session: g.session }), timeout])
+        .then(function (data) {
+          if (!data || data.loggedOut !== true) throw { code: 'UNKNOWN' };
+          if (state.notice && state.notice.revoke) state.notice = null;
+          toast('ok', 'ログアウトしました（サーバーでもログインを無効にしました）。');
+        })
+        .catch(function () {
+          state.notice = {
+            kind: 'error',
+            revoke: true,
+            text:
+              'この端末ではログアウトしました（この端末のログイン情報は消しました）。ただし、通信できなかったため、サーバー側でログインを無効にできたかは確認できていません。サーバー側では' +
+              (g.expiresAt ? ' 最長 ' + new Date(g.expiresAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) + ' まで' : '期限まで') +
+              '有効なままの可能性があります。通信できる状態で、もう一度お試しください（このページを閉じると再試行できません）。',
+            action: {
+              label: 'もう一度試す',
+              onClick: function () {
+                revokeOnServer(g);
+              },
+            },
+          };
+        })
+        .then(renderNotice);
     }
 
     function isMine(eventId) {
@@ -1024,6 +1112,7 @@
         el(doc, 'div', { className: 'banner banner--' + n.kind, role: n.kind === 'error' ? 'alert' : 'status' }, [
           icon(doc, n.kind === 'error' ? ICON_ERROR : ICON_INFO, 24),
           el(doc, 'p', { className: 'banner__text', text: n.text }),
+          n.action ? el(doc, 'button', { type: 'button', className: 'btn btn--secondary btn--small', disabled: n.action.disabled ? true : null, onClick: n.action.onClick, text: n.action.label }) : null,
           el(doc, 'button', {
             type: 'button',
             className: 'banner__close',

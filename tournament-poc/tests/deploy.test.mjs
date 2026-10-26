@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runGas, runPages, runRollback, runVerifyPages, summaryMarkdown, createRecorder, stampRelease } from '../tools/deploy/deploy.mjs';
+import { runGas, runPages, runRollback, runVerifyPages, summaryMarkdown, createRecorder, stampRelease, expectedSchema } from '../tools/deploy/deploy.mjs';
 import { parseClasprc, accessToken } from '../tools/deploy/gas-api.mjs';
 import { createStore, createClock, loadProject, fakeIdToken, SPREADSHEET_ID, ADMIN_KEY as GAS_ADMIN_KEY, GOOGLE_CLIENT_ID, ROOT } from './gas-mock.mjs';
 
@@ -104,7 +104,7 @@ function fakeGoogle(opts = {}) {
         migrated = true;
         return json(200, res);
       }
-      if (dep === ADMIN_DEP) return json(200, { ok: true, release: deployed.admin.release, schema: deployed.admin.release === SHA ? 2 : undefined });
+      if (dep === ADMIN_DEP) return json(200, { ok: true, release: deployed.admin.release, schema: deployed.admin.release === SHA ? expectedSchema() : undefined });
       if (dep === VIEWER_DEP && u.searchParams.get('format') === 'version') return json(200, { ok: true, release: deployed.viewer.release });
       if (dep === VIEWER_DEP && u.searchParams.get('format') === 'list') return json(200, { ok: true, events: [] });
     }

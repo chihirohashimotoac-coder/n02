@@ -289,9 +289,10 @@ function estimateFormat_(id, params) {
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.8.0',
+  APP_VERSION: '0.9.0',
   // 1 = v0.7 まで。2 = v0.8（大会設定・所属/Rt・試合の予定/特殊な結果・共同主催者など。列とシートの追加だけ）
-  SCHEMA_VERSION: 2,
+  // 3 = v0.9（主催者・共同主催者を Google の不変 ID（sub）で識別する列。共同主催者の旧 email 列は invite_email へ移す）
+  SCHEMA_VERSION: 3,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
   // 二重送信（ボタン連打・通信再試行）を requestId で弾く期間
@@ -330,6 +331,8 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_IMPORT_PLAYERS: 128,
   // ポータルの「作成した大会」に返す大会の上限（新しい順）
   MAX_MY_EVENTS: 100,
+  // v0.9: 1 つの大会・招待に記録する「確認待ちのログイン」（同じメールアドレスの別アカウント）の上限
+  MAX_LINK_CLAIMS: 5,
 });
 
 /** 試合状態（シートにはコード値で保存し、画面で日本語に変換する） */
@@ -421,7 +424,7 @@ var SCHEMA = Object.freeze({
       ['organizer_name', 'text'], // 主催者名（任意・非公開。管理者が誰の大会か分かるように）
       ['admin_key_hash', 'text'], // v0.4 までの運営用の鍵（v0.5 以降は使わない。既存のシートとの互換のため列だけ残す）
       ['admin_key_issued_at', 'text'],
-      ['owner_email', 'text'], // 大会を作った Google アカウント（小文字）。空欄の大会は管理者だけが操作できる
+      ['owner_email', 'text'], // 主催者の Google アカウントのメールアドレス（小文字）。v0.9 から表示と紐付けの手がかりだけに使い、権限は owner_sub で判定する。空欄の大会は管理者だけが操作できる
       ['staff_pass_hash', 'text'], // 店舗スタッフ用の管理パスワードのソルト付き SHA-256。空欄なら未設定
       ['staff_pass_salt', 'text'],
       ['staff_pass_set_at', 'text'],
@@ -430,6 +433,8 @@ var SCHEMA = Object.freeze({
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
+      ['owner_sub', 'text', 3], // v0.9: 主催者の Google アカウントの不変 ID（ID トークンの sub）。権限の判定に使う。画面・公開データには出さない
+      ['owner_link_json', 'text', 3], // v0.9: 紐付けた時のメールアドレス・方法、確認待ちのログイン（02b_identity.js）
     ],
   },
   Rules: {
@@ -563,6 +568,8 @@ var SCHEMA = Object.freeze({
     ],
   },
   // v0.8: 共同主催者（Google アカウント単位）。招待メールは送らない
+  // v0.9: 主催者が入力したメールアドレスは「招待」（invite_email）で、権限はない。招待先がログインして sub を紐付けると有効になる。
+  //       email 列は v0.8 の形式（メールアドレスだけで権限があった）。v0.9 は書かず、移行で invite_email へ移す（旧版に戻しても招待に権限が付かない）
   Collaborators: {
     key: 'collab_id',
     since: 2,
@@ -575,6 +582,9 @@ var SCHEMA = Object.freeze({
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
+      ['invite_email', 'text', 3], // v0.9: 招待したメールアドレス（小文字）
+      ['sub', 'text', 3], // v0.9: 紐付けた Google アカウントの不変 ID。空欄なら招待中（権限なし）
+      ['link_json', 'text', 3], // v0.9: 紐付けた時のメールアドレス・方法、確認待ちのログイン
     ],
   },
   PublicSnapshots: {
@@ -758,8 +768,9 @@ function byOrder_(a, b) {
  *
  * - 主催者: Google アカウントでログインする。運営画面（GitHub Pages）が Google Identity Services で受け取った
  *   ID トークンを送り、ここで Google の tokeninfo に問い合わせて確かめる（宛先 aud = スクリプト プロパティ
- *   GOOGLE_CLIENT_ID・発行元・有効期限・メール確認済み）。大会を作った Google アカウント（owner_email）だけが、
- *   その大会を運営できる。誰でも大会を作れる（上限あり）
+ *   GOOGLE_CLIENT_ID・発行元・有効期限・メール確認済み・sub）。誰でも大会を作れる（上限あり）
+ * - v0.9: 利用者は ID トークンの sub（Google アカウントごとに不変で再利用されない ID）で識別する。メールアドレスは
+ *   変わりうる・別の人に渡りうるので、権限の判定には使わない（表示と、既存の大会・招待を紐付ける手がかりだけ。02b_identity.js）
  * - 店舗スタッフ: 主催者が大会ごとに設定した「管理パスワード」でその大会だけを運営できる。
  *   シートには乱数のソルト付き SHA-256 だけを保存する。間違いが続いたら一定時間止める
  * - ログインに成功したら推測できない長さのセッション（244 ビット相当の乱数）を発行し、以後はそれで呼ぶ。
@@ -778,6 +789,8 @@ var ID_TOKEN_PATTERN_ = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 var ID_TOKEN_MAX_LENGTH_ = 4096;
 var GOOGLE_ISSUERS_ = ['accounts.google.com', 'https://accounts.google.com'];
 var EMAIL_PATTERN_ = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Google の sub は 255 文字以内の ASCII（実際は数字の列）。空白・制御文字は受け付けない
+var SUB_PATTERN_ = /^[\x21-\x7e]{1,255}$/;
 var STAFF_PASSWORD_MIN_ = 8;
 var STAFF_PASSWORD_MAX_ = 64;
 var STAFF_FAIL_LIMIT_ = 10;
@@ -823,8 +836,12 @@ function normalizeEmail_(value) {
 /* ---------- Google ログイン ---------- */
 
 /**
- * Google の ID トークンを確かめ、ログインした人のメールアドレス（小文字）を返す。
+ * Google の ID トークンを確かめ、ログインした人を返す: { sub, email（小文字）, emailAuthoritative }。
  * 署名の検証は Google の tokeninfo エンドポイントに任せる（Apps Script では Google の検証ライブラリを使えないため）。
+ * emailAuthoritative: Google がそのメールアドレスの今の持ち主を保証できるか（@gmail.com、または email_verified かつ hd あり =
+ * Google Workspace）。それ以外のアドレスは、Google アカウントを作った時に確認されただけで、今の持ち主とは限らない
+ * （https://developers.google.com/identity/gsi/web/guides/verify-google-id-token）。
+ * トークンは URL に入るので、例外の文面（URL を含むことがある）はログに出さない。
  */
 function verifyGoogleIdToken_(token) {
   var clientId = googleClientId_();
@@ -842,11 +859,17 @@ function verifyGoogleIdToken_(token) {
       followRedirects: false,
     });
   } catch (e) {
-    console.error('tokeninfo fetch failed', e && e.message);
+    console.error('tokeninfo fetch failed', e && e.name);
+    throw appError_('UNAVAILABLE', 'Google に接続できませんでした。時間をおいてもう一度お試しください。');
+  }
+  var code = res.getResponseCode();
+  // tokeninfo は混雑時に断られることがある（Google の案内）。その場合はトークンの誤りとは言わない
+  if (code === 429 || code >= 500) {
+    console.error('tokeninfo unavailable', code);
     throw appError_('UNAVAILABLE', 'Google に接続できませんでした。時間をおいてもう一度お試しください。');
   }
   var claims = null;
-  if (res.getResponseCode() === 200) {
+  if (code === 200) {
     try {
       claims = JSON.parse(res.getContentText());
     } catch (e) {
@@ -859,12 +882,15 @@ function verifyGoogleIdToken_(token) {
     claims.aud === clientId &&
     GOOGLE_ISSUERS_.indexOf(claims.iss) >= 0 &&
     Number(claims.exp) > nowSec &&
+    typeof claims.sub === 'string' &&
+    SUB_PATTERN_.test(claims.sub) &&
     (claims.email_verified === true || claims.email_verified === 'true');
   var email = ok ? normalizeEmail_(claims.email) : '';
   if (!email) {
     throw appError_('AUTH_INVALID', 'Google のログイン情報を確認できませんでした。もう一度ログインしてください。');
   }
-  return email;
+  var hd = typeof claims.hd === 'string' ? claims.hd.trim() : '';
+  return { sub: claims.sub, email: email, emailAuthoritative: /@gmail\.com$/.test(email) || hd !== '' };
 }
 
 /* ---------- セッション ---------- */
@@ -873,7 +899,7 @@ function sessionCacheKey_(session) {
   return 'sess:' + sha256Hex_('n02-tournament-session:' + session);
 }
 
-/** data = { kind: 'google', email } | { kind: 'staff', eventId, passStamp } */
+/** data = { kind: 'google', sub, email, emailAuthoritative } | { kind: 'staff', eventId, passStamp } */
 function issueSession_(data) {
   var session = newSecret_();
   var expiresAt = new Date(Date.now() + SESSION_TTL_SEC_ * 1000).toISOString();
@@ -972,23 +998,37 @@ function authenticate_(ctxProvider, auth) {
     if (typeof a.adminKey !== 'string' || !safeEqual_(sha256Hex_(a.adminKey), sha256Hex_(adminKey))) {
       throw appError_('AUTH_INVALID', '管理者の鍵が違います。');
     }
-    return { kind: 'admin', isPlatformAdmin: true, email: '', eventId: '', label: 'admin' };
+    return { kind: 'admin', isPlatformAdmin: true, email: '', eventId: '', label: 'admin', principal: 'admin' };
   }
   if (a.session !== undefined) {
     var data = readSession_(a.session);
     if (data && data.kind === 'google' && normalizeEmail_(data.email)) {
-      return { kind: 'google', isPlatformAdmin: false, email: data.email, eventId: '', label: 'google:' + data.email };
+      // v0.8 までのセッションは sub を持たない（メールアドレスだけ）。権限を判定できないので、ログインし直してもらう
+      if (typeof data.sub !== 'string' || !SUB_PATTERN_.test(data.sub)) {
+        throw appError_('AUTH_EXPIRED', 'ログインの仕組みを更新しました。お手数ですが、もう一度 Google でログインしてください。');
+      }
+      return {
+        kind: 'google',
+        isPlatformAdmin: false,
+        email: data.email,
+        sub: data.sub,
+        emailAuthoritative: data.emailAuthoritative === true,
+        eventId: '',
+        // label は履歴の「操作した人」の表示用。重複送信・回数制限の区別には principal（sub）を使う
+        label: 'google:' + data.email,
+        principal: 'google-sub:' + data.sub,
+      };
     }
     if (data && data.kind === 'staff' && isValidId_(data.eventId)) {
       // 管理パスワードが変わった・消された後は、古いパスワードで作ったセッションを使えなくする
       var event = ctxProvider().table('Events').byKey[data.eventId];
       if (event && event.staff_pass_hash && safeEqual_(staffPassStamp_(event), data.passStamp)) {
-        return { kind: 'staff', isPlatformAdmin: false, email: '', eventId: data.eventId, label: 'staff:' + data.eventId };
+        return { kind: 'staff', isPlatformAdmin: false, email: '', eventId: data.eventId, label: 'staff:' + data.eventId, principal: 'staff:' + data.eventId };
       }
     }
     throw appError_('AUTH_EXPIRED', 'ログインの有効期限が切れたか、管理パスワードが変更されました。もう一度ログインしてください。');
   }
-  return { kind: 'anonymous', isPlatformAdmin: false, email: '', eventId: '', label: 'anonymous' };
+  return { kind: 'anonymous', isPlatformAdmin: false, email: '', eventId: '', label: 'anonymous', principal: 'anonymous' };
 }
 
 function assertPlatformAdmin_(user) {
@@ -1002,7 +1042,7 @@ function assertCanCreate_(user) {
 }
 
 /**
- * 大会ごとの共同主催者（v0.8）のメールアドレス。ctx ごとに 1 回だけ作る。
+ * 大会ごとの有効な共同主催者の sub（v0.9。招待中・確認待ちは含めない）。ctx ごとに 1 回だけ作る。
  * 毎回シートから読むので、解除するとその人の古いセッションでもすぐに操作できなくなる。
  */
 function collaboratorIndex_(ctx) {
@@ -1010,10 +1050,9 @@ function collaboratorIndex_(ctx) {
   if (ctx._collab) return ctx._collab;
   var index = {};
   ctx.table('Collaborators').rows.forEach(function (r) {
-    var email = normalizeEmail_(r.email);
-    if (!email || !isValidId_(r.event_id)) return;
+    if (!collabActive_(r) || !isValidId_(r.event_id)) return;
     if (!index[r.event_id]) index[r.event_id] = [];
-    if (index[r.event_id].indexOf(email) === -1) index[r.event_id].push(email);
+    if (index[r.event_id].indexOf(r.sub) === -1) index[r.event_id].push(r.sub);
   });
   ctx._collab = index;
   return index;
@@ -1026,9 +1065,11 @@ function eventRole_(user, event, ctx) {
   if (!user || !event) return '';
   if (user.isPlatformAdmin) return 'admin';
   if (user.kind === 'google') {
-    if (event.owner_email && event.owner_email === user.email) return 'owner';
+    // メールアドレスの一致だけでは権限を与えない（紐付けた sub だけで判定する）
+    if (!user.sub) return '';
+    if (ownerSubOf_(event) === user.sub) return 'owner';
     var list = collaboratorIndex_(ctx)[event.event_id] || [];
-    return list.indexOf(user.email) !== -1 ? 'editor' : '';
+    return list.indexOf(user.sub) !== -1 ? 'editor' : '';
   }
   if (user.kind === 'staff') return user.eventId === event.event_id ? 'staff' : '';
   return '';
@@ -1087,6 +1128,231 @@ function authorizeEventPayload_(ctx, payload) {
     });
   }
   return eventId;
+}
+
+// ---- 02b_identity.js ----
+/* v0.9: 主催者・共同主催者と Google アカウント（sub）の紐付け
+ *
+ * 権限は sub だけで判定する（02_auth.js の eventRole_）。メールアドレスは、まだ sub の分からない
+ * 「既存の大会（v0.8 までに作成）」「管理者が付け替えた主催者」「共同主催者の招待」を、本人のログインで紐付ける手がかりにだけ使う。
+ *
+ * 紐付けの条件（linkCandidates_）:
+ * - ログインで確かめたメールアドレスが、大会の owner_email・招待のメールアドレスと一致する
+ * - Google がそのアドレスの今の持ち主を保証できる（@gmail.com、または Google Workspace = hd あり）
+ * - そのアドレスが別の sub に、またはその sub が別のアドレスに、既に紐付いていない（アドレスの再割り当て・変更の疑い）
+ * 満たせば本人のログインで自動的に紐付ける。満たさなければ「確認待ちのログイン」として記録するだけで権限は付けず、
+ * 主催者（共同主催者の場合）か管理者（主催者の場合）が画面で承認したときに、その sub を紐付ける。
+ * 画面・履歴には sub を出さず、見分け用の短い参照（subRef_）だけを出す。
+ */
+
+function subRef_(sub) {
+  return sha256Hex_('n02-tournament-sub:' + sub).slice(0, 12);
+}
+
+function linkJson_(text) {
+  var v = safeJson_(text, {});
+  if (!Array.isArray(v.claims)) v.claims = [];
+  v.claims = v.claims.filter(function (c) {
+    return c && typeof c.sub === 'string' && SUB_PATTERN_.test(c.sub);
+  });
+  return v;
+}
+
+/**
+ * 大会の主催者の sub。紐付けた時のメールアドレスと今の owner_email が違えば（旧版での付け替え・シートの手作業での変更）、
+ * 紐付けは古いとみなして使わない（空欄 = 主催者が紐付いていない。管理者だけが操作できる）
+ */
+function ownerSubOf_(event) {
+  if (!event || !event.owner_sub || !SUB_PATTERN_.test(event.owner_sub) || !event.owner_email) return '';
+  var link = safeJson_(event.owner_link_json, {});
+  return normalizeEmail_(link.email) === event.owner_email ? event.owner_sub : '';
+}
+
+/** 共同主催者の招待のメールアドレス（v0.8 の行は email 列） */
+function collabEmailOf_(r) {
+  return normalizeEmail_(r.invite_email) || normalizeEmail_(r.email);
+}
+
+/** 共同主催者として有効か（sub が紐付いている） */
+function collabActive_(r) {
+  return !!(r && typeof r.sub === 'string' && SUB_PATTERN_.test(r.sub));
+}
+
+/** 確認待ちのログインを画面に出す形（sub は出さない） */
+function claimsView_(link) {
+  return link.claims.map(function (c) {
+    return { ref: subRef_(c.sub), email: normalizeEmail_(c.email), at: c.at || '' };
+  });
+}
+
+/** 新しく作る大会の主催者（Google でログインした人。管理者が作った大会は主催者なし） */
+function creatorOwner_(ctx) {
+  var u = ctx.user;
+  if (!u || u.kind !== 'google' || !u.sub) return { owner_email: '', owner_sub: '', owner_link_json: '' };
+  return { owner_email: u.email, owner_sub: u.sub, owner_link_json: JSON.stringify({ email: u.email, via: 'created', at: ctx.now }) };
+}
+
+/**
+ * 紐付け済みの (sub, メールアドレス) の組。アドレスの再割り当て・変更の疑いを見つけるのに使う。
+ * 主催者の紐付け（有効なもの）と、有効な共同主催者から集める。
+ */
+function linkedPairs_(ctx) {
+  var pairs = [];
+  ctx.table('Events').rows.forEach(function (e) {
+    var sub = ownerSubOf_(e);
+    if (sub) pairs.push({ sub: sub, email: e.owner_email });
+  });
+  ctx.table('Collaborators').rows.forEach(function (r) {
+    if (!collabActive_(r)) return;
+    var link = safeJson_(r.link_json, {});
+    pairs.push({ sub: r.sub, email: normalizeEmail_(link.email) || collabEmailOf_(r) });
+  });
+  return pairs;
+}
+
+/**
+ * この利用者（Google ログイン）に紐付けられる大会・招待。
+ * 戻り値 { bind: [...], claim: [...], pending: [...] }。各要素は { kind: 'owner', event } | { kind: 'collaborator', event, rec }
+ * - bind: 本人のログインで自動的に紐付けてよい
+ * - claim: 確認待ちとして記録する（まだ記録していない）
+ * - pending: この人の確認待ちが記録済み（承認を待っている）
+ */
+function linkCandidates_(ctx, user) {
+  var out = { bind: [], claim: [], pending: [] };
+  if (!user || user.kind !== 'google' || !user.sub || !user.email) return out;
+  var events = ctx.table('Events');
+  var conflict = linkedPairs_(ctx).some(function (p) {
+    return (p.email === user.email && p.sub !== user.sub) || (p.sub === user.sub && p.email !== user.email);
+  });
+  var auto = user.emailAuthoritative === true && !conflict;
+  var place = function (item, link) {
+    var claimed = link.claims.some(function (c) {
+      return c.sub === user.sub;
+    });
+    if (claimed) out.pending.push(item);
+    else if (auto) out.bind.push(item);
+    else out.claim.push(item);
+  };
+  events.rows.forEach(function (e) {
+    if (events.duplicates[e.event_id] || !e.owner_email || e.owner_email !== user.email || ownerSubOf_(e)) return;
+    place({ kind: 'owner', event: e }, linkJson_(e.owner_link_json));
+  });
+  ctx.table('Collaborators').rows.forEach(function (r) {
+    if (collabActive_(r) || collabEmailOf_(r) !== user.email) return;
+    var e = events.byKey[r.event_id];
+    if (!e || events.duplicates[r.event_id] || ownerSubOf_(e) === user.sub) return;
+    place({ kind: 'collaborator', event: e, rec: r }, linkJson_(r.link_json));
+  });
+  return out;
+}
+
+/** 画面に返す件数（bootstrap・myEvents）。available があれば、画面が linkAccount を呼ぶ */
+function linkSummary_(ctx, user) {
+  var c = linkCandidates_(ctx, user);
+  return { available: c.bind.length + c.claim.length, pending: c.pending.length };
+}
+
+function addClaim_(link, user, now) {
+  if (link.claims.length >= ADMIN_CONFIG.MAX_LINK_CLAIMS) return false;
+  link.claims.push({ sub: user.sub, email: user.email, at: now });
+  return true;
+}
+
+/** 紐付ける: 主催者は owner_sub、共同主催者は sub。共同主催者の v0.8 の email 列は invite_email へ移す */
+function bindItem_(ctx, item, sub, email, via) {
+  var link = { email: email, via: via, at: ctx.now };
+  if (ctx.user && ctx.user.kind !== 'google') link.by = ctx.user.label;
+  if (item.kind === 'owner') {
+    item.event.owner_sub = sub;
+    item.event.owner_link_json = JSON.stringify(link);
+    updateRecord_(ctx.table('Events'), item.event);
+    recordHistory_(ctx, 'owner.link', 'Event', item.event.event_id, item.event.event_id, null, { via: via, account: subRef_(sub) });
+    return;
+  }
+  var r = item.rec;
+  r.invite_email = collabEmailOf_(r);
+  r.email = '';
+  r.sub = sub;
+  r.link_json = JSON.stringify(link);
+  r.rev = (r.rev || 0) + 1;
+  r.updated_at = ctx.now;
+  updateRecord_(ctx.table('Collaborators'), r);
+  recordHistory_(ctx, 'collaborator.link', 'Event', item.event.event_id, item.event.event_id, null, { email: r.invite_email, via: via, account: subRef_(sub) });
+}
+
+/**
+ * ログインした本人の大会・招待を紐付ける（画面がログインの後に呼ぶ）。
+ * 自動で紐付けてよいものは紐付け、そうでないものは確認待ちとして記録する（権限は付かない）。
+ */
+function actionLinkAccount_(ctx) {
+  var user = ctx.user;
+  var c = linkCandidates_(ctx, user);
+  c.bind.forEach(function (item) {
+    bindItem_(ctx, item, user.sub, user.email, 'email');
+  });
+  var claimed = 0;
+  c.claim.forEach(function (item) {
+    var table = item.kind === 'owner' ? ctx.table('Events') : ctx.table('Collaborators');
+    var rec = item.kind === 'owner' ? item.event : item.rec;
+    var field = item.kind === 'owner' ? 'owner_link_json' : 'link_json';
+    var link = linkJson_(rec[field]);
+    if (!addClaim_(link, user, ctx.now)) return;
+    rec[field] = JSON.stringify(link);
+    if (item.kind === 'collaborator') {
+      rec.rev = (rec.rev || 0) + 1;
+      rec.updated_at = ctx.now;
+    }
+    updateRecord_(table, rec);
+    claimed++;
+    recordHistory_(ctx, item.kind === 'owner' ? 'owner.claim' : 'collaborator.claim', 'Event', item.event.event_id, item.event.event_id, null, { email: user.email, account: subRef_(user.sub) });
+  });
+  var owners = c.bind.filter(function (i) {
+    return i.kind === 'owner';
+  }).length;
+  return { linked: { owner: owners, collaborator: c.bind.length - owners }, claimed: claimed, pending: c.pending.length + claimed };
+}
+
+/** 確認待ちのログインから 1 件を選ぶ（画面からは参照 ref だけを受け取る） */
+function pickClaim_(link, ref, email) {
+  if (typeof ref !== 'string' || !/^[a-f0-9]{12}$/.test(ref)) throw appError_('BAD_REQUEST', '承認するログインの指定が不正です。');
+  var found = link.claims.filter(function (c) {
+    return subRef_(c.sub) === ref && normalizeEmail_(c.email) === email;
+  })[0];
+  if (!found) throw appError_('NOT_FOUND', '確認待ちのログインが見つかりません。画面を再読み込みしてください。');
+  return found;
+}
+
+/** 管理者: 主催者の確認待ちのログインを承認して、その Google アカウントを主催者にする */
+function actionApproveOwnerClaim_(ctx, payload) {
+  assertPlatformAdmin_(ctx.user);
+  var eventId = requireId_(payload.eventId, '大会');
+  var events = ctx.table('Events');
+  var event = findRecord_(events, eventId, '大会');
+  assertRev_(event, requireRev_(payload.rev), '大会');
+  if (!event.owner_email) throw appError_('VALIDATION', 'この大会には主催者のメールアドレスが設定されていません。');
+  var claim = pickClaim_(linkJson_(event.owner_link_json), payload.ref, event.owner_email);
+  bindItem_(ctx, { kind: 'owner', event: event }, claim.sub, event.owner_email, 'approved');
+  event.rev = (event.rev || 0) + 1;
+  event.updated_at = ctx.now;
+  updateRecord_(events, event);
+  return { eventId: eventId };
+}
+
+/** 主催者・管理者: 共同主催者の確認待ちのログインを承認して、有効にする */
+function actionApproveCollaborator_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '共同主催者の承認');
+  var event = findRecord_(ctx.table('Events'), eventId, '大会');
+  var table = ctx.table('Collaborators');
+  var rec = findRecord_(table, requireId_(payload.collabId, '共同主催者'), '共同主催者');
+  if (rec.event_id !== eventId) throw appError_('NOT_FOUND', '共同主催者が見つかりません。');
+  assertRev_(rec, requireRev_(payload.rev), '共同主催者');
+  if (collabActive_(rec)) throw appError_('VALIDATION', 'この共同主催者は既に有効です。');
+  var email = collabEmailOf_(rec);
+  var claim = pickClaim_(linkJson_(rec.link_json), payload.ref, email);
+  if (claim.sub === ownerSubOf_(event)) throw appError_('VALIDATION', 'この大会の主催者本人です。');
+  bindItem_(ctx, { kind: 'collaborator', event: event, rec: rec }, claim.sub, email, 'approved');
+  return { eventId: eventId };
 }
 
 // ---- 03_storage.js ----
@@ -1572,8 +1838,9 @@ var BACKUP_PREFIX_ = 'bak-';
  * 保存先を ADMIN_CONFIG.SCHEMA_VERSION に移行する。管理者の鍵でだけ呼べる（migrateStorage 操作）。
  * 1. 移行前の件数を数える  2. 各シートを同じスプレッドシート内に複製してバックアップ
  * 3. 足りないシート・列を追加（initializeStorage_ と同じ。既存の列・値は動かさない）
- * 4. 件数が変わっていないことを確かめてから SCHEMA_VERSION を上げる
- * 何度呼んでも安全（移行済みなら何もしない）。途中で失敗しても、既存の列・値は変わっていない。
+ * 3b. v3 への移行だけ: 共同主催者の v0.8 の email 列（メールアドレスだけで権限があった）を invite_email（招待）へ移す（migrateRecords_）
+ * 4. 件数（と 3b の結果）が正しいことを確かめてから SCHEMA_VERSION を上げる
+ * 何度呼んでも安全（移行済みなら何もしない）。途中で止まっても、やり直せば続きから終わる（3b は移していない行だけを移す）。
  * 公開閲覧（閲覧者用 Web アプリ）からは呼ばれない。
  */
 function migrateStorage_(ss, actor) {
@@ -1597,11 +1864,15 @@ function migrateStorage_(ss, actor) {
     if (!sheet) return;
     var copy = sheet.copyTo(ss);
     var backupName = BACKUP_PREFIX_ + 's' + from + '-' + stamp + '-' + name;
+    // 途中で止まった移行を同じ秒にやり直すと名前が重なるので、番号を付けて分ける（前のバックアップは消さない）
+    for (var k = 2; ss.getSheetByName(backupName); k++) backupName = BACKUP_PREFIX_ + 's' + from + '-' + stamp + '-' + k + '-' + name;
     copy.setName(backupName);
     state.backups.push(backupName);
   });
   props.setProperty('MIGRATION_STATE', JSON.stringify(state));
   var init = initializeStorage_(ss, { keepVersion: true });
+  var records = migrateRecords_(ss, from);
+  state.records = records;
   var after = {};
   var mismatch = [];
   SHEET_ORDER.forEach(function (name) {
@@ -1619,7 +1890,31 @@ function migrateStorage_(ss, actor) {
   state.finishedAt = nowIso_();
   state.added = init;
   props.setProperty('MIGRATION_STATE', JSON.stringify(state));
-  return { from: from, to: to, migrated: true, backups: state.backups, added: init, counts: after };
+  return { from: from, to: to, migrated: true, backups: state.backups, added: init, counts: after, records: records };
+}
+
+/**
+ * 値の移し替え（列の追加の後）。v3: 共同主催者の email 列を invite_email へ移し、email 列を空にする。
+ * 移した行は「招待中」（権限なし）になり、本人がログインして sub を紐付けると有効になる。
+ * email 列を空にするのは、旧版（v0.8 まで。email 列で権限を判定する）に戻したときに、招待に権限が付かないようにするため。
+ */
+function migrateRecords_(ss, from) {
+  var out = { collaboratorsMoved: 0 };
+  if (from >= 3 || !ss.getSheetByName('Collaborators')) return out;
+  var table = readTable_(ss, 'Collaborators');
+  table.rows.forEach(function (r) {
+    if (!r.email || collabActive_(r)) return;
+    r.invite_email = r.invite_email || normalizeEmail_(r.email) || r.email;
+    r.email = '';
+    r._dirty = true;
+    out.collaboratorsMoved++;
+  });
+  if (out.collaboratorsMoved) writeUpdates_(table);
+  var left = readTable_(ss, 'Collaborators').rows.filter(function (r) {
+    return r.email && !collabActive_(r);
+  });
+  if (left.length) throw appError_('MIGRATION_FAILED', '共同主催者の移し替えが終わっていません（残り ' + left.length + ' 件）。もう一度移行を実行してください。');
+  return out;
 }
 
 function migrationState_() {
@@ -3970,6 +4265,7 @@ function actionBootstrap_(ctx) {
   var user = ctx.user;
   var storage = getStorageStatus_();
   var events = [];
+  var link;
   if (storage.initialized && user.kind !== 'anonymous') {
     var c = createContext_(openStorage_(), ctx.actor, user);
     var matches = c.table('Matches').rows;
@@ -3999,10 +4295,14 @@ function actionBootstrap_(ctx) {
         updatedAt: e.updated_at,
         organizerName: user.isPlatformAdmin ? e.organizer_name : undefined,
         ownerEmail: user.isPlatformAdmin ? e.owner_email : undefined,
+        // v0.9: 主催者が Google アカウントに紐付いているか・確認待ちのログインの数（管理者だけ）
+        ownerLinked: user.isPlatformAdmin ? !!ownerSubOf_(e) : undefined,
+        ownerClaims: user.isPlatformAdmin && !ownerSubOf_(e) ? linkJson_(e.owner_link_json).claims.length : undefined,
         staffPasswordSet: user.kind === 'staff' ? undefined : !!e.staff_pass_hash,
         role: eventRole_(user, e, c),
       };
     });
+    if (user.kind === 'google') link = linkSummary_(c, user);
   }
   var props = PropertiesService.getScriptProperties();
   if (!user.isPlatformAdmin) {
@@ -4016,7 +4316,8 @@ function actionBootstrap_(ctx) {
   }
   return {
     appVersion: ADMIN_CONFIG.APP_VERSION,
-    role: { kind: user.kind, isPlatformAdmin: user.isPlatformAdmin, email: user.email, eventId: user.eventId },
+    // link: { available, pending }（Google ログインのみ）。available > 0 なら画面が linkAccount を呼ぶ
+    role: { kind: user.kind, isPlatformAdmin: user.isPlatformAdmin, email: user.email, eventId: user.eventId, link: link },
     googleLoginReady: !!googleClientId_(),
     storage: storage,
     events: events,
@@ -4026,7 +4327,7 @@ function actionBootstrap_(ctx) {
 
 /**
  * ポータルの「作成した大会」: Google でログインした本人が作った大会だけを、公開・非公開・状態を問わず返す。
- * 絞り込みはサーバーのセッション（ログインで確かめたメールアドレス）と各大会の owner_email で行い、
+ * 絞り込みはサーバーのセッション（ログインで確かめた Google アカウントの sub）と各大会に紐付けた sub で行い、
  * 送られてきたメールアドレスや大会 ID は使わない。返すのは一覧の要約（公開データと同じ範囲）と公開状態だけ。
  */
 function actionMyEvents_(ctx) {
@@ -4047,7 +4348,7 @@ function actionMyEvents_(ctx) {
     s.role = eventRole_(user, e, ctx);
     return s;
   });
-  return { email: user.email, events: list, truncated: mine.length > list.length };
+  return { email: user.email, events: list, truncated: mine.length > list.length, link: linkSummary_(ctx, user) };
 }
 
 function actionEventDetail_(ctx, payload) {
@@ -4065,13 +4366,23 @@ function eventDetail_(ctx, eventId) {
   view.event.role = role;
   view.event.canChangePassword = role === 'owner' || role === 'admin';
   view.event.canManageCollaborators = role === 'owner' || role === 'admin';
+  if (role === 'admin') {
+    // v0.9: 主催者の紐付けの状態と確認待ちのログイン（管理者が承認する。sub は出さない）
+    var ownerLink = linkJson_(bundle.event.owner_link_json);
+    view.event.ownerLink = ownerSubOf_(bundle.event)
+      ? { linked: true, via: ownerLink.via || '', at: ownerLink.at || '', claims: [] }
+      : { linked: false, claims: bundle.event.owner_email ? claimsView_(ownerLink) : [] };
+  }
   if (view.event.canManageCollaborators) {
     view.collaborators = ctx.table('Collaborators').rows
       .filter(function (r) {
         return r.event_id === eventId;
       })
       .map(function (r) {
-        return { id: r.collab_id, email: r.email, role: r.role || 'editor', addedAt: r.created_at, rev: r.rev || 0 };
+        var active = collabActive_(r);
+        var claims = active ? [] : claimsView_(linkJson_(r.link_json));
+        // status: active = 有効 / invited = 招待中（相手のログイン待ち）/ pending = 確認待ち（主催者の承認が必要）
+        return { id: r.collab_id, email: collabEmailOf_(r), role: r.role || 'editor', addedAt: r.created_at, rev: r.rev || 0, status: active ? 'active' : claims.length ? 'pending' : 'invited', claims: claims };
       });
   }
   view.snapshotBudget = snapshotBudget_(bundle);
@@ -4399,7 +4710,7 @@ function createEventRecords_(ctx, input) {
     organizer_name: input.organizerName || '',
     admin_key_hash: '',
     admin_key_issued_at: '',
-    owner_email: input.ownerEmail || '',
+    owner_email: input.owner.owner_email,
     staff_pass_hash: '',
     staff_pass_salt: '',
     staff_pass_set_at: '',
@@ -4409,6 +4720,8 @@ function createEventRecords_(ctx, input) {
     rev: 1,
     created_at: ctx.now,
     updated_at: ctx.now,
+    owner_sub: input.owner.owner_sub,
+    owner_link_json: input.owner.owner_link_json,
   };
   appendRecords_(events, [event]);
   appendRecords_(ctx.table('Rules'), rules);
@@ -4424,12 +4737,14 @@ function createEventRecords_(ctx, input) {
   return { event: event, rules: rules, stages: stages, groups: groups };
 }
 
-/** 履歴に残す大会レコード（パスワードのハッシュ・ソルトは残さない） */
+/** 履歴・保存ファイルに残す大会レコード（パスワードのハッシュ・ソルト、Google アカウントの sub・紐付けの記録は残さない） */
 function eventForLog_(event) {
   var out = plain_(event);
   delete out.admin_key_hash;
   delete out.staff_pass_hash;
   delete out.staff_pass_salt;
+  delete out.owner_sub;
+  delete out.owner_link_json;
   return out;
 }
 
@@ -4446,7 +4761,7 @@ function assertCreateAllowed_(ctx) {
   if (count >= ADMIN_CONFIG.MAX_CREATES_PER_HOUR) {
     throw appError_('LIMIT', '短時間に多くの大会が作成されたため、一時的に作成を止めています。しばらくしてからお試しください。');
   }
-  var mine = bucket + ':' + sha256Hex_(ctx.user.email);
+  var mine = bucket + ':' + sha256Hex_(ctx.user.principal || ctx.user.email);
   var myCount = Number(cache.get(mine) || 0);
   if (myCount >= ADMIN_CONFIG.MAX_CREATES_PER_USER_HOUR) {
     throw appError_('LIMIT', '1 時間に作れる大会の数（' + ADMIN_CONFIG.MAX_CREATES_PER_USER_HOUR + '）を超えました。しばらくしてからお試しください。');
@@ -4454,11 +4769,6 @@ function assertCreateAllowed_(ctx) {
   // 書き込みはスクリプトロックの中なので、数え間違いは起きない
   cache.put(bucket, String(count + 1), 3600);
   cache.put(mine, String(myCount + 1), 3600);
-}
-
-/** 作った大会の主催者（Google でログインしていればその人。管理者が作った大会は主催者なし） */
-function creatorEmail_(ctx) {
-  return ctx.user && ctx.user.kind === 'google' ? ctx.user.email : '';
 }
 
 function parseAdvanceCount_(value) {
@@ -4527,7 +4837,7 @@ function actionCreateEvent_(ctx, payload) {
     nightPoints: template === 'series_playoff' ? parseNightPoints_(payload.nightPoints, [5, 3, 2, 0]) : null,
     swissRounds: template === 'swiss' ? parseSmallInt_(payload.swissRounds, '回戦数', 1, ADMIN_CONFIG.MAX_SWISS_ROUNDS, 5) : 0,
     grandFinal: payload.grandFinal === 'single' ? 'single' : 'reset',
-    ownerEmail: creatorEmail_(ctx),
+    owner: creatorOwner_(ctx),
   });
   if (template === 'swiss' && created.stages.length === 1 && payload.playoff === 1) throw appError_('VALIDATION', '決勝トーナメントの人数は 0（なし）か 2 以上にしてください。');
   return { eventId: created.event.event_id };
@@ -4545,9 +4855,10 @@ function actionLogin_(ctx, payload) {
     throw appError_('LIMIT', 'ログインが混み合っています。1 分ほどしてからもう一度お試しください。');
   }
   cache.put(bucket, String(count + 1), 120);
-  var email = verifyGoogleIdToken_(payload.idToken);
-  var issued = issueSession_({ kind: 'google', email: email });
-  return { session: issued.session, expiresAt: issued.expiresAt, email: email };
+  var id = verifyGoogleIdToken_(payload.idToken);
+  var issued = issueSession_({ kind: 'google', sub: id.sub, email: id.email, emailAuthoritative: id.emailAuthoritative });
+  // sub は画面に返さない（サーバーのセッションにだけ置く）
+  return { session: issued.session, expiresAt: issued.expiresAt, email: id.email };
 }
 
 /** 店舗スタッフ: 大会と管理パスワードを確かめてセッションを発行する */
@@ -4587,7 +4898,11 @@ function actionSetStaffPassword_(ctx, payload) {
   return { eventId: eventId };
 }
 
-/** 大会の主催者（Google アカウント）を付け替える（管理者のみ。v0.4 以前に作った大会や、主催者の交代に使う） */
+/**
+ * 大会の主催者（Google アカウント）を付け替える（管理者のみ。v0.4 以前に作った大会や、主催者の交代に使う）。
+ * v0.9: 入力するのはメールアドレスなので、新しい主催者はまだ紐付いていない（前の主催者の権限はすぐに外れる）。
+ * 新しい主催者がログインすると紐付く（Google が保証できないアドレスは、管理者が確認待ちのログインを承認して紐付ける）
+ */
 function actionSetOwner_(ctx, payload) {
   assertPlatformAdmin_(ctx.user);
   var eventId = requireId_(payload.eventId, '大会');
@@ -4600,7 +4915,11 @@ function actionSetOwner_(ctx, payload) {
     if (!email) throw appError_('VALIDATION', '主催者の Google アカウント（メールアドレス）を正しく入力してください。');
   }
   var before = event.owner_email;
-  event.owner_email = email;
+  if (email !== before) {
+    event.owner_email = email;
+    event.owner_sub = '';
+    event.owner_link_json = '';
+  }
   event.rev = (event.rev || 0) + 1;
   event.updated_at = ctx.now;
   updateRecord_(events, event);
@@ -6659,7 +6978,7 @@ function actionCreateSampleEvent_(ctx, payload) {
     template: 'robin',
     groupCount: SAMPLE_GROUP_COUNT_,
     isSample: true,
-    ownerEmail: creatorEmail_(ctx),
+    owner: creatorOwner_(ctx),
   });
   var eventId = created.event.event_id;
   var names = [];
@@ -7666,6 +7985,7 @@ function cloneEventStructure_(ctx, source, opts) {
     }
   });
   var cfgEv = safeJson_(source.event.config_json, {});
+  var owner = creatorOwner_(ctx);
   delete cfgEv.autoFinishedAt;
   if (!opts.keepAnnouncement) delete cfgEv.announcement;
   var event = {
@@ -7680,7 +8000,7 @@ function cloneEventStructure_(ctx, source, opts) {
     organizer_name: '',
     admin_key_hash: '',
     admin_key_issued_at: '',
-    owner_email: creatorEmail_(ctx),
+    owner_email: owner.owner_email,
     staff_pass_hash: '',
     staff_pass_salt: '',
     staff_pass_set_at: '',
@@ -7689,6 +8009,8 @@ function cloneEventStructure_(ctx, source, opts) {
     rev: 1,
     created_at: ctx.now,
     updated_at: ctx.now,
+    owner_sub: owner.owner_sub,
+    owner_link_json: owner.owner_link_json,
   };
   appendRecords_(events, [event]);
   appendRecords_(ctx.table('Rules'), rules);
@@ -7731,10 +8053,11 @@ function actionAddCollaborator_(ctx, payload) {
   var current = table.rows.filter(function (r) {
     return r.event_id === eventId;
   });
-  if (current.some(function (r) { return normalizeEmail_(r.email) === email; })) throw appError_('VALIDATION', 'この Google アカウントは既に共同主催者です。');
+  if (current.some(function (r) { return collabEmailOf_(r) === email; })) throw appError_('VALIDATION', 'この Google アカウントは既に共同主催者（または招待中）です。');
   if (current.length >= ADMIN_CONFIG.MAX_COLLABORATORS) throw appError_('LIMIT', '共同主催者は ' + ADMIN_CONFIG.MAX_COLLABORATORS + ' 人までです。');
   var id = newId_('COL', table.byKey);
-  appendRecords_(table, [{ collab_id: id, event_id: eventId, email: email, role: 'editor', added_by: ctx.user.label, rev: 1, created_at: ctx.now, updated_at: ctx.now }]);
+  // v0.9: 入力したメールアドレスは招待（invite_email）。相手がログインして紐付くまで権限はない。email 列は書かない（旧版はこの列で権限を判定するため）
+  appendRecords_(table, [{ collab_id: id, event_id: eventId, email: '', invite_email: email, sub: '', link_json: '', role: 'editor', added_by: ctx.user.label, rev: 1, created_at: ctx.now, updated_at: ctx.now }]);
   recordHistory_(ctx, 'collaborator.add', 'Event', eventId, eventId, null, { email: email });
   return { eventId: eventId };
 }
@@ -7746,7 +8069,7 @@ function actionRemoveCollaborator_(ctx, payload) {
   var rec = findRecord_(table, requireId_(payload.collabId, '共同主催者'), '共同主催者');
   if (rec.event_id !== eventId) throw appError_('NOT_FOUND', '共同主催者が見つかりません。');
   deleteRecords_(table, [rec]);
-  recordHistory_(ctx, 'collaborator.remove', 'Event', eventId, eventId, { email: rec.email }, null);
+  recordHistory_(ctx, 'collaborator.remove', 'Event', eventId, eventId, { email: collabEmailOf_(rec) }, null);
   return { eventId: eventId };
 }
 
@@ -8033,6 +8356,10 @@ function adminActions_() {
     addCollaborator: { fn: actionAddCollaborator_, scope: 'event', mutating: true },
     removeCollaborator: { fn: actionRemoveCollaborator_, scope: 'event', mutating: true },
     restoreEvent: { fn: actionRestoreEvent_, scope: 'create', mutating: true },
+    // v0.9: Google アカウント（sub）との紐付け（02b_identity.js）
+    linkAccount: { fn: actionLinkAccount_, scope: 'google', mutating: true },
+    approveOwnerClaim: { fn: actionApproveOwnerClaim_, scope: 'event', mutating: true },
+    approveCollaborator: { fn: actionApproveCollaborator_, scope: 'event', mutating: true },
   };
 }
 
@@ -8143,7 +8470,7 @@ var REQUEST_ID_PATTERN_ = /^[A-Za-z0-9-]{16,64}$/;
 var NO_COMPLETION_CHECK_ = [
   'updateEvent', 'updateEventSettings', 'setStaffPassword', 'setOwner', 'addCollaborator', 'removeCollaborator', 'republish', 'renameGroup',
   'updatePlayer', 'setSchedule', 'postponeMatch', 'applyWeeklySchedule', 'updateNight', 'createEvent', 'createSampleEvent', 'duplicateEvent',
-  'restoreEvent', 'importPlayers', 'addPlayers', 'deleteEvent', 'reinstatePlayer',
+  'restoreEvent', 'importPlayers', 'addPlayers', 'deleteEvent', 'reinstatePlayer', 'linkAccount', 'approveOwnerClaim', 'approveCollaborator',
 ];
 var WRITE_JOURNAL_KEY_ = 'WRITE_JOURNAL';
 
@@ -8164,8 +8491,8 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
     throw appError_('BAD_REQUEST', 'requestId がありません。画面を再読み込みしてください。');
   }
   var cache = CacheService.getScriptCache();
-  // 別の利用者の requestId と衝突しないよう、利用者ごとに分ける
-  var dedupeKey = 'req:' + sha256Hex_(user.label + ':' + requestId);
+  // 別の利用者の requestId と衝突しないよう、利用者ごとに分ける（Google は sub ごと。メールアドレスは変わりうる）
+  var dedupeKey = 'req:' + sha256Hex_((user.principal || user.label) + ':' + requestId);
   var done = cache.get(dedupeKey);
   if (done) return duplicateResult_(done);
 

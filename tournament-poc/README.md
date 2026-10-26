@@ -215,7 +215,8 @@ CSV 取込（F11。確認してから登録）、設定の複製（F12）、毎�
 
 | シート | 主な列 | 後続フェーズへの備え |
 | --- | --- | --- |
-| Events | event_id, name, date_label, status, is_public, is_featured, rule_id, is_sample, organizer_name, admin_key_hash, admin_key_issued_at, owner_email, staff_pass_hash, staff_pass_salt, staff_pass_set_at, notes | 複数大会を並行管理可能。主催者の Google アカウント・管理パスワードのハッシュ（admin_key_* は v0.4 までの列で、今は使わない） |
+| Events | event_id, name, date_label, status, is_public, is_featured, rule_id, is_sample, organizer_name, admin_key_hash, admin_key_issued_at, owner_email, staff_pass_hash, staff_pass_salt, staff_pass_set_at, notes, owner_sub, owner_link_json | 複数大会を並行管理可能。主催者の Google アカウント・管理パスワードのハッシュ（admin_key_* は v0.4 までの列で、今は使わない）。v0.9 から権限は owner_sub（Google の不変 ID）で判定し、owner_email は表示と紐付けの手がかり（[docs/v0.9-identity.md](docs/v0.9-identity.md)） |
+| Collaborators | collab_id, event_id, email（v0.8 の形式。v0.9 では空）, role, added_by, invite_email, sub, link_json | 共同主催者。invite_email は招待（権限なし）、sub が紐付くと有効 |
 | Rules | rule_id, event_id, name, format, best_of, set_best_of, is_provisional | format: best_of_legs / best_of_sets。段階ごとに 1 行 |
 | Players | player_id, event_id, display_name, external_ref, notes | external_ref で n02 の選手と対応付け |
 | Stages | stage_id, event_id, name, type, order, rule_id, parent_stage_id, config_json | type: round_robin / league / single_elimination。config_json に総当たり回数・順位の決め方・進出ルール・3 位決定戦・回戦ごとの Best of・ラウンド表示名 |

@@ -2,8 +2,9 @@
  *
  * - 主催者: Google アカウントでログインする。運営画面（GitHub Pages）が Google Identity Services で受け取った
  *   ID トークンを送り、ここで Google の tokeninfo に問い合わせて確かめる（宛先 aud = スクリプト プロパティ
- *   GOOGLE_CLIENT_ID・発行元・有効期限・メール確認済み）。大会を作った Google アカウント（owner_email）だけが、
- *   その大会を運営できる。誰でも大会を作れる（上限あり）
+ *   GOOGLE_CLIENT_ID・発行元・有効期限・メール確認済み・sub）。誰でも大会を作れる（上限あり）
+ * - v0.9: 利用者は ID トークンの sub（Google アカウントごとに不変で再利用されない ID）で識別する。メールアドレスは
+ *   変わりうる・別の人に渡りうるので、権限の判定には使わない（表示と、既存の大会・招待を紐付ける手がかりだけ。02b_identity.js）
  * - 店舗スタッフ: 主催者が大会ごとに設定した「管理パスワード」でその大会だけを運営できる。
  *   シートには乱数のソルト付き SHA-256 だけを保存する。間違いが続いたら一定時間止める
  * - ログインに成功したら推測できない長さのセッション（244 ビット相当の乱数）を発行し、以後はそれで呼ぶ。
@@ -22,6 +23,8 @@ var ID_TOKEN_PATTERN_ = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 var ID_TOKEN_MAX_LENGTH_ = 4096;
 var GOOGLE_ISSUERS_ = ['accounts.google.com', 'https://accounts.google.com'];
 var EMAIL_PATTERN_ = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Google の sub は 255 文字以内の ASCII（実際は数字の列）。空白・制御文字は受け付けない
+var SUB_PATTERN_ = /^[\x21-\x7e]{1,255}$/;
 var STAFF_PASSWORD_MIN_ = 8;
 var STAFF_PASSWORD_MAX_ = 64;
 var STAFF_FAIL_LIMIT_ = 10;
@@ -67,8 +70,12 @@ function normalizeEmail_(value) {
 /* ---------- Google ログイン ---------- */
 
 /**
- * Google の ID トークンを確かめ、ログインした人のメールアドレス（小文字）を返す。
+ * Google の ID トークンを確かめ、ログインした人を返す: { sub, email（小文字）, emailAuthoritative }。
  * 署名の検証は Google の tokeninfo エンドポイントに任せる（Apps Script では Google の検証ライブラリを使えないため）。
+ * emailAuthoritative: Google がそのメールアドレスの今の持ち主を保証できるか（@gmail.com、または email_verified かつ hd あり =
+ * Google Workspace）。それ以外のアドレスは、Google アカウントを作った時に確認されただけで、今の持ち主とは限らない
+ * （https://developers.google.com/identity/gsi/web/guides/verify-google-id-token）。
+ * トークンは URL に入るので、例外の文面（URL を含むことがある）はログに出さない。
  */
 function verifyGoogleIdToken_(token) {
   var clientId = googleClientId_();
@@ -86,11 +93,17 @@ function verifyGoogleIdToken_(token) {
       followRedirects: false,
     });
   } catch (e) {
-    console.error('tokeninfo fetch failed', e && e.message);
+    console.error('tokeninfo fetch failed', e && e.name);
+    throw appError_('UNAVAILABLE', 'Google に接続できませんでした。時間をおいてもう一度お試しください。');
+  }
+  var code = res.getResponseCode();
+  // tokeninfo は混雑時に断られることがある（Google の案内）。その場合はトークンの誤りとは言わない
+  if (code === 429 || code >= 500) {
+    console.error('tokeninfo unavailable', code);
     throw appError_('UNAVAILABLE', 'Google に接続できませんでした。時間をおいてもう一度お試しください。');
   }
   var claims = null;
-  if (res.getResponseCode() === 200) {
+  if (code === 200) {
     try {
       claims = JSON.parse(res.getContentText());
     } catch (e) {
@@ -103,12 +116,15 @@ function verifyGoogleIdToken_(token) {
     claims.aud === clientId &&
     GOOGLE_ISSUERS_.indexOf(claims.iss) >= 0 &&
     Number(claims.exp) > nowSec &&
+    typeof claims.sub === 'string' &&
+    SUB_PATTERN_.test(claims.sub) &&
     (claims.email_verified === true || claims.email_verified === 'true');
   var email = ok ? normalizeEmail_(claims.email) : '';
   if (!email) {
     throw appError_('AUTH_INVALID', 'Google のログイン情報を確認できませんでした。もう一度ログインしてください。');
   }
-  return email;
+  var hd = typeof claims.hd === 'string' ? claims.hd.trim() : '';
+  return { sub: claims.sub, email: email, emailAuthoritative: /@gmail\.com$/.test(email) || hd !== '' };
 }
 
 /* ---------- セッション ---------- */
@@ -117,7 +133,7 @@ function sessionCacheKey_(session) {
   return 'sess:' + sha256Hex_('n02-tournament-session:' + session);
 }
 
-/** data = { kind: 'google', email } | { kind: 'staff', eventId, passStamp } */
+/** data = { kind: 'google', sub, email, emailAuthoritative } | { kind: 'staff', eventId, passStamp } */
 function issueSession_(data) {
   var session = newSecret_();
   var expiresAt = new Date(Date.now() + SESSION_TTL_SEC_ * 1000).toISOString();
@@ -216,23 +232,37 @@ function authenticate_(ctxProvider, auth) {
     if (typeof a.adminKey !== 'string' || !safeEqual_(sha256Hex_(a.adminKey), sha256Hex_(adminKey))) {
       throw appError_('AUTH_INVALID', '管理者の鍵が違います。');
     }
-    return { kind: 'admin', isPlatformAdmin: true, email: '', eventId: '', label: 'admin' };
+    return { kind: 'admin', isPlatformAdmin: true, email: '', eventId: '', label: 'admin', principal: 'admin' };
   }
   if (a.session !== undefined) {
     var data = readSession_(a.session);
     if (data && data.kind === 'google' && normalizeEmail_(data.email)) {
-      return { kind: 'google', isPlatformAdmin: false, email: data.email, eventId: '', label: 'google:' + data.email };
+      // v0.8 までのセッションは sub を持たない（メールアドレスだけ）。権限を判定できないので、ログインし直してもらう
+      if (typeof data.sub !== 'string' || !SUB_PATTERN_.test(data.sub)) {
+        throw appError_('AUTH_EXPIRED', 'ログインの仕組みを更新しました。お手数ですが、もう一度 Google でログインしてください。');
+      }
+      return {
+        kind: 'google',
+        isPlatformAdmin: false,
+        email: data.email,
+        sub: data.sub,
+        emailAuthoritative: data.emailAuthoritative === true,
+        eventId: '',
+        // label は履歴の「操作した人」の表示用。重複送信・回数制限の区別には principal（sub）を使う
+        label: 'google:' + data.email,
+        principal: 'google-sub:' + data.sub,
+      };
     }
     if (data && data.kind === 'staff' && isValidId_(data.eventId)) {
       // 管理パスワードが変わった・消された後は、古いパスワードで作ったセッションを使えなくする
       var event = ctxProvider().table('Events').byKey[data.eventId];
       if (event && event.staff_pass_hash && safeEqual_(staffPassStamp_(event), data.passStamp)) {
-        return { kind: 'staff', isPlatformAdmin: false, email: '', eventId: data.eventId, label: 'staff:' + data.eventId };
+        return { kind: 'staff', isPlatformAdmin: false, email: '', eventId: data.eventId, label: 'staff:' + data.eventId, principal: 'staff:' + data.eventId };
       }
     }
     throw appError_('AUTH_EXPIRED', 'ログインの有効期限が切れたか、管理パスワードが変更されました。もう一度ログインしてください。');
   }
-  return { kind: 'anonymous', isPlatformAdmin: false, email: '', eventId: '', label: 'anonymous' };
+  return { kind: 'anonymous', isPlatformAdmin: false, email: '', eventId: '', label: 'anonymous', principal: 'anonymous' };
 }
 
 function assertPlatformAdmin_(user) {
@@ -246,7 +276,7 @@ function assertCanCreate_(user) {
 }
 
 /**
- * 大会ごとの共同主催者（v0.8）のメールアドレス。ctx ごとに 1 回だけ作る。
+ * 大会ごとの有効な共同主催者の sub（v0.9。招待中・確認待ちは含めない）。ctx ごとに 1 回だけ作る。
  * 毎回シートから読むので、解除するとその人の古いセッションでもすぐに操作できなくなる。
  */
 function collaboratorIndex_(ctx) {
@@ -254,10 +284,9 @@ function collaboratorIndex_(ctx) {
   if (ctx._collab) return ctx._collab;
   var index = {};
   ctx.table('Collaborators').rows.forEach(function (r) {
-    var email = normalizeEmail_(r.email);
-    if (!email || !isValidId_(r.event_id)) return;
+    if (!collabActive_(r) || !isValidId_(r.event_id)) return;
     if (!index[r.event_id]) index[r.event_id] = [];
-    if (index[r.event_id].indexOf(email) === -1) index[r.event_id].push(email);
+    if (index[r.event_id].indexOf(r.sub) === -1) index[r.event_id].push(r.sub);
   });
   ctx._collab = index;
   return index;
@@ -270,9 +299,11 @@ function eventRole_(user, event, ctx) {
   if (!user || !event) return '';
   if (user.isPlatformAdmin) return 'admin';
   if (user.kind === 'google') {
-    if (event.owner_email && event.owner_email === user.email) return 'owner';
+    // メールアドレスの一致だけでは権限を与えない（紐付けた sub だけで判定する）
+    if (!user.sub) return '';
+    if (ownerSubOf_(event) === user.sub) return 'owner';
     var list = collaboratorIndex_(ctx)[event.event_id] || [];
-    return list.indexOf(user.email) !== -1 ? 'editor' : '';
+    return list.indexOf(user.sub) !== -1 ? 'editor' : '';
   }
   if (user.kind === 'staff') return user.eventId === event.event_id ? 'staff' : '';
   return '';
