@@ -333,7 +333,7 @@ test('段階の追加・設定・削除と、その制約', () => {
   d = p.ok('deleteStage', { stageId: ko.id, rev: d.stages[1].rev }).detail;
   assert.equal(d.stages.length, 1);
   assert.equal(p.call('deleteStage', { stageId: robin.id, rev: d.stages[0].rev }).error.code, 'LOCKED');
-  assert.equal(p.call('addStage', { eventId: p.eventId, type: 'swiss' }).error.code, 'VALIDATION');
+  assert.equal(p.call('addStage', { eventId: p.eventId, type: 'knockout_unknown' }).error.code, 'VALIDATION');
   for (let i = 0; i < 7; i++) p.ok('addStage', { eventId: p.eventId, type: 'league' });
   assert.equal(p.call('addStage', { eventId: p.eventId, type: 'league' }).error.code, 'LIMIT');
 });

@@ -18,6 +18,7 @@ function adminActions_() {
     eventDetail: { fn: actionEventDetail_, scope: 'event', mutating: false },
     configureStorage: { fn: actionConfigureStorage_, scope: 'platform', mutating: true, needsStorage: false },
     initializeStorage: { fn: actionInitializeStorage_, scope: 'platform', mutating: true, needsStorage: false },
+    migrateStorage: { fn: actionMigrateStorage_, scope: 'platform', mutating: true, needsStorage: false },
     setViewerUrl: { fn: actionSetViewerUrl_, scope: 'platform', mutating: true, needsStorage: false },
     createEvent: { fn: actionCreateEvent_, scope: 'create', mutating: true },
     createSampleEvent: { fn: actionCreateSampleEvent_, scope: 'create', mutating: true },
@@ -48,6 +49,30 @@ function adminActions_() {
     setEntrants: { fn: actionSetEntrants_, scope: 'event', mutating: true },
     generateBracket: { fn: actionGenerateBracket_, scope: 'event', mutating: true },
     clearBracket: { fn: actionClearBracket_, scope: 'event', mutating: true },
+    // v0.8
+    previewAdvancement: { fn: actionPreviewAdvancement_, scope: 'event', mutating: false },
+    previewBracket: { fn: actionPreviewBracket_, scope: 'event', mutating: false },
+    drawNextRound: { fn: actionDrawNextRound_, scope: 'event', mutating: true },
+    generateSwissRound: { fn: actionGenerateSwissRound_, scope: 'event', mutating: true },
+    deleteSwissRound: { fn: actionDeleteSwissRound_, scope: 'event', mutating: true },
+    setNightParticipants: { fn: actionSetNightParticipants_, scope: 'event', mutating: true },
+    generateNight: { fn: actionGenerateNight_, scope: 'event', mutating: true },
+    clearNight: { fn: actionClearNight_, scope: 'event', mutating: true },
+    cancelNight: { fn: actionCancelNight_, scope: 'event', mutating: true },
+    updateNight: { fn: actionUpdateNight_, scope: 'event', mutating: true },
+    importPlayers: { fn: actionImportPlayers_, scope: 'event', mutating: true },
+    previewWithdraw: { fn: actionPreviewWithdraw_, scope: 'event', mutating: false },
+    withdrawPlayer: { fn: actionWithdrawPlayer_, scope: 'event', mutating: true },
+    reinstatePlayer: { fn: actionReinstatePlayer_, scope: 'event', mutating: true },
+    setSchedule: { fn: actionSetSchedule_, scope: 'event', mutating: true },
+    postponeMatch: { fn: actionPostponeMatch_, scope: 'event', mutating: true },
+    previewWeeklySchedule: { fn: actionPreviewWeeklySchedule_, scope: 'event', mutating: false },
+    applyWeeklySchedule: { fn: actionApplyWeeklySchedule_, scope: 'event', mutating: true },
+    updateEventSettings: { fn: actionUpdateEventSettings_, scope: 'event', mutating: true },
+    duplicateEvent: { fn: actionDuplicateEvent_, scope: 'event', mutating: true },
+    addCollaborator: { fn: actionAddCollaborator_, scope: 'event', mutating: true },
+    removeCollaborator: { fn: actionRemoveCollaborator_, scope: 'event', mutating: true },
+    restoreEvent: { fn: actionRestoreEvent_, scope: 'create', mutating: true },
   };
 }
 
@@ -55,10 +80,23 @@ function jsonOutput_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
-/** 運営画面は GitHub Pages にある。ここを直接開いた人には案内だけを返す */
+/**
+ * 運営画面は GitHub Pages にある。ここを直接開いた人には案内だけを返す。
+ * version / release は本番反映の確認用（どの版のコードが動いているか。秘密の情報は含まない）。
+ */
 function doGet() {
-  return jsonOutput_({ ok: true, app: 'n02-tournament-admin-api', message: 'この URL は運営画面（GitHub Pages）から使う API です。' });
+  return jsonOutput_({
+    ok: true,
+    app: 'n02-tournament-admin-api',
+    version: ADMIN_CONFIG.APP_VERSION,
+    schema: ADMIN_CONFIG.SCHEMA_VERSION,
+    release: RELEASE_ID_,
+    message: 'この URL は運営画面（GitHub Pages）から使う API です。',
+  });
 }
+
+/** 本番反映のときに、反映した正本のコミット（SHA）に置き換わる。手で貼り付けた場合は 'manual' のまま */
+var RELEASE_ID_ = 'manual';
 
 /**
  * 運営画面からの API 呼び出し。本文は JSON（Content-Type: text/plain で送る。CORS のプリフライトを避けるため）。
@@ -68,13 +106,17 @@ function doGet() {
 function doPost(e) {
   var startedAt = Date.now();
   var text = e && e.postData && typeof e.postData.contents === 'string' ? e.postData.contents : '';
-  if (!text || text.length > ADMIN_CONFIG.MAX_REQUEST_CHARS) {
+  if (!text || text.length > ADMIN_CONFIG.MAX_RESTORE_REQUEST_CHARS) {
     return jsonOutput_(errorResponse_(appError_('BAD_REQUEST', 'リクエストが不正です。'), startedAt));
   }
   var request;
   try {
     request = JSON.parse(text);
   } catch (err) {
+    return jsonOutput_(errorResponse_(appError_('BAD_REQUEST', 'リクエストが不正です。'), startedAt));
+  }
+  // 大会ファイルからの復元だけは大きな本文を受け付ける。それ以外の操作は従来どおりの上限
+  if (text.length > ADMIN_CONFIG.MAX_REQUEST_CHARS && !(request && request.action === 'restoreEvent')) {
     return jsonOutput_(errorResponse_(appError_('BAD_REQUEST', 'リクエストが不正です。'), startedAt));
   }
   return jsonOutput_(handleAdminRequest_(request, startedAt));
@@ -138,6 +180,24 @@ function runQuery_(user, spec, payload, reuse) {
 }
 
 var REQUEST_ID_PATTERN_ = /^[A-Za-z0-9-]{16,64}$/;
+var NO_COMPLETION_CHECK_ = [
+  'updateEvent', 'updateEventSettings', 'setStaffPassword', 'setOwner', 'addCollaborator', 'removeCollaborator', 'republish', 'renameGroup',
+  'updatePlayer', 'setSchedule', 'postponeMatch', 'applyWeeklySchedule', 'updateNight', 'createEvent', 'createSampleEvent', 'duplicateEvent',
+  'restoreEvent', 'importPlayers', 'addPlayers', 'deleteEvent', 'reinstatePlayer',
+];
+var WRITE_JOURNAL_KEY_ = 'WRITE_JOURNAL';
+
+/**
+ * 書き込みの途中で止まった操作の目印（スクリプト プロパティ）。書き込みの直前に置き、書き終えたら消す。
+ * 残っていれば、前の操作の書き込みが途中で止まった（Google 側のエラー・時間切れ）可能性がある。
+ */
+function readWriteJournal_() {
+  try {
+    return JSON.parse(PropertiesService.getScriptProperties().getProperty(WRITE_JOURNAL_KEY_) || 'null');
+  } catch (e) {
+    return null;
+  }
+}
 
 function runMutation_(user, action, spec, payload, requestId, auth) {
   if (typeof requestId !== 'string' || !REQUEST_ID_PATTERN_.test(requestId)) {
@@ -157,11 +217,23 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
     // ロック待ちの間に同じ requestId の処理が終わっていることがあるので、もう一度確認する
     done = cache.get(dedupeKey);
     if (done) return duplicateResult_(done);
+    var props = PropertiesService.getScriptProperties();
+    var journal = readWriteJournal_();
+    if (journal && journal.key === dedupeKey) {
+      // 同じ操作の再送: 前回の書き込みが途中で止まっている可能性があるので、もう一度は実行しない
+      throw appError_('PARTIAL_WRITE', '前回の保存が途中で止まった可能性があります。画面を再読み込みして内容を確認してから、必要ならもう一度操作してください。');
+    }
     var result;
     if (spec.needsStorage === false) {
       result = spec.fn({ actor: user.label, user: user }, payload);
     } else {
+      assertSchemaCurrent_();
       var ctx = contextFor_(user, null);
+      if (journal) {
+        // 別の操作の書き込みが途中で止まっていた: 記録だけ残して先へ進む（管理者が履歴で確認できる）
+        recordHistory_(ctx, 'storage.incompleteWrite', 'Storage', '', journal.eventId || '', null, { action: journal.action, at: journal.at, actor: journal.actor });
+        props.deleteProperty(WRITE_JOURNAL_KEY_);
+      }
       // ログインの確認と権限の確認は、ロックの中で最新のデータに対してやり直す（パスワード変更・主催者の付け替えと同時に操作された場合に備える）
       if (user.kind === 'staff' || user.kind === 'google') {
         user = authenticate_(function () {
@@ -170,25 +242,45 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
         ctx.user = user;
       }
       if (spec.scope === 'event') authorizeEventPayload_(ctx, payload);
+      // 自動終了（F05）の判定は、試合・組み合わせ・段階が変わりうる操作の後だけ（大会設定の保存などでは判定しない）
+      ctx.touchedResults = NO_COMPLETION_CHECK_.indexOf(action) === -1;
       result = spec.fn(ctx, payload) || {};
+      var eventIds = [];
+      if (result.eventId) eventIds.push(result.eventId);
+      (result.alsoPublish || []).forEach(function (id) {
+        if (eventIds.indexOf(id) === -1) eventIds.push(id);
+      });
+      delete result.alsoPublish;
+      eventIds.forEach(function (id) {
+        afterEventChange_(ctx, id);
+      });
       flushHistory_(ctx);
-      if (result.eventId) {
-        // ここまでの変更はもう書き込んである。閲覧ページへの反映だけが失敗しても操作は成功として返し、
-        // 再送で同じ操作をやり直さないよう下で requestId を記録する（反映は「公開データを再生成」でやり直せる）
+      // 公開データも書き込む前に組み立てる。大きすぎるときは何も保存せずに止める（保存してから気づくことがないように）
+      var publications = {};
+      eventIds.forEach(function (id) {
         try {
-          result.publication = syncPublication_(ctx, result.eventId);
+          publications[id] = syncPublication_(ctx, id);
         } catch (e) {
-          console.error('syncPublication_ failed', result.eventId, e && e.message);
-          result.publication = { published: false, failed: true, message: (e && e.publicMessage) || '公開データを書き込めませんでした' };
+          if (e && e.appCode === 'TOO_LARGE') throw e;
+          // 公開データを作る処理の思わぬ失敗では、操作そのものは保存する（結果の入力を止めない）。
+          // 閲覧ページへの反映は「公開データを再生成」でやり直せる
+          console.error('syncPublication_ failed', id, e && e.message);
+          publications[id] = { published: false, failed: true, message: (e && e.publicMessage) || '公開データを書き込めませんでした' };
         }
+      });
+      props.setProperty(WRITE_JOURNAL_KEY_, JSON.stringify({ key: dedupeKey, action: action, eventId: result.eventId || '', at: ctx.now, actor: user.label }));
+      commitContext_(ctx);
+      if (result.eventId) {
+        result.publication = publications[result.eventId];
         result.detail = eventDetail_(ctx, result.eventId);
       }
       delete result.forceRepublish;
     }
     SpreadsheetApp.flush();
     // 大会作成は、通信が切れて再送されても作った大会を開けるよう、大会 ID を保存する（サーバー内のみ・10 分）
-    var memo = (action === 'createEvent' || action === 'createSampleEvent') && result && result.eventId ? { eventId: result.eventId } : {};
+    var memo = (action === 'createEvent' || action === 'createSampleEvent' || action === 'duplicateEvent' || action === 'restoreEvent') && result && result.eventId ? { eventId: result.eventId } : {};
     cache.put(dedupeKey, JSON.stringify(memo), ADMIN_CONFIG.REQUEST_DEDUPE_TTL_SEC);
+    props.deleteProperty(WRITE_JOURNAL_KEY_);
     return result;
   } finally {
     lock.releaseLock();

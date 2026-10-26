@@ -38,6 +38,8 @@ test('管理者の初期設定 → Google でログインして大会作成 → 
   await expect(org.locator('#actor')).toContainText(ORGANIZER);
   await org.getByLabel('大会名').fill('E2E 検証大会');
   await org.getByLabel('開催日（表示用の文字列）').fill('2026/11/03');
+  // v0.8 から新しい大会の初期選択は「予選ロビン → 決勝トーナメント」。この確認はロビンのみで行う
+  await org.getByLabel(/大会の形式/).selectOption('robin');
   await org.getByLabel('ロビンのグループ数').fill('2');
   await org.getByRole('button', { name: '大会を作成', exact: true }).click();
 
@@ -253,14 +255,13 @@ test('トーナメントのみ: 5 名・シード・不戦勝・3 位決定戦 �
     await confirmMatch(page, page.locator('.match-editor:not(.match-editor--pending):not(.match-editor--final)').first(), '2', '1');
   }
 
+  // v0.8: 新しい大会は「すべての段階が終わったら自動で終了」が有効。最後の結果で「終了」になり、案内のボタンは出ない
   await page.getByRole('button', { name: '大会設定' }).click();
+  await expect(page.getByLabel('状態')).toHaveValue('finished');
   await page.getByLabel('閲覧画面に公開する').check();
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await expect(page.locator('.event-head .badge')).toHaveText('公開中');
-  // 全試合が確定したので、進行状況に「終了」の案内が出る
   await page.getByRole('button', { name: '進行状況' }).click();
-  await page.getByRole('button', { name: '大会を「終了」にする' }).click();
-  await expect(page.getByText('大会を「終了」にしました。').last()).toBeVisible();
   await expect(page.getByRole('button', { name: '大会を「終了」にする' })).toHaveCount(0);
 
   const eventId = page.url().match(/#e=(EVT-[A-Z0-9]+)/)[1];
@@ -324,7 +325,7 @@ test('ロビン → A / B トーナメント: 順位を確定して進出 → �
 
   await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
   // 3 名の総当たりで全試合「上の選手」が勝つと 3 すくみ（全員 1 勝 1 敗・同 Leg 差）になる → 進出できない
-  await page.getByRole('button', { name: '順位を確定して進出させる' }).click();
+  await page.getByRole('button', { name: '進出を確認' }).click();
   await expect(page.getByText(/同順位（1位）の選手がいて進出者が決まりません/).last()).toBeVisible();
   // 手動で順位を決めると進出できる
   const editors = page.locator('.manual-order');
@@ -333,7 +334,10 @@ test('ロビン → A / B トーナメント: 順位を確定して進出 → �
     await page.locator('.manual-order').nth(i).getByRole('button', { name: 'この順番で決める' }).click();
     await expect(page.getByText('順位を決めました。').last()).toBeVisible();
   }
-  await page.getByRole('button', { name: '順位を確定して進出させる' }).click();
+  // 進出の前に、誰がどこへ入るかを確認してから確定する
+  await page.getByRole('button', { name: '進出を確認' }).click();
+  await expect(page.getByRole('heading', { name: /→ A トーナメント（2 人）/ })).toBeVisible();
+  await page.getByRole('button', { name: 'この内容で順位を確定して進出させる' }).click();
   await expect(page.getByText('6 名が進出しました。').last()).toBeVisible();
 
   // A トーナメント: 各組 1 位の 2 名

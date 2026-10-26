@@ -60,3 +60,26 @@ Vercel can put its own authentication in front of preview deployments, which mak
 unreachable for anyone reviewing without a Vercel account. Turn it off under
 **Project → Settings → Deployment Protection → Vercel Authentication → Disabled**, or issue a
 share link with Protection Bypass. Nothing in this repository controls that setting.
+
+## Tournament preview (`/tournament/`)
+
+Preview builds (every `VERCEL_ENV` except `production`) also carry the tournament manager's
+operable preview, built by `npm run build:preview-host`
+(`tournament-poc/tools/preview-site/vercel-build.mjs`):
+
+- `<deployment>/tournament/` — the explanation page: commit SHA and branch of the build, role
+  switching (organizer A / B, staff password, co-organizer), the sample event of each of the 10
+  formats, and **最初の状態に戻す** (reset).
+- `<deployment>/tournament/site/events/`, `…/site/admin/`, `…/site/` — the portal, organizer screen
+  and viewer, running the real `dist/admin/Code.gs` and `dist/viewer/Code.gs` in the browser on a
+  mock spreadsheet with a mock Google sign-in. Nothing reaches Google, Apps Script, the production
+  spreadsheet or GitHub Pages; every page is labelled **プレビュー・模擬データ・本番には保存されません**
+  with the commit. What a reviewer does stays in that browser's `localStorage`.
+- The n02 app of a preview build links its 「トーナメント・リーグ」 entry to that preview portal, and
+  its service worker leaves `/tournament/` alone (`N02_TOURNAMENT_PREVIEW`; production output is
+  unchanged).
+
+The production Vercel build (`VERCEL_ENV=production`) is exactly `npm run build:preview` as before.
+No secrets are involved. CI (`.github/workflows/tournament-poc.yml`) checks that the preview build
+leaves every tracked file untouched, and `tournament-poc/e2e/preview-site.spec.mjs` builds and
+operates the preview site.

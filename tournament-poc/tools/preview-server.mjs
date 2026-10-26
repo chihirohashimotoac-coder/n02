@@ -111,6 +111,9 @@ const server = http.createServer(async (req, res) => {
         'ux-kit.js': 'text/javascript; charset=utf-8',
         'ux-kit.css': 'text/css; charset=utf-8',
         'viewer-plus.js': 'text/javascript; charset=utf-8',
+        'formats.js': 'text/javascript; charset=utf-8',
+        'admin/admin-io.js': 'text/javascript; charset=utf-8',
+        'admin/print-landscape.css': 'text/css; charset=utf-8',
       };
       if (!types[name]) return send(res, 404, 'text/plain', 'not found');
       const file = join(ROOT, 'dist', 'pages', name);

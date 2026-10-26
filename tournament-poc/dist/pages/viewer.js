@@ -3,7 +3,9 @@
 (function (global) {
   'use strict';
 
-  var STATUS_LABEL = { scheduled: '未開始', live: '進行中', final: '確定済み', check: '確認中', pending: '組み合わせ待ち' };
+  var STATUS_LABEL = { scheduled: '未開始', live: '進行中', final: '確定済み', check: '確認中', pending: '組み合わせ待ち', void: '実施なし', bye: '不戦' };
+  var RESULT_TYPE_LABEL = { walkover: '不戦勝', retired: '途中棄権', disqualified: '失格', bye: '不戦（Bye）' };
+  var SCHEDULE_STATUS_LABEL = { postponed: '延期（日程未定）', rescheduled: '振替' };
   var EVENT_STATUS_LABEL = { draft: '準備中', running: '開催中', finished: '終了' };
 
   function clamp(n, min, max) {
@@ -231,6 +233,8 @@
    * 次の段階を待っているので「確定」とはみなさない
    */
   function allMatchesFinal(d) {
+    // v0.8: 段階の完了（未作成の本戦・未実施の節・リセットの決勝を含む）をサーバーが判定したものがあれば、それを使う
+    if (d && typeof d.complete === 'boolean') return d.complete;
     var p = d && d.progress;
     if (!p || !(p.total > 0) || p.final !== p.total) return false;
     return (d.stages || []).every(function (st) {
@@ -269,16 +273,44 @@
     return legs === null || legs === undefined ? '–' : String(legs);
   }
 
-  var STAGE_TYPE_LABEL = { round_robin: '総当たり', league: 'リーグ', single_elimination: 'トーナメント' };
-  var TIEBREAKER_LABEL = { wins: '勝数', leg_diff: 'Leg 差', legs_for: '得 Leg', set_diff: 'セット差', sets_for: '得セット', head_to_head: '直接対決' };
+  var STAGE_TYPE_LABEL = { round_robin: '総当たり', league: 'リーグ', single_elimination: 'トーナメント', double_elimination: 'ダブルエリミネーション', swiss: 'スイス式', series: 'ポイントシリーズ' };
+  var TIEBREAKER_LABEL = { wins: '勝数', leg_diff: 'Leg 差', legs_for: '得 Leg', set_diff: 'セット差', sets_for: '得セット', head_to_head: '直接対決', points: '勝ち点', buchholz: 'Buchholz（対戦相手の勝ち点の合計。不戦は 0）', night_wins: '節優勝回数' };
+
+  /** 予定の 1 行（日付・時刻・ボード・延期） */
+  function scheduleLine(sch) {
+    if (!sch) return '';
+    var parts = [];
+    if (sch.date) parts.push(sch.date.slice(5).replace('-', '/') + (sch.time ? ' ' + sch.time : ''));
+    if (sch.board) parts.push('ボード ' + sch.board);
+    if (sch.venue) parts.push(sch.venue);
+    if (sch.referee) parts.push('審判 ' + sch.referee);
+    if (sch.status) parts.push(SCHEDULE_STATUS_LABEL[sch.status] || '');
+    return parts.join('・');
+  }
 
   function ruleText(rule) {
+    if (rule && rule.format === 'fixed') return '固定 ' + rule.bestOf + ' Legs（引き分けあり）' + (rule.provisional ? '・暫定ルール' : '');
     if (!rule || !rule.bestOf) return '';
     var text =
       rule.format === 'sets'
         ? 'Best of ' + rule.bestOf + ' セット（先に ' + rule.setsToWin + ' セット・各セット Best of ' + rule.setBestOf + ' Legs）'
         : 'Best of ' + rule.bestOf + ' Legs（先に ' + rule.legsToWin + ' Leg）';
     return text + (rule.provisional ? '・暫定ルール' : '');
+  }
+
+  /** ルールの表示（主催者が入力した説明。n02 の採点には使わない） */
+  function ruleDisplayText(rd) {
+    if (!rd) return '';
+    var parts = [];
+    if (rd.category) parts.push(rd.category === 'soft' ? 'ソフトダーツ' : 'スティールダーツ');
+    if (rd.startScore) parts.push(rd.startScore);
+    var io = { open: 'オープン', double: 'ダブル', master: 'マスター' };
+    if (rd.inMode) parts.push(io[rd.inMode] + 'イン');
+    if (rd.outMode) parts.push(io[rd.outMode] + 'アウト');
+    if (rd.bull) parts.push(rd.bull === 'fat' ? 'ファットブル' : 'セパレートブル（25/50）');
+    if (rd.roundLimit) parts.push(rd.roundLimit + ' ラウンド上限');
+    if (rd.note) parts.push(rd.note);
+    return parts.join('・');
   }
 
   function isSetMatch(m) {
@@ -289,7 +321,7 @@
     var final = m.status === 'final';
     var p1Win = final && !!m.winnerId && m.winnerId === m.p1.id;
     var p2Win = final && !!m.winnerId && m.winnerId === m.p2.id;
-    var showScore = m.status === 'live' || final;
+    var showScore = (m.status === 'live' || final) && m.resultType !== 'walkover';
     var sets = isSetMatch(m);
     var s1 = sets ? m.p1.sets : m.p1.legs;
     var s2 = sets ? m.p2.sets : m.p2.legs;
@@ -297,7 +329,18 @@
     var name = function (p) {
       return p.id ? p.name : '未定';
     };
-    return el('li', { className: 'match match--' + m.status, 'data-match-id': m.id }, [
+    if (m.status === 'bye') {
+      return el('li', { className: 'match match--bye', 'data-match-id': m.id }, [
+        el('span', { className: 'match__round', text: m.label || 'R' + m.round }),
+        el('span', { className: 'match__player match__player--1' }, [el('span', { className: 'match__name', text: name(m.p1) })]),
+        el('span', { className: 'match__score', text: '' }),
+        el('span', { className: 'match__player match__player--2 is-tbd' }, [el('span', { className: 'match__name', text: '不戦（Bye）' })]),
+        el('span', { className: 'status status--bye', text: STATUS_LABEL.bye }),
+      ]);
+    }
+    var sched = m.status !== 'final' ? scheduleLine(m.schedule) : '';
+    var extra = m.resultType ? RESULT_TYPE_LABEL[m.resultType] : m.draw ? '引き分け' : '';
+    return el('li', { className: 'match match--' + m.status + (m.schedule && m.schedule.status ? ' match--postponed' : ''), 'data-match-id': m.id }, [
       el('span', { className: 'match__round', text: m.label || 'R' + m.round }),
       el('span', { className: 'match__player match__player--1' + (p1Win ? ' is-winner' : '') + (m.p1.id ? '' : ' is-tbd') }, [
         el('span', { className: 'match__name', text: name(m.p1) }),
@@ -315,7 +358,8 @@
         p2Win ? el('span', { className: 'win-mark', text: 'WIN', 'aria-label': '勝者' }) : null,
         el('span', { className: 'match__name', text: name(m.p2) }),
       ]),
-      el('span', { className: 'status status--' + m.status, text: STATUS_LABEL[m.status] || '確認中' }),
+      el('span', { className: 'status status--' + m.status, text: (STATUS_LABEL[m.status] || '確認中') + (extra ? '・' + extra : '') }),
+      sched ? el('span', { className: 'match__schedule', text: sched }) : null,
     ]);
   }
 
@@ -327,16 +371,35 @@
     var sets = !!(opts && opts.sets);
     var ranked = !!(opts && opts.ranked);
     var standings = g.standings || g.summary || [];
+    var points = standings.some(function (s) {
+      return s.points !== undefined;
+    });
+    var draws = standings.some(function (s) {
+      return s.drawn;
+    });
+    var buchholz = standings.some(function (s) {
+      return s.buchholz !== undefined;
+    });
+    var affOf = {};
+    g.players.forEach(function (p) {
+      if (p.affiliation) affOf[p.id] = p.affiliation;
+    });
     var heads = [];
     if (ranked) heads.push(el('th', { scope: 'col', className: 'summary__rank', text: '順位' }));
-    heads.push(el('th', { scope: 'col', text: '選手' }), el('th', { scope: 'col', text: '勝-敗' }));
+    heads.push(el('th', { scope: 'col', text: '選手' }));
+    if (points) heads.push(el('th', { scope: 'col', text: '勝ち点' }));
+    heads.push(el('th', { scope: 'col', text: draws ? '勝-分-敗' : '勝-敗' }));
+    if (buchholz) heads.push(el('th', { scope: 'col', text: 'Buchholz' }));
     if (sets) heads.push(el('th', { scope: 'col', text: 'セット 得-失' }));
     heads.push(el('th', { scope: 'col', text: 'Leg 得-失' }));
     var rows = standings.map(function (s) {
       var cells = [];
       // 確定試合がないうちは全員同順位になるので、順位は出さない
       if (ranked) cells.push(el('td', { className: 'summary__rank', text: g.progress.final && s.rank ? s.rank + (s.tied ? '（同）' : '') : '–' }));
-      cells.push(el('th', { scope: 'row', text: nameById[s.playerId] || '' }), el('td', { text: s.won + '-' + s.lost }));
+      cells.push(el('th', { scope: 'row' }, [nameById[s.playerId] || '', affOf[s.playerId] ? el('span', { className: 'summary__aff', text: affOf[s.playerId] }) : null]));
+      if (points) cells.push(el('td', { text: String(s.points) }));
+      cells.push(el('td', { text: draws ? s.won + '-' + (s.drawn || 0) + '-' + s.lost : s.won + '-' + s.lost }));
+      if (buchholz) cells.push(el('td', { text: String(s.buchholz) }));
       if (sets) cells.push(el('td', { text: (s.setsFor || 0) + '-' + (s.setsAgainst || 0) }));
       cells.push(el('td', { text: s.legsFor + '-' + s.legsAgainst }));
       return el('tr', null, cells);
@@ -525,8 +588,16 @@
           '（並んだ場合は運営が決定。「同」は順位が未確定）'
       );
     }
-    if (stage.cycles > 1) notes.push('各対戦を ' + stage.cycles + ' 回行います。');
-    var body = stage.groups ? renderGroupStage(stage, groupFilter) : renderBracket(stage);
+    if (stage.cycles > 1 && stage.type !== 'swiss') notes.push('各対戦を ' + stage.cycles + ' 回行います。');
+    if (stage.points) notes.push('勝ち点: 勝ち ' + stage.points.win + '・引き分け ' + stage.points.draw + '・負け ' + stage.points.loss + '。');
+    if (stage.swiss) notes.push('スイス式 ' + stage.swiss.generated + ' / ' + stage.swiss.rounds + ' 回戦（成績の近い選手どうしを回戦ごとに組み合わせます）。');
+    if (stage.type === 'double_elimination') notes.push('2 回負けると敗退します。' + (stage.grandFinal === 'single' ? 'グランドファイナルは 1 試合のみ（勝者側の選手もここで負けると敗退）。' : 'グランドファイナルで敗者側の選手が勝つと、もう 1 試合（リセット）を行います。'));
+    if (stage.drawMode === 'redraw') notes.push('この勝ち抜き戦は、回戦が終わるたびに組み合わせを抽選します。');
+    var late = (stage.entrants || []).filter(function (e) {
+      return e.startRound > 1;
+    });
+    if (late.length) notes.push('シード ' + late.map(function (e) { return e.name + '（' + e.startRound + ' 回戦から）'; }).join('、') + ' は途中の回戦から出場します。');
+    var body = stage.type === 'series' ? renderSeries(stage) : stage.type === 'double_elimination' ? renderDoubleElimination(stage) : stage.groups ? renderGroupStage(stage, groupFilter) : renderBracket(stage);
     return el('section', { className: 'stage stage--' + stage.type, id: 'stage-' + stage.id, 'aria-labelledby': 'stage-title-' + stage.id }, [
       stage.name
         ? el('header', { className: 'stage__head' }, [
@@ -538,6 +609,84 @@
       body,
       notes.length ? el('p', { className: 'stage__note', text: notes.join(' ') }) : null,
     ]);
+  }
+
+  /** ダブルエリミネーション: 勝者側（線でつなぐ表）・敗者側（回戦ごとの列）・グランドファイナル */
+  function renderDoubleElimination(stage) {
+    var seedById = {};
+    (stage.entrants || []).forEach(function (e) {
+      if (e.seed) seedById[e.id] = e.seed;
+    });
+    var parts = [];
+    (stage.sides || []).forEach(function (side) {
+      if (!side.rounds.length) return;
+      parts.push(el('h3', { className: 'side-title', text: side.label }));
+      if (side.side === 'W') {
+        parts.push(renderBracket({ id: stage.id + '-W', rounds: side.rounds, entrants: stage.entrants }));
+      } else {
+        parts.push(
+          el('div', { className: 'round-columns' }, side.rounds.map(function (r) {
+            return el('div', { className: 'round-columns__col' }, [
+              roundTitle(r.label, r.matches[0] && r.matches[0].bestOf),
+              el('ol', { className: 'matches--third' }, r.matches.map(function (m) {
+                return el('li', null, [bracketMatch(m, seedById)]);
+              })),
+            ]);
+          }))
+        );
+      }
+    });
+    if (stage.runnerUp) parts.push(el('p', { className: 'stage__note', text: '準優勝: ' + stage.runnerUp.name }));
+    if (!parts.length) parts.push(el('p', { className: 'empty', text: '組み合わせはまだ決まっていません。' }));
+    return el('div', { className: 'de' }, parts);
+  }
+
+  /** ポイントシリーズ: 累計順位（節ごとの点）と、各節の小トーナメント */
+  function renderSeries(stage) {
+    var nameById = {};
+    (stage.roster || []).forEach(function (p) {
+      nameById[p.id] = p.name;
+    });
+    var nights = stage.nights || [];
+    var heads = [el('th', { scope: 'col', className: 'summary__rank', text: '順位' }), el('th', { scope: 'col', text: '選手' }), el('th', { scope: 'col', text: '累計' })];
+    nights.forEach(function (n, i) {
+      heads.push(el('th', { scope: 'col', className: 'series__night', text: String(i + 1), title: n.name }));
+    });
+    var anyFinal = nights.some(function (n) {
+      return n.status === 'complete';
+    });
+    var table = el('div', { className: 'table-scroll' }, [
+      el('table', { className: 'summary series-table' }, [
+        el('caption', { className: 'visually-hidden', text: stage.name + ' の累計順位（終わった節のみ。途中の節は暫定として括弧）' }),
+        el('thead', null, [el('tr', null, heads)]),
+        el('tbody', null, (stage.standings || []).map(function (r) {
+          var cells = [
+            el('td', { className: 'summary__rank', text: anyFinal ? r.rank + (r.tied ? '（同）' : '') : '–' }),
+            el('th', { scope: 'row', text: nameById[r.playerId] || '' }),
+            el('td', { text: String(r.points) + (r.provisionalPoints ? '（+' + r.provisionalPoints + ' 暫定）' : '') }),
+          ];
+          (r.nights || []).forEach(function (v, i) {
+            var n = nights[i];
+            cells.push(el('td', { className: 'series__night', text: n && n.status === 'cancelled' ? '中止' : v === null || v === undefined ? '' : n && n.status !== 'complete' ? '(' + v + ')' : String(v) }));
+          });
+          return el('tr', null, cells);
+        })),
+      ]),
+    ]);
+    var parts = [table, el('p', { className: 'stage__note', text: '各節の順位ポイント: ' + (stage.nightPoints || []).join('・') + '（優勝・準優勝・準決勝敗退…の順。到達した順位の総点）。' + stage.nightsComplete + ' / ' + stage.planned + ' 節が終了。' })];
+    nights.forEach(function (n) {
+      if (n.status === 'planned' || n.status === 'ready') return;
+      parts.push(
+        el('section', { className: 'night', id: 'night-' + n.id }, [
+          el('header', { className: 'group__head' }, [
+            el('h3', { className: 'group__title', text: n.name + (n.date ? '（' + n.date.slice(5).replace('-', '/') + '）' : '') }),
+            el('span', { className: 'group__progress', text: n.status === 'cancelled' ? '中止' : n.champion ? '優勝 ' + n.champion.name : '確定 ' + n.progress.final + ' / ' + n.progress.total }),
+          ]),
+          n.status === 'cancelled' ? null : renderBracket({ id: n.id, rounds: n.rounds, entrants: n.participants }),
+        ])
+      );
+    });
+    return el('div', { className: 'series' }, parts);
   }
 
   function legacyStage(data) {
@@ -729,10 +878,26 @@
       ui.rule.hidden = !ruleText(rule);
       ui.rule.textContent = ruleText(rule);
       ui.updated.textContent = formatTime(d.dataUpdatedAt);
+      renderNotice(d);
       renderQr(d);
       renderFilter();
       renderEvent(ui.groups, d, view.filter);
       notify('render', { data: d });
+    }
+
+    /** お知らせ（主催者が公開用に書いたもの）とルールの表示（v0.8） */
+    function renderNotice(d) {
+      var box = $('notice');
+      if (!box) return;
+      box.textContent = '';
+      var ann = d.event.announcement;
+      var rd = d.event.ruleDisplay;
+      if (ann && ann.text) {
+        box.appendChild(el('div', { className: 'notice-board__ann' }, [el('h2', { className: 'notice-board__title', text: 'お知らせ' }), el('p', { className: 'notice-board__text', text: ann.text })]));
+      }
+      var rule = ruleDisplayText(rd);
+      if (rule) box.appendChild(el('p', { className: 'notice-board__rule', text: 'ルール: ' + rule }));
+      box.hidden = !box.childNodes.length;
     }
 
     /**

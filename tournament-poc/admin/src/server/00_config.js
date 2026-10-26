@@ -10,8 +10,9 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.7.1',
-  SCHEMA_VERSION: 1,
+  APP_VERSION: '0.8.0',
+  // 1 = v0.7 まで。2 = v0.8（大会設定・所属/Rt・試合の予定/特殊な結果・共同主催者など。列とシートの追加だけ）
+  SCHEMA_VERSION: 2,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
   // 二重送信（ボタン連打・通信再試行）を requestId で弾く期間
@@ -39,6 +40,15 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_STAGES: 8,
   MAX_ELIMINATION_ENTRANTS: 128,
   MAX_REQUEST_CHARS: 100000,
+  // JSON からの復元（restoreEvent）だけは大会 1 つ分のファイルを受け取るので大きくする
+  MAX_RESTORE_REQUEST_CHARS: 2000000,
+  // 公開データ（閲覧ページの JSON）の上限。セル 10 個 × 40,000 文字
+  MAX_SNAPSHOT_CHARS: 400000,
+  MAX_COLLABORATORS: 10,
+  MAX_SERIES_NIGHTS: 30,
+  MAX_SWISS_ROUNDS: 15,
+  MAX_ANNOUNCEMENT_LENGTH: 1000,
+  MAX_IMPORT_PLAYERS: 128,
   // ポータルの「作成した大会」に返す大会の上限（新しい順）
   MAX_MY_EVENTS: 100,
 });
@@ -73,22 +83,49 @@ var STAGE_TYPE = Object.freeze({
   ROUND_ROBIN: 'round_robin', // ロビン（グループごとの総当たり）
   LEAGUE: 'league', // リーグ（全員の総当たり。ラウンドを「節」と呼ぶ）
   SINGLE_ELIMINATION: 'single_elimination', // トーナメント（勝ち抜き）
+  DOUBLE_ELIMINATION: 'double_elimination', // v0.8: ダブルエリミネーション（勝者側・敗者側・グランドファイナル）
+  SWISS: 'swiss', // v0.8: スイス式（成績の近い選手どうしを回戦ごとに組む）
+  SERIES: 'series', // v0.8: ポイントシリーズ（節ごとの小トーナメントの順位ポイントを累計）
 });
 
 var RULE_FORMAT = Object.freeze({
   BEST_OF_LEGS: 'best_of_legs', // Best of N Legs
   BEST_OF_SETS: 'best_of_sets', // Best of N セット（各セット Best of M Legs）
+  FIXED_LEGS: 'fixed_legs', // v0.8: 固定 Leg 数（N Legs をすべて投げる。同数なら引き分け。勝ち抜き戦では使えない）
+});
+
+/** v0.8: 試合の特殊な結果（空欄は通常の結果） */
+var RESULT_TYPE = Object.freeze({
+  NORMAL: '',
+  WALKOVER: 'walkover', // 不戦勝（相手の当日棄権・不在）。Leg 数は記録しない
+  RETIRED: 'retired', // 途中棄権（それまでの Leg 数は実際の数）
+  DISQUALIFIED: 'disqualified', // 失格
+  BYE: 'bye', // スイス式の不戦（相手なし）
+  NOT_NEEDED: 'not_needed', // ダブルエリミのリセットの決勝など、行わなくてよくなった試合
+});
+
+var RESULT_TYPE_LABEL = Object.freeze({
+  walkover: '不戦勝',
+  retired: '途中棄権',
+  disqualified: '失格',
+  bye: '不戦（Bye）',
+  not_needed: '実施なし',
 });
 
 var STAGE_TYPE_LABEL = Object.freeze({
   round_robin: 'ロビン',
   league: 'リーグ',
   single_elimination: 'トーナメント',
+  double_elimination: 'ダブルエリミネーション',
+  swiss: 'スイス式',
+  series: 'ポイントシリーズ',
 });
 
 /**
  * シート定義。列は見出し名で参照するため、列の並べ替えや末尾への列追加には耐える。
  * 型: text = 文字列（書式「書式なしテキスト」で保存）, int = 整数, bool = 真偽値
+ * 列の 3 つ目の値（2 など）は、その列を追加したスキーマの版。移行前のシートにその列がなくても読み込める（空として読む）。
+ * シートの since も同じ（移行前はシートがなくても空として読む）。書き込みは移行が終わるまで受け付けない。
  */
 var SCHEMA = Object.freeze({
   Events: {
@@ -110,6 +147,7 @@ var SCHEMA = Object.freeze({
       ['staff_pass_salt', 'text'],
       ['staff_pass_set_at', 'text'],
       ['notes', 'text'],
+      ['config_json', 'text', 2], // v0.8: 大会の設定（形式・お知らせ・ルール表示・公開する項目・自動終了など）
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
@@ -139,6 +177,10 @@ var SCHEMA = Object.freeze({
       ['display_name', 'text'],
       ['external_ref', 'text'], // 将来の n02 連携用
       ['notes', 'text'], // 非公開メモ（閲覧画面には出さない）
+      ['affiliation', 'text', 2], // v0.8: 所属（任意。空欄は「所属なし」）
+      ['rating', 'text', 2], // v0.8: レーティング（任意。未入力は空欄で、0 とは区別する）
+      ['seed', 'int', 2], // v0.8: シード（任意）
+      ['meta_json', 'text', 2], // v0.8: 棄権・失格など
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
@@ -168,6 +210,7 @@ var SCHEMA = Object.freeze({
       ['stage_id', 'text'],
       ['name', 'text'],
       ['order', 'int'],
+      ['meta_json', 'text', 2], // v0.8: シリーズの節の予定・中止など
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
@@ -184,6 +227,8 @@ var SCHEMA = Object.freeze({
       ['seed', 'int'],
       ['manual_order', 'int'], // 同順位を主催者が決めたときの順番
       ['source_label', 'text'], // 進出元（例: グループA 1位）
+      ['start_round', 'int', 2], // v0.8: トーナメントの途中回戦から出場するシード（空欄は 1 回戦から）
+      ['meta_json', 'text', 2], // v0.8: 進出元のグループ・直接出場など
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
@@ -217,6 +262,11 @@ var SCHEMA = Object.freeze({
       ['created_at', 'text'],
       ['updated_at', 'text'],
       ['confirmed_at', 'text'],
+      ['result_type', 'text', 2], // v0.8: 空欄=通常 / walkover=不戦勝 / retired=途中棄権 / disqualified=失格 / bye=スイスの不戦 / not_needed=不要になった試合
+      ['result_note', 'text', 2], // v0.8: 特殊な結果の理由
+      ['schedule_json', 'text', 2], // v0.8: 予定（日付・時刻・会場・ボード・審判・延期）
+      ['bracket_side', 'text', 2], // v0.8: ダブルエリミの W / L / GF
+      ['meta_json', 'text', 2], // v0.8: 試合の補足（リセットの決勝・抽選の記録など）
     ],
   },
   History: {
@@ -231,6 +281,21 @@ var SCHEMA = Object.freeze({
       ['event_id', 'text'],
       ['before_json', 'text'],
       ['after_json', 'text'],
+    ],
+  },
+  // v0.8: 共同主催者（Google アカウント単位）。招待メールは送らない
+  Collaborators: {
+    key: 'collab_id',
+    since: 2,
+    columns: [
+      ['collab_id', 'text'],
+      ['event_id', 'text'],
+      ['email', 'text'],
+      ['role', 'text'],
+      ['added_by', 'text'],
+      ['rev', 'int'],
+      ['created_at', 'text'],
+      ['updated_at', 'text'],
     ],
   },
   PublicSnapshots: {
@@ -266,4 +331,5 @@ var SHEET_ORDER = Object.freeze([
   'Matches',
   'History',
   'PublicSnapshots',
+  'Collaborators',
 ]);

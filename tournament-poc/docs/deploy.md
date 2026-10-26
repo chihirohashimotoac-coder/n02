@@ -159,6 +159,72 @@ v0.7.0 を反映済みなら、運営用・閲覧者用の `Code.gs` を貼り�
 - 閲覧者用: 公開をやめた大会の予備キャッシュを消す（シートが読めないときに非公開の大会を返さない）
 - 運営用: 保存のあと閲覧ページへの反映だけが失敗したときは、保存は成功として返し、再送で二重に実行しない（画面に「公開データを再生成」の案内を出す）
 
+### v0.8.0 から: main へのマージで本番に反映する（GitHub Actions）
+
+v0.8.0 からは、手での貼り替えの代わりに `.github/workflows/tournament-deploy.yml` が反映します（手での貼り替えも引き続きできます）。
+PR（プルリクエスト）の段階では何も反映しません。**main にマージされたときだけ**、次の順で動きます。
+
+| 順 | 内容 | 失敗したとき |
+| --- | --- | --- |
+| 1 | 検証（Secrets なし）: `dist/` が `src/` から作られたものか、単体テスト | ここで止まり、何も変わらない |
+| 2 | main が先に進んでいないか（古いコミットで上書きしない） | 何も変わらない（新しい実行が反映する） |
+| 3 | 設定の確認: デプロイ ID は閲覧リポジトリの `config.js`・`admin/config.js` の URL から読み、スクリプト ID と組み合わせて Apps Script API で実在を確認。今のコードが本アプリのものか・Web アプリの公開設定と権限が変わらないかを確認 | 何も変わらない |
+| 3.5 | 管理者の確認（dry-run でも行う）: 今動いている運営用 GAS の読み取り API（`bootstrap`）を `TOURNAMENT_ADMIN_KEY` で呼び、管理者として認証できること・保存先が設定済み・開ける・初期化済みであることを確認（移行が必要なだけなら止めない。鍵・保存先・大会のデータはログに出さない） | 何も変わらない |
+| 4 | バックアップ: 運営用・閲覧者用の今のコードと、デプロイの版番号を記録（実行結果の成果物 `tournament-backup-<SHA>` に 90 日） | 何も変わらない |
+| 5 | 運営用 GAS: コードを置き換え → 新しい版を作成 → **既存のデプロイ**の版を差し替え（URL は変わらない。新しいデプロイは作らない） | 運営用だけ新しい版。閲覧はでき、書き込みは移行まで止まる（下の「戻す」） |
+| 6 | スキーマの移行（管理者の鍵で `migrateStorage`）: 同じスプレッドシートに `bak-s1-…` のバックアップのシートを作り、列とシート（Collaborators）を足す。何度実行しても安全 | 運営用は新しい版のまま。書き込みは止まる（再実行で続きから） |
+| 7 | 閲覧者用 GAS: 5 と同じ | 閲覧者用は前の版のまま（前の版でも移行後のシートを読める） |
+| 8 | 動作確認: 両方の Web アプリが今回のコミットで応答し、大会一覧を読める | GAS は新しい版。Pages は前のまま |
+| 9 | GitHub Pages: `dist/pages/` を閲覧リポジトリに写して push（`config.js`・`admin/config.js`・`README.md` は残す）。`release.json` に今回のコミット | Pages は前のまま |
+| 10 | 公開確認: `…/release.json` が今回のコミットになるまで待つ | 実行結果に表示 |
+
+反映は 1 つずつ（同時に 2 つは動かない。途中で取り消さない）。各手順の結果と、戻すための版番号は実行結果の「Summary」に出ます。
+「移行の前に GAS を更新する」順番なのは、移行の処理が新しい版のコードにあるためです（移行のための匿名の API は作っていません）。
+旧版（v0.6.0・v0.7.1）のコードは移行後のシートでも読み書きでき、新しい版は移行前のシートを読めることをテストで確かめています（`tests/storage.test.mjs`）。
+Pages を最後にするため、手順 5〜9 の数分間は、前の版の画面が新しい版の API を使います（未検証。既存の操作は残しています）。
+
+#### 最初に 1 回だけ行う設定（リポジトリの所有者が行う）
+
+トークン・鍵・パスワードは**会話に貼らず**、GitHub の画面に直接入力してください。
+
+1. **Apps Script API を有効にする**: スクリプトを所有する Google アカウントで <https://script.google.com/home/usersettings> を開き、「Google Apps Script API」をオンにする。
+2. **clasp でログインして認証情報を作る**（Node.js が入った自分の PC で）:
+   `npx @google/clasp@3.4.1 login` → ブラウザで同じ Google アカウントを選んで許可 → ホームフォルダに `.clasprc.json` ができる（clasp 3.4.1 は Apps Script のプロジェクト・デプロイの管理の権限を求めます）。
+3. **GitHub に環境を作る**: n02 リポジトリの Settings → Environments → New environment → 名前 `tournament-production`。
+   「Deployment branches and tags」を **Selected branches** にして `main` だけを許可（必要なら「Required reviewers」に自分を入れると、反映の前に承認を求められます）。
+4. **閲覧リポジトリの Deploy key**（閲覧リポジトリだけに書ける鍵）:
+   自分の PC で `ssh-keygen -t ed25519 -C n02-tournament-deploy -f n02-tournament-deploy -N ""` →
+   n02-tournament-viewer の Settings → Deploy keys → Add deploy key に `n02-tournament-deploy.pub` の中身（**Allow write access にチェック**）。
+5. 環境 `tournament-production` の **Secrets**（3 つ）:
+
+   | 名前 | 値 |
+   | --- | --- |
+   | `TOURNAMENT_CLASPRC_JSON` | 2 の `.clasprc.json` の中身全体 |
+   | `TOURNAMENT_ADMIN_KEY` | 運営用のスクリプト プロパティ `ADMIN_KEY` と同じ値 |
+   | `TOURNAMENT_VIEWER_DEPLOY_KEY` | 4 の `n02-tournament-deploy`（拡張子なし。秘密鍵）の中身 |
+
+6. 環境 `tournament-production` の **Variables**（4 つ。どれも秘密ではありません）:
+
+   | 名前 | 値 |
+   | --- | --- |
+   | `TOURNAMENT_ADMIN_SCRIPT_ID` | 「n02 Tournament Admin」のスクリプト ID（エディタの「プロジェクトの設定」→「ID」） |
+   | `TOURNAMENT_VIEWER_SCRIPT_ID` | 「n02 Tournament Viewer」のスクリプト ID |
+   | `TOURNAMENT_PAGES_URL` | `https://chihirohashimotoac-coder.github.io/n02-tournament-viewer/`（末尾の `/` まで） |
+   | `TOURNAMENT_VIEWER_REPO` | `chihirohashimotoac-coder/n02-tournament-viewer` |
+
+   デプロイ ID は入力しません（閲覧リポジトリの `config.js`・`admin/config.js` に書いてある URL から読みます）。
+7. ここまで済んだら PR をマージします。**最初のマージでは反映しません**（8 まで止まっています）。
+8. Actions → 「Tournament deploy」→ Run workflow → mode `dry-run`。書き込まずに 3〜4 を確かめ、Summary に今の版番号が出ます。
+9. dry-run が通ったら、**リポジトリ**の Variables（Settings → Secrets and variables → Actions → Variables。環境の Variables ではなく）に `TOURNAMENT_DEPLOY_ENABLED` = `true` を追加し、Run workflow → mode `deploy` で反映します。以降は main へのマージごとに自動で反映します。
+
+#### 戻す（ロールバック）
+
+- GAS: Actions → 「Tournament deploy」→ Run workflow → mode `rollback`、Summary に出た前の版番号を入れる（運営用・閲覧者用それぞれ。空欄の方は戻さない）。
+  手でも「デプロイを管理」→ 鉛筆 →「バージョン」で前の版を選べば戻せます（URL は変わりません）。
+- スプレッドシート: 移行で増やした列・シートは旧版でも邪魔になりません（戻す必要はありません）。移行前の内容は `bak-s1-…` のシートに残っています。
+- GitHub Pages: 閲覧リポジトリで `deploy: n02 <SHA>` のコミットを revert して push します。
+- 認証情報の取り消し: 不要になったら <https://myaccount.google.com/permissions> で clasp のアクセスを削除し、Deploy key と Secrets を削除します。
+
 ## 6.5 うまくいかないとき（権限の許可し直し）
 
 運営画面で「そのスプレッドシートを開けませんでした」、閲覧画面で「通信エラー」が続く場合は、権限が許可されていない可能性があります。

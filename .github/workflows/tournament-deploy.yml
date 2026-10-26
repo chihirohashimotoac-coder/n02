@@ -1,0 +1,145 @@
+name: Tournament deploy
+
+# 大会運営（tournament-poc）の本番反映。main にマージされたときだけ動く（PR では動かない・Secrets を渡さない）。
+#   検証（Secrets なし）→ 本番反映（environment: tournament-production の Secrets・変数）:
+#   設定とバックアップ → 運営用 GAS → スキーマの移行 → 閲覧者用 GAS → 動作確認 → GitHub Pages（閲覧リポジトリ）→ 公開確認
+# 初期設定（Secrets・変数・環境）が済むまでは、変数 TOURNAMENT_DEPLOY_ENABLED が 'true' でないため反映しない（手動の dry-run だけできる）。
+# 手順: tournament-poc/docs/deploy.md の「マージで本番に反映する」
+on:
+  push:
+    branches: [main]
+    paths: ['tournament-poc/**', '.github/workflows/tournament-deploy.yml']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run = 書き込まずに設定・権限・対象を確認 / deploy = 本番反映 / rollback = GAS のデプロイを指定の版番号に戻す'
+        type: choice
+        options: [dry-run, deploy, rollback]
+        default: dry-run
+      rollback_admin_version:
+        description: 'rollback のとき: 運営用 GAS の版番号（空欄 = 戻さない）'
+        required: false
+      rollback_viewer_version:
+        description: 'rollback のとき: 閲覧者用 GAS の版番号（空欄 = 戻さない）'
+        required: false
+
+permissions:
+  contents: read
+
+# 本番反映は 1 つずつ。実行中の反映は取り消さない（途中で止めると GAS と Pages の版がずれるため）
+concurrency:
+  group: tournament-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify (no secrets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # 依存パッケージを入れずに確かめる（本番反映のジョブも外部のパッケージを使わない）
+      - name: dist/ is generated from src/
+        run: node tournament-poc/tools/build.mjs --check
+      - name: Unit and integration tests
+        working-directory: tournament-poc
+        run: node --test "tests/*.test.mjs"
+
+  deploy:
+    name: deploy to production
+    needs: verify
+    # 初期設定が済むまで（TOURNAMENT_DEPLOY_ENABLED が 'true' になるまで）は、手動の dry-run だけ動く。どれも main からだけ
+    if: github.ref == 'refs/heads/main' && (vars.TOURNAMENT_DEPLOY_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # TOURNAMENT_DEPLOY_ENABLED はリポジトリの変数（ジョブの if は環境の変数を読めないため）。それ以外は環境 tournament-production の変数・Secrets
+    environment: tournament-production
+    env:
+      MODE: ${{ github.event_name == 'push' && 'deploy' || inputs.mode }}
+      TOURNAMENT_ADMIN_SCRIPT_ID: ${{ vars.TOURNAMENT_ADMIN_SCRIPT_ID }}
+      TOURNAMENT_VIEWER_SCRIPT_ID: ${{ vars.TOURNAMENT_VIEWER_SCRIPT_ID }}
+      TOURNAMENT_PAGES_URL: ${{ vars.TOURNAMENT_PAGES_URL }}
+      VIEWER_SITE_DIR: ${{ github.workspace }}/viewer-site
+      TOURNAMENT_DEPLOY_STATE: ${{ github.workspace }}/.tournament-deploy/state.json
+      TOURNAMENT_BACKUP_DIR: ${{ github.workspace }}/.tournament-deploy/backup
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 閲覧リポジトリ（GitHub Pages）。このリポジトリだけに書ける Deploy key で取得・push する
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.TOURNAMENT_VIEWER_REPO }}
+          ref: main
+          path: viewer-site
+          ssh-key: ${{ secrets.TOURNAMENT_VIEWER_DEPLOY_KEY }}
+
+      - name: Refuse a stale commit
+        if: env.MODE != 'rollback'
+        run: |
+          head=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::error::main is at ${head:0:7}, this run is ${GITHUB_SHA:0:7}. A newer run deploys the newer commit."
+            exit 1
+          fi
+
+      - name: Apps Script (backup, admin, migrate, viewer, smoke test)
+        if: env.MODE != 'rollback'
+        env:
+          TOURNAMENT_CLASPRC_JSON: ${{ secrets.TOURNAMENT_CLASPRC_JSON }}
+          TOURNAMENT_ADMIN_KEY: ${{ secrets.TOURNAMENT_ADMIN_KEY }}
+        run: node tournament-poc/tools/deploy/deploy.mjs gas ${{ env.MODE == 'dry-run' && '--dry-run' || '' }}
+
+      - name: GitHub Pages (copy dist/pages, keep config.js)
+        if: env.MODE != 'rollback'
+        run: node tournament-poc/tools/deploy/deploy.mjs pages ${{ env.MODE == 'dry-run' && '--dry-run' || '' }}
+
+      - name: GitHub Pages (commit and push)
+        if: env.MODE == 'deploy'
+        working-directory: viewer-site
+        run: |
+          git config user.name "n02 tournament deploy"
+          git config user.email "n02-tournament-deploy@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            head=$(git -C "$GITHUB_WORKSPACE" ls-remote origin refs/heads/main | cut -f1)
+            if [ "$head" != "$GITHUB_SHA" ]; then echo "::error::main moved during the deploy; not publishing an older commit"; exit 1; fi
+            git commit -q -m "deploy: n02 ${GITHUB_SHA}"
+            git push origin HEAD:main
+          fi
+
+      - name: GitHub Pages (wait for the release)
+        if: env.MODE == 'deploy'
+        run: node tournament-poc/tools/deploy/deploy.mjs verify-pages
+
+      - name: Roll back Apps Script deployments
+        if: env.MODE == 'rollback'
+        env:
+          TOURNAMENT_CLASPRC_JSON: ${{ secrets.TOURNAMENT_CLASPRC_JSON }}
+          ROLLBACK_ADMIN_VERSION: ${{ inputs.rollback_admin_version }}
+          ROLLBACK_VIEWER_VERSION: ${{ inputs.rollback_viewer_version }}
+        run: node tournament-poc/tools/deploy/deploy.mjs rollback
+
+      - name: Summary
+        if: always()
+        run: node tournament-poc/tools/deploy/deploy.mjs summary
+
+      # 反映前の GAS のコードとデプロイの版番号（秘密の値は含まない）
+      - name: Keep the backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tournament-backup-${{ github.sha }}
+          path: ${{ github.workspace }}/.tournament-deploy
+          if-no-files-found: ignore
+          retention-days: 90

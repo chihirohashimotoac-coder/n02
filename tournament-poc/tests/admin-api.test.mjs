@@ -48,7 +48,7 @@ test('初期化: 必要なシートと見出しを作る。2 回実行しても�
   const p = setupPair();
   const first = p.ok('initializeStorage');
   assert.equal(first.storage.initialized, true);
-  assert.deepEqual([...first.initializeResult.created].sort(), ['Entries', 'Events', 'Groups', 'History', 'Matches', 'Players', 'PublicSnapshots', 'Rules', 'Stages']);
+  assert.deepEqual([...first.initializeResult.created].sort(), ['Collaborators', 'Entries', 'Events', 'Groups', 'History', 'Matches', 'Players', 'PublicSnapshots', 'Rules', 'Stages']);
   const eventId = createEvent(p);
   const before = p.store.get().getSheetByName('Events').records();
   const second = p.ok('initializeStorage');

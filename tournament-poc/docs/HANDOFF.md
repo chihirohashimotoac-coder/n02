@@ -1,9 +1,9 @@
 # 引き継ぎ（Handoff）— n02 Tournament / League Manager PoC
 
-最終更新: 2026-10-21 / 対象版: **v0.7.1**（ポータル「トーナメント・リーグ」。**本番未反映**。v0.6.0 までは本番反映・動作確認済み）
+最終更新: 2026-10-21 / 対象版: **v0.8.0**（大会形式 10 種・F01〜F21・PR プレビュー・マージ連動の本番反映。**本番未反映**。v0.7.x も未反映。v0.6.0 までは本番反映・動作確認済み）
 
 次のセッションは、まずこのファイルと [README.md](../README.md)・[test-plan.md](test-plan.md) を読んでから作業してください。
-作業を始める前に、ユーザーに次の依頼内容を確認してください（現時点で未着手の依頼はありません）。
+作業を始める前に、ユーザーに次の依頼内容を確認してください。v0.8.0 は Draft PR（ブランチ `claude/zen-ride-35c2c3`）で、マージ前に [deploy.md](deploy.md) の「最初に 1 回だけ行う設定」が必要です。作業記録は [v0.8-work.md](v0.8-work.md)。
 
 ---
 
@@ -14,6 +14,7 @@
 | **chihirohashimotoac-coder/n02** | **ソースの正本**（`tournament-poc/` 配下。v0.7.0 では n02 本体のトップ画面に入口のリンクも追加） | `claude/gifted-bardeen-eistmm`（最新。`claude/confident-carson-4jh0g5` に main をマージして派生） | `claude/bold-albattani-5vsk78`（v0.4.1 まで）から派生。未マージ。**PR は未作成**（ユーザーの指示があるまで作らない） |
 | chihirohashimotoac-coder/n02-tournament-viewer | GitHub Pages の公開先（`dist/pages/` のコピー置き場） | `main` | 手で編集しないで `dist/pages/` からコピーする。例外は `config.js`・`admin/config.js`（Web アプリの URL と OAuth クライアント ID。コピーで上書きしない）と `README.md`（`admin/` の行が手で足されている）。負荷テスト用に `.github/workflows/loadtest.yml`（← `tournament-poc/tools/pages-loadtest.yml`）と `tools/loadtest.mjs`（← `tournament-poc/tools/loadtest.mjs`）も置いてある |
 
+- v0.8.0: `claude/zen-ride-35c2c3`（main `20431d3` から派生）。Draft PR。n02-tournament-viewer には push していない（本番反映はマージ後のワークフローが行う）。
 - 新しいセッションの作業ブランチがシステムから指定された場合は、そのブランチを `origin/claude/confident-carson-4jh0g5` から作って push する（このセッションでもそうした）。
 - Pages を更新するときだけ `add_repo` で n02-tournament-viewer を追加し（push 権限。ユーザーの許可が要る）、`/home/user/n02-tournament-viewer` に clone する。
 - GitHub の操作は MCP（`mcp__github__*`）。Pages の公開状況は `actions_list`（workflow `390482601` = pages build and deployment）で確認できる。この環境から github.io・script.google.com へは直接つながらない。
@@ -35,6 +36,16 @@
 - ユーザーへの返答は**日本語**（丁寧語・簡潔・正直）。手順はわかりやすく短く（長い手順は「わかりにくい」と言われたことがある。こちらでできることはこちらでやる）。
 - 外部への操作（Google 側の変更、公開リポジトリへの追加、ワークフローの実行など）は**事前に承認を得る**。
 - 管理者の鍵（ADMIN_KEY）・管理パスワード・クライアント シークレットは**会話に貼らないよう**案内済み。こちらからも求めない。OAuth クライアント ID と大会 ID は秘密ではないので、会話でもらってよい。
+
+## 2.5 v0.8.0 の要点（2026-10-21 の依頼「大会運営の拡張・大会形式追加・PR プレビュー・マージ連動公開」）
+
+- 依頼の制約（原文の要点）: マージ・自動マージ設定・本番デプロイ・本番データ変更をしない。マージまで本番 GAS・シート移行・Pages を更新しない（viewer/main への先行 push 禁止）。
+  認証情報・refresh token・管理者キーをソース・ログ・プレビュー・成果物に含めない。トークンやパスワードをチャットに貼らせない。PR で Secrets を使わない（`pull_request_target` を使わない）。
+  移行のための匿名 API を作らない。推測した ID・URL を書かない。保護設定を緩めない。有料サービスを契約しない。既存の画面のデザインは変えず機能を足す
+- この依頼は既存の Vercel の PR プレビューを使うことを求めたため、リポジトリ直下の `vercel.json`・`package.json`（`build:preview-host` を追加）・`vite.config.ts`（プレビューのビルドだけ Service Worker が `/tournament/` を置き換えない）・`docs/preview-deployment.md` を変更した。本番（GitHub Pages）の n02 の成果物は変わらない（CI で確認）
+- 形式の定義は `shared/formats.js` だけ（順・説明・流れ・見積もり）。ブラケットは汎用の組み立て（`04b_bracket.js`。SE・DE・シリーズの節）、スイス式は `04c_swiss.js`、表示は `04e_view.js`、組分けは `04f_draw.js`、運営機能は `06b_ops.js`
+- 保存はまとめて書き込み（`commitContext_`）。スキーマ v2（`SCHEMA_VERSION`）。移行は `migrateStorage`（管理者の鍵のみ）。旧版の画面の「初期化する」も移行として動く
+- 本番反映: `.github/workflows/tournament-deploy.yml` + `tools/deploy/`。手順・初期設定・戻し方は [deploy.md](deploy.md)。PR プレビュー: `tools/preview-site/vercel-build.mjs`（[../../docs/preview-deployment.md](../../docs/preview-deployment.md)）
 
 ## 3. 構成（v0.6.0）
 
@@ -103,8 +114,8 @@ cd /home/user/n02 && npm ci            # 初回のみ（Playwright を使うた�
 cd tournament-poc
 node tools/build.mjs                   # src → dist（dist もコミットする）
 node tools/build.mjs --check           # dist が最新か
-npm test                               # 106 件（node:test + tests/gas-mock.mjs）
-npm run e2e                            # 40 件（desktop 20・mobile 20）
+npm test                               # 187 件（node:test + tests/gas-mock.mjs。v0.8.0）
+npm run e2e                            # 画面テスト（件数は test-plan.md の 3.）
 cd .. && npx eslint .                  # ルートの lint（既存への影響確認として実行）
 ```
 
@@ -114,6 +125,8 @@ cd .. && npx eslint .                  # ルートの lint（既存への影響�
 - `tests/gas-mock.mjs` の `loadProject(app, { codePath })` で別の版のコードを動かせる（版の更新の確認用）。
 
 ## 6. Google 側・Pages への反映手順（毎回これ）
+
+v0.8.0 以降、初期設定（[deploy.md](deploy.md)）が済んでいれば **main へのマージで自動で反映**します（下の手作業の手順は、初期設定の前か、自動の反映が使えないときのもの）。
 
 1. `node tools/build.mjs` → 運営用の変更があれば `dist/admin/Code.gs`（権限が変われば `appsscript.json` も）を、手順ページ（コピーボタン付き）でユーザーに貼り付けてもらう。
 2. ユーザーが「デプロイを管理」→ 鉛筆 →「**新バージョン**」→「デプロイ」。**「新しいデプロイ」は URL が変わるので禁止**（過去に 2 回誤操作あり）。
@@ -139,8 +152,13 @@ Drive コネクタ（`mcp__Google_Drive__*`）でできること・できない�
 - 実行数: Web アプリの実行回数に日次上限の記載はなく料金も発生しない（公式の割り当て表）。増えたのは負荷テストと開きっぱなしの閲覧ページが原因と説明し、v0.5.1 で抑えた
 - 作成の上限: 1 人 1 時間 5 件・全体 1 時間 10 件。ログイン（tokeninfo）は全体で 1 分 30 回まで。管理パスワードは 10 回間違いで 10 分停止
 
-未対応（ユーザーとの合意で範囲外。依頼があれば見積もりから）:
-- ダブルエリミネーション、スイスドロー、試合ごとの棄権・不戦勝の入力、日時・ボードの割り当て、n02 との結果連携、保存ファイル（JSON）からの大会の復元、共同主催者（Google アカウントは 1 大会 1 人）
+v0.8.0 で未検証（模擬環境・Chromium では合格）:
+- 実際の Apps Script API・clasp の認証・スプレッドシートでの移行・GitHub Pages への push（初期設定の後に dry-run → deploy で確認。test-plan の R-24〜R-27）
+- 反映の途中の数分間（GAS は新しい版・Pages は前の版）の旧画面と新 API の組み合わせ
+- Apps Script 上での処理時間（128 名・448 試合など。模擬環境では 1 操作数十 ms）、実際のプリンター・Safari の印刷、実機
+
+未対応（範囲外）:
+- n02 との結果連携、招待メール、祝日の自動判定
 - 大会形式の追加について質問あり（2026-10-21）。既存の段階の組み合わせ（ひな形）の追加は軽い（`TEMPLATES_`・`createEventRecords_` と運営画面の `TEMPLATES`）。新しい段階の種類（ダブルエリミ・スイスなど）は組み合わせ・順位・表示・テストを新しく作る必要があり重い、と回答
 
 ## 8. ハマりどころ
