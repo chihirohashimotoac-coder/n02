@@ -480,8 +480,9 @@ var BACKUP_PREFIX_ = 'bak-';
  * 保存先を ADMIN_CONFIG.SCHEMA_VERSION に移行する。管理者の鍵でだけ呼べる（migrateStorage 操作）。
  * 1. 移行前の件数を数える  2. 各シートを同じスプレッドシート内に複製してバックアップ
  * 3. 足りないシート・列を追加（initializeStorage_ と同じ。既存の列・値は動かさない）
- * 4. 件数が変わっていないことを確かめてから SCHEMA_VERSION を上げる
- * 何度呼んでも安全（移行済みなら何もしない）。途中で失敗しても、既存の列・値は変わっていない。
+ * 3b. v3 への移行だけ: 共同主催者の v0.8 の email 列（メールアドレスだけで権限があった）を invite_email（招待）へ移す（migrateRecords_）
+ * 4. 件数（と 3b の結果）が正しいことを確かめてから SCHEMA_VERSION を上げる
+ * 何度呼んでも安全（移行済みなら何もしない）。途中で止まっても、やり直せば続きから終わる（3b は移していない行だけを移す）。
  * 公開閲覧（閲覧者用 Web アプリ）からは呼ばれない。
  */
 function migrateStorage_(ss, actor) {
@@ -505,11 +506,15 @@ function migrateStorage_(ss, actor) {
     if (!sheet) return;
     var copy = sheet.copyTo(ss);
     var backupName = BACKUP_PREFIX_ + 's' + from + '-' + stamp + '-' + name;
+    // 途中で止まった移行を同じ秒にやり直すと名前が重なるので、番号を付けて分ける（前のバックアップは消さない）
+    for (var k = 2; ss.getSheetByName(backupName); k++) backupName = BACKUP_PREFIX_ + 's' + from + '-' + stamp + '-' + k + '-' + name;
     copy.setName(backupName);
     state.backups.push(backupName);
   });
   props.setProperty('MIGRATION_STATE', JSON.stringify(state));
   var init = initializeStorage_(ss, { keepVersion: true });
+  var records = migrateRecords_(ss, from);
+  state.records = records;
   var after = {};
   var mismatch = [];
   SHEET_ORDER.forEach(function (name) {
@@ -527,7 +532,31 @@ function migrateStorage_(ss, actor) {
   state.finishedAt = nowIso_();
   state.added = init;
   props.setProperty('MIGRATION_STATE', JSON.stringify(state));
-  return { from: from, to: to, migrated: true, backups: state.backups, added: init, counts: after };
+  return { from: from, to: to, migrated: true, backups: state.backups, added: init, counts: after, records: records };
+}
+
+/**
+ * 値の移し替え（列の追加の後）。v3: 共同主催者の email 列を invite_email へ移し、email 列を空にする。
+ * 移した行は「招待中」（権限なし）になり、本人がログインして sub を紐付けると有効になる。
+ * email 列を空にするのは、旧版（v0.8 まで。email 列で権限を判定する）に戻したときに、招待に権限が付かないようにするため。
+ */
+function migrateRecords_(ss, from) {
+  var out = { collaboratorsMoved: 0 };
+  if (from >= 3 || !ss.getSheetByName('Collaborators')) return out;
+  var table = readTable_(ss, 'Collaborators');
+  table.rows.forEach(function (r) {
+    if (!r.email || collabActive_(r)) return;
+    r.invite_email = r.invite_email || normalizeEmail_(r.email) || r.email;
+    r.email = '';
+    r._dirty = true;
+    out.collaboratorsMoved++;
+  });
+  if (out.collaboratorsMoved) writeUpdates_(table);
+  var left = readTable_(ss, 'Collaborators').rows.filter(function (r) {
+    return r.email && !collabActive_(r);
+  });
+  if (left.length) throw appError_('MIGRATION_FAILED', '共同主催者の移し替えが終わっていません（残り ' + left.length + ' 件）。もう一度移行を実行してください。');
+  return out;
 }
 
 function migrationState_() {

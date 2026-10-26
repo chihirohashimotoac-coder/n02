@@ -2,7 +2,7 @@
 // 引き分け/勝ち点・棄権/失格・所属/Rt の組分け・共同主催者・JSON からの復元
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setupPair } from './gas-mock.mjs';
+import { setupPair, WORKSPACE } from './gas-mock.mjs';
 
 function ready() {
   const p = setupPair();
@@ -246,7 +246,8 @@ test('F12 大会設定の複製: 新しい ID・準備中・非公開。結果�
   let ev = d0.event;
   p.ok('setStaffPassword', { eventId: ev.id, rev: ev.rev, password: 'staff-pass-01' }, { auth: alice });
   p.ok('addCollaborator', { eventId: ev.id, email: 'bob@example.org' }, { auth: alice });
-  const bob = p.loginAs('bob@example.org');
+  const bob = p.loginAs('bob@example.org', WORKSPACE);
+  p.link(bob);
   // 共同主催者が複製すると、新しい大会の主催者は複製した人
   const dup = p.ok('duplicateEvent', { eventId: ev.id, name: '複製した大会', includePlayers: false }, { auth: bob });
   const d = dup.detail;
@@ -315,12 +316,18 @@ test('F21 JSON からの復元: 新しい大会として ID を付け直し、�
 test('F20 共同主催者: 本人だけが追加・解除でき、解除は古いセッションにもすぐ効く。他の大会には権限が及ばない。招待メールは送らない', () => {
   const p = ready();
   const alice = p.loginAs('alice@example.org');
-  const bob = p.loginAs('bob@example.org');
-  const carol = p.loginAs('carol@example.org');
+  const bob = p.loginAs('bob@example.org', WORKSPACE);
+  const carol = p.loginAs('carol@example.org', WORKSPACE);
   const a = p.ok('createSampleEvent', {}, { auth: alice }).detail;
   const other = p.ok('createSampleEvent', {}, { auth: alice }).detail;
   assert.equal(p.call('eventDetail', { eventId: a.event.id }, { auth: bob }).error.code, 'NOT_FOUND');
   p.ok('addCollaborator', { eventId: a.event.id, email: 'Bob@Example.org' }, { auth: alice });
+  // v0.9: 追加しただけ（招待）では権限はない。本人のログインで紐付けると有効になる
+  assert.equal(p.call('eventDetail', { eventId: a.event.id }, { auth: bob }).error.code, 'NOT_FOUND');
+  assert.equal(detail(p, a.event.id, alice).collaborators[0].status, 'invited');
+  assert.equal(p.ok('bootstrap', {}, { auth: bob }).role.link.available, 1);
+  assert.deepEqual(p.link(bob).linked, { owner: 0, collaborator: 1 });
+  assert.equal(p.ok('bootstrap', {}, { auth: bob }).role.link.available, 0);
   const asBob = detail(p, a.event.id, bob);
   assert.equal(asBob.event.role, 'editor');
   assert.equal(asBob.event.ownerEmail, undefined, '共同主催者には主催者のメールを見せない');
@@ -340,6 +347,7 @@ test('F20 共同主催者: 本人だけが追加・解除でき、解除は古�
   const list = detail(p, a.event.id, alice).collaborators;
   assert.equal(list.length, 1);
   assert.equal(list[0].email, 'bob@example.org');
+  assert.equal(list[0].status, 'active');
   p.ok('removeCollaborator', { eventId: a.event.id, collabId: list[0].id }, { auth: alice });
   assert.equal(p.call('eventDetail', { eventId: a.event.id }, { auth: bob }).error.code, 'NOT_FOUND');
   assert.equal(p.admin.fetches.filter((u) => !u.includes('tokeninfo')).length, 0, '外部への通信（招待メールなど）はしない');

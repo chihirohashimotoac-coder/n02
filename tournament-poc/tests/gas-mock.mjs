@@ -546,6 +546,9 @@ export function loadProject(app, options = {}) {
 export const ADMIN_KEY = 'test-admin-key-0123456789-abcdefghij';
 export const GOOGLE_CLIENT_ID = '123456789012-testclientid0preview.apps.googleusercontent.com';
 
+/** Google Workspace のアカウントとしてログインする（hd あり = Google がメールアドレスの持ち主を保証する） */
+export const WORKSPACE = Object.freeze({ hd: 'example.org' });
+
 /** テスト用の Google ID トークン（UrlFetchApp の模擬 tokeninfo が本物として扱う形）。claims で上書きできる */
 export function fakeIdToken(email, clock, claims = {}, signature = 'valid-signature') {
   const nowSec = Math.floor((clock ? clock.now() : Date.now()) / 1000);
@@ -581,9 +584,14 @@ export function setupPair(options = {}) {
     if (!res.ok) throw new Error(`${action} failed: ${res.error.code} ${res.error.message}`);
     return res.data;
   };
-  /** Google でログインしてセッションの auth を返す */
-  const loginAs = (email) => ({ session: ok('login', { idToken: fakeIdToken(email, clock) }, { auth: 'anon' }).session });
+  /**
+   * Google でログインしてセッションの auth を返す。claims で ID トークンの中身を変えられる
+   * （例: WORKSPACE = { hd } で Google Workspace のアカウント。example.org のままでは Google が持ち主を保証しないアドレス）
+   */
+  const loginAs = (email, claims = {}) => ({ session: ok('login', { idToken: fakeIdToken(email, clock, claims) }, { auth: 'anon' }).session });
+  /** ログインの後に画面が呼ぶ紐付け（v0.9） */
+  const link = (auth) => ok('linkAccount', {}, { auth });
   /** 管理パスワードでログインしてセッションの auth を返す */
   const staffLogin = (eventId, password) => ({ session: ok('staffLogin', { eventId, password }, { auth: 'anon' }).session });
-  return { store, clock, admin, viewer, call, ok, loginAs, staffLogin };
+  return { store, clock, admin, viewer, call, ok, loginAs, link, staffLogin };
 }

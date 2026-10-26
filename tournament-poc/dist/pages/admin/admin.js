@@ -398,6 +398,10 @@
       return undefined;
     }
     var api = createApi(createFetchRunner(win, config.endpoint, currentAuth));
+    // ログアウト（サーバー側での無効化）だけは、今の画面のログインを送らない（消したセッションは本文で送る）
+    var plainApi = createApi(createFetchRunner(win, config.endpoint, function () {
+      return undefined;
+    }));
 
     function toast(kind, text) {
       var item = el('div', { className: 'toast toast--' + kind, role: kind === 'error' ? 'alert' : 'status', text: text });
@@ -609,10 +613,15 @@
       }, [el('label', { className: 'visually-hidden', for: 'staff-password', text: '管理パスワード' }), input, el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '開く' })]);
     }
 
+    /**
+     * ログアウト: まずこの端末のログイン（localStorage と画面の状態）を消して、この端末からは操作できなくする。
+     * その後でサーバーにセッションの無効化を頼み、成功を確かめられたときだけ「サーバーでも無効にした」と伝える。
+     * 通信に失敗・時間切れのときは、その旨と再試行のボタンを出す（消したセッションはこのページのメモリにだけ持つ）。
+     */
     function logout() {
-      var auth = currentAuth();
-      if (auth && auth.session) api.query('logout', { session: auth.session }).catch(function () {});
-      if (state.route.mode === 'event' && staffLogin(state.route.eventId)) setStaff(state.route.eventId, null);
+      var isStaff = state.route.mode === 'event' && !!staffLogin(state.route.eventId);
+      var login = isStaff ? staffLogin(state.route.eventId) : state.google;
+      if (isStaff) setStaff(state.route.eventId, null);
       else setGoogle(null);
       try {
         if (win.google && win.google.accounts && win.google.accounts.id) win.google.accounts.id.disableAutoSelect();
@@ -623,10 +632,67 @@
       state.detail = null;
       state.eventId = '';
       state.noAccess = false;
-      toast('ok', 'ログアウトしました。');
       render();
       loadBoot();
+      if (login && login.session) revokeOnServer([{ session: login.session, expiresAt: login.expiresAt }]);
+      else toast('ok', 'ログアウトしました。');
     }
+
+    var LOGOUT_TIMEOUT_MS = 15000;
+
+    function revokeOnServer(items) {
+      state.revoke = { items: items, running: true };
+      render();
+      var timeout = new Promise(function (resolve, reject) {
+        setTimeout(function () {
+          reject({ code: 'TIMEOUT' });
+        }, LOGOUT_TIMEOUT_MS);
+      });
+      var calls = items.map(function (it) {
+        return plainApi.query('logout', { session: it.session }).then(function (data) {
+          if (!data || data.loggedOut !== true) throw { code: 'UNKNOWN' };
+        });
+      });
+      Promise.race([Promise.all(calls), timeout])
+        .then(function () {
+          state.revoke = null;
+          toast('ok', 'ログアウトしました（サーバーでもログインを無効にしました）。');
+        })
+        .catch(function () {
+          state.revoke = { items: items, running: false };
+        })
+        .then(render);
+    }
+
+    /** サーバーでの無効化を確かめられなかったときの警告（この端末ではログアウト済み） */
+    function renderRevokeNotice() {
+      var r = state.revoke;
+      if (!r || r.running) return null;
+      var until = r.items.map(function (it) {
+        return it.expiresAt || '';
+      }).sort().pop();
+      return el('section', { className: 'panel', role: 'alert' }, [
+        el('p', { className: 'error', text: 'この端末ではログアウトしました（この端末のログイン情報は消しました）。ただし、通信できなかったため、サーバー側でログインを無効にできたかは確認できていません。' }),
+        el('p', { className: 'muted small', text: 'サーバー側では' + (until ? ' 最長 ' + formatDateTime(until) + ' まで' : '期限まで') + '有効なままの可能性があります。通信できる状態で、もう一度お試しください（このページを閉じると再試行できません）。' }),
+        el('div', { className: 'row' }, [
+          el('button', { className: 'btn btn--primary', type: 'button', text: 'サーバーでの無効化をもう一度試す', onClick: function () { revokeOnServer(r.items); } }),
+          el('button', { className: 'btn btn--ghost', type: 'button', text: '閉じる', onClick: function () { state.revoke = null; render(); } }),
+        ]),
+      ]);
+    }
+
+    /* 別のタブ（ポータル・運営画面）でのログイン・ログアウトを反映する（同じオリジンの localStorage） */
+    win.addEventListener('storage', function (e) {
+      if (e.key !== null && e.key !== 'tpoc-google' && String(e.key).indexOf('tpoc-staff:') !== 0) return;
+      var before = currentAuth();
+      state.google = readLogin('tpoc-google');
+      state.staff = {};
+      var after = currentAuth();
+      if ((before && before.session) === (after && after.session)) return;
+      resetView();
+      render();
+      loadBoot();
+    });
 
     /* ---------- 読み込み ---------- */
 
@@ -643,6 +709,7 @@
       return api
         .query('bootstrap')
         .then(function (data) {
+          if (needsLink(data)) return linkAccount().then(loadBoot);
           state.boot = data;
           state.authError = '';
           if (state.route.mode === 'event') return loadEventFirst(state.route.eventId);
@@ -653,6 +720,31 @@
           root.textContent = '';
           root.appendChild(el('p', { className: 'panel error', text: (err && err.message) || '読み込みに失敗しました。' }));
           root.appendChild(el('button', { className: 'btn', type: 'button', text: '再読み込み', onClick: loadBoot }));
+        });
+    }
+
+    /**
+     * v0.9: 以前の大会・共同主催者の招待を、ログインした Google アカウントに紐付ける（サーバーが条件を判定する）。
+     * 紐付けられるものがあるときだけ、同じセッションで 1 回だけ呼ぶ
+     */
+    var linkedSessions = {};
+    function needsLink(boot) {
+      var auth = currentAuth();
+      var link = boot && boot.role && boot.role.kind === 'google' ? boot.role.link : null;
+      return !!(link && link.available > 0 && auth && auth.session && !linkedSessions[auth.session]);
+    }
+    function linkAccount() {
+      linkedSessions[currentAuth().session] = true;
+      return api
+        .mutate('linkAccount', {})
+        .then(function (res) {
+          var n = res && res.linked ? res.linked.owner + res.linked.collaborator : 0;
+          if (n) toast('ok', 'このアカウントに ' + n + ' 件の大会（主催・共同主催）を紐付けました。');
+        })
+        .catch(function (err) {
+          if (err && AUTH_ERRORS[err.code]) throw err;
+          // 紐付けに失敗しても画面は開く（次にログインしたときにやり直す）
+          toast('error', '大会の紐付けに失敗しました（' + ((err && err.message) || '通信エラー') + '）。時間をおいてページを再読み込みしてください。');
         });
     }
 
@@ -774,6 +866,8 @@
       batchUi = null;
       root.textContent = '';
       renderWho();
+      var revoke = renderRevokeNotice();
+      if (revoke) root.appendChild(revoke);
       var mode = state.route.mode;
       if (mode === 'invalid') {
         root.appendChild(renderMessage('URL が正しくありません', 'URL が途中で切れていないか確認してください。'));
@@ -1230,6 +1324,7 @@
               ev.role === 'editor' ? el('span', { className: 'badge', text: '共同主催' }) : null,
               ev.staffPasswordSet ? el('span', { className: 'badge', text: '管理パスワード設定済み' }) : null,
               admin && !ev.ownerEmail ? el('span', { className: 'badge', text: '主催者未設定' }) : null,
+              admin && ev.ownerEmail && ev.ownerLinked === false ? el('span', { className: 'badge', text: ev.ownerClaims ? '主催者の承認待ち ' + ev.ownerClaims : '主催者の紐付け待ち' }) : null,
             ]),
           ]),
           el('button', { className: 'btn', type: 'button', text: '開く', onClick: function () { openEvent(ev.id); } }),
@@ -1242,6 +1337,9 @@
       var boot = state.boot;
       var wrap = el('div', { className: 'stack' });
       var list = el('section', { className: 'panel' }, [el('h2', { text: 'あなたの大会' })]);
+      var link = boot.role.link;
+      // v0.9: Google が持ち主を保証しないアドレスの大会・招待は、主催者（招待）・管理者（大会）の承認を待つ
+      if (link && link.pending) list.appendChild(el('p', { className: 'notice', text: 'このアカウントの確認待ちが ' + link.pending + ' 件あります（大会の主催者・共同主催者としての紐付け）。承認されるとここに表示されます。招待した人（大会の主催者）または管理者に、ログインしたことを伝えてください。' }));
       if (!boot.events.length) list.appendChild(el('p', { className: 'muted', text: 'まだ大会がありません。下のフォームから作成してください。' }));
       eventCards(boot.events, false).forEach(function (n) {
         list.appendChild(n);
@@ -3421,9 +3519,23 @@
       return el('section', { className: 'panel' }, [
         el('h3', { text: '共同主催者' }),
         el('p', { className: 'muted small', text: 'Google アカウントで、この大会を一緒に運営できる人を追加します（招待メールは送りません。相手には運営画面の URL を伝えてください）。共同主催者は結果の入力・組み合わせ・設定の変更ができますが、大会の削除・管理パスワード・共同主催者の管理はできません。解除すると、その人のログイン中の画面でもすぐに操作できなくなります。' }),
+        el('p', { className: 'muted small', text: '追加した時点では「招待中」で、相手がその Google アカウントでログインすると有効になります。Gmail・Google Workspace 以外のアドレスは Google が今の持ち主を保証しないため、相手のログインの後に「承認」が必要です（相手に、ログインした日時を確かめてから承認してください）。' }),
         list.length
           ? el('ul', { className: 'plain-list' }, list.map(function (c) {
-              return el('li', null, [el('span', { text: c.email + '（' + formatDateTime(c.addedAt) + ' 追加）' }), ' ', confirmButton('解除', '本当に解除', function () { mutate('removeCollaborator', { eventId: ev.id, collabId: c.id }, '解除しました。'); })]);
+              var status = c.status === 'active' ? '' : c.status === 'pending' ? ' — 承認待ち' : ' — 招待中（相手のログイン待ち）';
+              var claims = (c.claims || []).map(function (cl) {
+                return el('li', null, [
+                  el('span', { text: formatDateTime(cl.at) + ' にログイン（アカウントの識別: ' + cl.ref + '）' }),
+                  ' ',
+                  confirmButton('承認', 'この人を承認', function () { mutate('approveCollaborator', { eventId: ev.id, collabId: c.id, rev: c.rev, ref: cl.ref }, '共同主催者を承認しました。'); }),
+                ]);
+              });
+              return el('li', null, [
+                el('span', { text: c.email + '（' + formatDateTime(c.addedAt) + ' 追加）' + status }),
+                ' ',
+                confirmButton('解除', '本当に解除', function () { mutate('removeCollaborator', { eventId: ev.id, collabId: c.id }, '解除しました。'); }),
+                claims.length ? el('ul', { className: 'plain-list' }, claims) : null,
+              ]);
             }))
           : el('p', { className: 'muted small', text: '共同主催者はいません。' }),
         el('form', {
@@ -3539,6 +3651,7 @@
           el('section', { className: 'panel' }, [
             el('h3', { text: '主催者（管理者のみ）' }),
             el('p', { className: 'muted small', text: 'この大会を運営できる Google アカウント。v0.4 以前に作った大会や、管理者が作った大会に主催者を付けるときに使います。空欄にすると管理者だけが運営できます。' }),
+            ownerLinkInfo(ev),
             el('form', {
               className: 'row',
               onSubmit: function (e) {
@@ -3550,6 +3663,29 @@
         );
       }
       return el('div', { className: 'stack' }, panels);
+    }
+
+    /**
+     * 主催者の Google アカウントの紐付け（管理者のみ）。メールアドレスを設定しただけでは権限はなく、本人のログインで紐付く。
+     * Google が持ち主を保証しないアドレスは、確認待ちのログインを管理者が承認する（本人に、ログインした日時を確かめてから）
+     */
+    function ownerLinkInfo(ev) {
+      var link = ev.ownerLink;
+      if (!link || !ev.ownerEmail) return null;
+      if (link.linked) return el('p', { className: 'muted small', text: '紐付け済み（' + (link.via === 'approved' ? '管理者が承認' : link.via === 'created' ? '作成した本人' : '本人のログイン') + '・' + formatDateTime(link.at) + '）' });
+      var claims = link.claims || [];
+      return el('div', null, [
+        el('p', { className: 'notice', text: claims.length ? '確認待ちのログインがあります。本人に確かめてから承認してください（同じアドレスのアカウントが複数あるときは、なりすまし・アドレスの再割り当ての可能性があります）。' : 'まだ紐付いていません。この Google アカウントでログインすると紐付きます（Gmail・Google Workspace 以外のアドレスは、ログインの後にここで承認が必要です）。' }),
+        claims.length
+          ? el('ul', { className: 'plain-list' }, claims.map(function (cl) {
+              return el('li', null, [
+                el('span', { text: cl.email + ' — ' + formatDateTime(cl.at) + ' にログイン（アカウントの識別: ' + cl.ref + '）' }),
+                ' ',
+                confirmButton('承認', 'この人を主催者にする', function () { mutate('approveOwnerClaim', { eventId: ev.id, rev: ev.rev, ref: cl.ref }, '主催者を承認しました。'); }),
+              ]);
+            }))
+          : null,
+      ]);
     }
 
     /** ファイルとして保存させる（ダウンロード） */

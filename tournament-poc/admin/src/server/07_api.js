@@ -73,6 +73,10 @@ function adminActions_() {
     addCollaborator: { fn: actionAddCollaborator_, scope: 'event', mutating: true },
     removeCollaborator: { fn: actionRemoveCollaborator_, scope: 'event', mutating: true },
     restoreEvent: { fn: actionRestoreEvent_, scope: 'create', mutating: true },
+    // v0.9: Google アカウント（sub）との紐付け（02b_identity.js）
+    linkAccount: { fn: actionLinkAccount_, scope: 'google', mutating: true },
+    approveOwnerClaim: { fn: actionApproveOwnerClaim_, scope: 'event', mutating: true },
+    approveCollaborator: { fn: actionApproveCollaborator_, scope: 'event', mutating: true },
   };
 }
 
@@ -183,7 +187,7 @@ var REQUEST_ID_PATTERN_ = /^[A-Za-z0-9-]{16,64}$/;
 var NO_COMPLETION_CHECK_ = [
   'updateEvent', 'updateEventSettings', 'setStaffPassword', 'setOwner', 'addCollaborator', 'removeCollaborator', 'republish', 'renameGroup',
   'updatePlayer', 'setSchedule', 'postponeMatch', 'applyWeeklySchedule', 'updateNight', 'createEvent', 'createSampleEvent', 'duplicateEvent',
-  'restoreEvent', 'importPlayers', 'addPlayers', 'deleteEvent', 'reinstatePlayer',
+  'restoreEvent', 'importPlayers', 'addPlayers', 'deleteEvent', 'reinstatePlayer', 'linkAccount', 'approveOwnerClaim', 'approveCollaborator',
 ];
 var WRITE_JOURNAL_KEY_ = 'WRITE_JOURNAL';
 
@@ -204,8 +208,8 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
     throw appError_('BAD_REQUEST', 'requestId がありません。画面を再読み込みしてください。');
   }
   var cache = CacheService.getScriptCache();
-  // 別の利用者の requestId と衝突しないよう、利用者ごとに分ける
-  var dedupeKey = 'req:' + sha256Hex_(user.label + ':' + requestId);
+  // 別の利用者の requestId と衝突しないよう、利用者ごとに分ける（Google は sub ごと。メールアドレスは変わりうる）
+  var dedupeKey = 'req:' + sha256Hex_((user.principal || user.label) + ':' + requestId);
   var done = cache.get(dedupeKey);
   if (done) return duplicateResult_(done);
 

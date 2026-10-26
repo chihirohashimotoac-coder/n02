@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { setupPair, loadProject, ROOT, fakeIdToken, GOOGLE_CLIENT_ID } from './gas-mock.mjs';
+import { setupPair, loadProject, ROOT, fakeIdToken, GOOGLE_CLIENT_ID, WORKSPACE } from './gas-mock.mjs';
 
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
@@ -399,15 +399,24 @@ test('主催者のいない大会（v0.4 以前に作成・管理者が作成）
   const p = setupPair();
   p.ok('initializeStorage');
   const id = p.ok('createEvent', { name: '旧大会', bestOf: 5, groupCount: 1 }).eventId;
-  const alice = p.loginAs(ALICE);
+  const alice = p.loginAs(ALICE, WORKSPACE);
   assert.equal(p.call('eventDetail', { eventId: id }, { auth: alice }).error.code, 'NOT_FOUND');
   const ev = p.ok('eventDetail', { eventId: id }).event;
   assert.equal(p.call('setOwner', { eventId: id, rev: ev.rev, ownerEmail: 'not-an-email' }).error.code, 'VALIDATION');
   assert.equal(p.ok('setOwner', { eventId: id, rev: ev.rev, ownerEmail: ' Alice@Example.org ' }).detail.event.ownerEmail, ALICE);
-  assert.equal(p.call('eventDetail', { eventId: id }, { auth: alice }).ok, true);
+  // v0.9: メールアドレスを設定しただけでは権限はない。本人がログイン（紐付け）すると主催者になる
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth: alice }).error.code, 'NOT_FOUND');
+  assert.equal(p.ok('bootstrap').events[0].ownerLinked, false);
+  assert.deepEqual(p.link(alice).linked, { owner: 1, collaborator: 0 });
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth: alice }).data.event.role, 'owner');
   assert.deepEqual(Array.from(p.call('bootstrap', {}, { auth: alice }).data.events, (e) => e.id), [id]);
-  // 管理者の一覧には主催者のメールアドレスが出る
+  // 管理者の一覧には主催者のメールアドレスと紐付けの状態が出る
   assert.equal(p.ok('bootstrap').events[0].ownerEmail, ALICE);
+  assert.equal(p.ok('bootstrap').events[0].ownerLinked, true);
+  // 付け替えると、前の主催者の権限はすぐに外れる（同じセッションでも）
+  const ev2 = p.ok('eventDetail', { eventId: id }).event;
+  p.ok('setOwner', { eventId: id, rev: ev2.rev, ownerEmail: BOB });
+  assert.equal(p.call('eventDetail', { eventId: id }, { auth: alice }).error.code, 'NOT_FOUND');
 });
 
 test('閲覧者に返すデータに非公開情報（メモ・操作者・履歴・版番号・内部 ID 以外の管理項目）を含めない', () => {

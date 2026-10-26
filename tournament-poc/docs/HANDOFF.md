@@ -3,7 +3,11 @@
 最終更新: 2026-10-26 / 本番の版: **v0.8.0**（コミット `344c91f`。2026-10-26 01:11 UTC に GitHub Actions で本番反映・利用者が画面で確認済み）
 
 次のセッションは、まずこのファイルと [README.md](../README.md)・[test-plan.md](test-plan.md)・[deploy.md](deploy.md) を読んでから作業してください。
-現時点で未着手の依頼はありません。作業を始める前に、ユーザーに次の依頼内容を確認してください。
+
+**進行中（未反映）: v0.9.0**（ブランチ `claude/adoring-gates-m4ne8d`）。主催者・共同主催者を Google の `sub` で識別し、スキーマ v3 へ移行、
+ログアウトの成否の表示。設計・移行・ロールバックの境界・本番に移す手順は [v0.9-identity.md](v0.9-identity.md)。
+**マージすると自動で反映・移行され、Google でログイン中の全員が再ログインになる**ので、マージの前に同文書の「8.」の手順（自動反映を止める）を確認すること。
+ユーザーの指示により、main へのマージ・本番反映・本番シートの移行はこのセッションでは行っていない。
 
 ---
 
@@ -83,6 +87,7 @@
 ## 6. v0.8.0 の要点（コードの地図）
 
 - 形式 10 種（作成画面の順）: `robin_ko`（既定）・`elimination`・`robin_ab`・`double_elimination`・`robin`・`league`・`league_playoff`・`multi_robin_ko`・`series_playoff`・`swiss`。定義は `shared/formats.js` だけ（順・説明・流れ・予定試合数の見積もり）。
+- v0.9.0: 認証 `02_auth.js`（ID トークンの sub・hd、セッションに sub）、紐付けと承認 `02b_identity.js`、移行の値の移し替え `03_storage.js` の `migrateRecords_`。
 - サーバー（`admin/src/server/`）: 設定 `00_config.js`、保存 `03_storage.js`（まとめて書き込み `commitContext_`・スキーマ v2・`migrateStorage`）、勝敗・順位 `04_domain.js`、ブラケットの汎用の組み立て `04b_bracket.js`（SE・DE・シリーズの節・回戦ごとの抽選）、スイス式 `04c_swiss.js`、表示 `04e_view.js`、組分け `04f_draw.js`、操作 `06_actions.js`・`06b_ops.js`（F01〜F21）、API `07_api.js`。
 - 画面: 運営 `admin/src/client/admin.js`（CSV `admin-io.js`・印刷 `print-landscape.css`）、閲覧 `viewer/src/client/`、ポータル `portal/src/client/`、一覧の要約 `shared/summary.js`。
 - 回戦ごとの抽選（drawMode=redraw）の訂正: 抽選済みの後の試合が未開始なら勝者（と 3 位決定戦の敗者）を差し替え、始まっていれば拒否。後の回戦があれば確定の取り消しは拒否（`propagateRedrawn_`）。
@@ -103,7 +108,8 @@ cd .. && npx eslint .                  # ルートの lint
 
 - 画面テストは `tools/preview-server.mjs`（模擬 Apps Script、ポート 4180）。Google のログインは `fakeGoogle`・`googleLogin`（`e2e/helpers.mjs`）で模擬。
 - Playwright を単体スクリプトで使うときは `chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })`（`playwright install` はしない）。
-- `tests/gas-mock.mjs` の `loadProject(app, { codePath })` で旧版のコード（`tests/fixtures/admin-v0.6.0.gs`・`admin-v0.7.1.gs`・`viewer-v0.2.0.gs`）を動かせる（移行・ロールバックの確認用）。
+- `tests/gas-mock.mjs` の `loadProject(app, { codePath })` で旧版のコード（`tests/fixtures/admin-v0.6.0.gs`・`admin-v0.7.1.gs`・`admin-v0.8.0.gs`・`viewer-v0.2.0.gs`）を動かせる（移行・ロールバックの確認用）。
+- v0.9.0 のテスト: `loginAs(email, claims)` の claims で sub・hd を変える（`WORKSPACE` = hd あり。example.org のままでは Google が持ち主を保証しないアドレス）。紐付けは `link(auth)`。
 - `tests/deploy.test.mjs` は Google を模擬して本番反映の順序と止める条件を確かめる（実物の旧版コードに `bootstrap` を答えさせる）。
 
 ## 8. 実環境の確認状況・残り

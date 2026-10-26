@@ -28,9 +28,9 @@ export async function adminCall(request, action, payload = {}, auth) {
   return res.json();
 }
 
-/** Google でログインしたことにしてセッションの auth を返す（API を直接呼ぶテスト用） */
-export async function loginSession(request, email) {
-  const res = await adminCall(request, 'login', { idToken: fakeIdToken(email, null) }, 'anon');
+/** Google でログインしたことにしてセッションの auth を返す（API を直接呼ぶテスト用）。claims で ID トークンの中身を変えられる */
+export async function loginSession(request, email, claims = {}) {
+  const res = await adminCall(request, 'login', { idToken: fakeIdToken(email, null, claims) }, 'anon');
   expect(res.ok, JSON.stringify(res.error)).toBe(true);
   return { session: res.data.session };
 }
@@ -80,7 +80,7 @@ export async function expectNoHorizontalOverflow(page) {
  */
 export async function fakeGoogle(page, request, email, options = {}) {
   await page.route('https://accounts.google.com/gsi/client', async (route) => {
-    const r = await request.get(`/__fake-gsi.js?email=${encodeURIComponent(email)}`);
+    const r = await request.get(`/__fake-gsi.js?email=${encodeURIComponent(email)}${options.hd ? '&hd=' + encodeURIComponent(options.hd) : ''}`);
     await route.fulfill({ status: 200, contentType: 'text/javascript', body: await r.text() });
   });
   // ボタン用のスタイル（画面はこれを読み込み終えてからボタンを描く）

@@ -190,7 +190,9 @@ const server = http.createServer(async (req, res) => {
     // ボタンを押すと、指定したメールアドレスのテスト用 ID トークン（模擬 tokeninfo が本物として扱う形）を渡す
     if (req.method === 'GET' && url.pathname === '/__fake-gsi.js') {
       const email = url.searchParams.get('email') || 'organizer@example.org';
-      const token = fakeIdToken(email, null);
+      // hd: Google Workspace のアカウントとしてログインする（Google がメールアドレスの持ち主を保証する）
+      const hd = url.searchParams.get('hd') || '';
+      const token = fakeIdToken(email, null, hd ? { hd } : {});
       const script = `window.google = { accounts: { id: {
   initialize: function (cfg) { window.__gisConfig = cfg; },
   renderButton: function (box) {

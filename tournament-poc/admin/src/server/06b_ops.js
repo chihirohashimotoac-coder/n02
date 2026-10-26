@@ -938,6 +938,7 @@ function cloneEventStructure_(ctx, source, opts) {
     }
   });
   var cfgEv = safeJson_(source.event.config_json, {});
+  var owner = creatorOwner_(ctx);
   delete cfgEv.autoFinishedAt;
   if (!opts.keepAnnouncement) delete cfgEv.announcement;
   var event = {
@@ -952,7 +953,7 @@ function cloneEventStructure_(ctx, source, opts) {
     organizer_name: '',
     admin_key_hash: '',
     admin_key_issued_at: '',
-    owner_email: creatorEmail_(ctx),
+    owner_email: owner.owner_email,
     staff_pass_hash: '',
     staff_pass_salt: '',
     staff_pass_set_at: '',
@@ -961,6 +962,8 @@ function cloneEventStructure_(ctx, source, opts) {
     rev: 1,
     created_at: ctx.now,
     updated_at: ctx.now,
+    owner_sub: owner.owner_sub,
+    owner_link_json: owner.owner_link_json,
   };
   appendRecords_(events, [event]);
   appendRecords_(ctx.table('Rules'), rules);
@@ -1003,10 +1006,11 @@ function actionAddCollaborator_(ctx, payload) {
   var current = table.rows.filter(function (r) {
     return r.event_id === eventId;
   });
-  if (current.some(function (r) { return normalizeEmail_(r.email) === email; })) throw appError_('VALIDATION', 'この Google アカウントは既に共同主催者です。');
+  if (current.some(function (r) { return collabEmailOf_(r) === email; })) throw appError_('VALIDATION', 'この Google アカウントは既に共同主催者（または招待中）です。');
   if (current.length >= ADMIN_CONFIG.MAX_COLLABORATORS) throw appError_('LIMIT', '共同主催者は ' + ADMIN_CONFIG.MAX_COLLABORATORS + ' 人までです。');
   var id = newId_('COL', table.byKey);
-  appendRecords_(table, [{ collab_id: id, event_id: eventId, email: email, role: 'editor', added_by: ctx.user.label, rev: 1, created_at: ctx.now, updated_at: ctx.now }]);
+  // v0.9: 入力したメールアドレスは招待（invite_email）。相手がログインして紐付くまで権限はない。email 列は書かない（旧版はこの列で権限を判定するため）
+  appendRecords_(table, [{ collab_id: id, event_id: eventId, email: '', invite_email: email, sub: '', link_json: '', role: 'editor', added_by: ctx.user.label, rev: 1, created_at: ctx.now, updated_at: ctx.now }]);
   recordHistory_(ctx, 'collaborator.add', 'Event', eventId, eventId, null, { email: email });
   return { eventId: eventId };
 }
@@ -1018,7 +1022,7 @@ function actionRemoveCollaborator_(ctx, payload) {
   var rec = findRecord_(table, requireId_(payload.collabId, '共同主催者'), '共同主催者');
   if (rec.event_id !== eventId) throw appError_('NOT_FOUND', '共同主催者が見つかりません。');
   deleteRecords_(table, [rec]);
-  recordHistory_(ctx, 'collaborator.remove', 'Event', eventId, eventId, { email: rec.email }, null);
+  recordHistory_(ctx, 'collaborator.remove', 'Event', eventId, eventId, { email: collabEmailOf_(rec) }, null);
   return { eventId: eventId };
 }
 

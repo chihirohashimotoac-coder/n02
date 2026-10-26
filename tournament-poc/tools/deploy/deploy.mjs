@@ -294,12 +294,19 @@ export async function runGas(env, { dryRun = false, io = defaultIo(), dist } = {
     const a = await getJson(io, adminUrl);
     const v = await getJson(io, EXEC_URL(cfg.viewerDeploymentId) + '?format=version');
     const l = await getJson(io, EXEC_URL(cfg.viewerDeploymentId) + '?format=list');
-    if (!a.json || a.json.release !== cfg.sha || a.json.schema !== 2) throw new DeployError('運営用 GAS の応答が想定と違います。');
+    if (!a.json || a.json.release !== cfg.sha || a.json.schema !== expectedSchema()) throw new DeployError('運営用 GAS の応答が想定と違います。');
     if (!v.json || v.json.release !== cfg.sha) throw new DeployError('閲覧者用 GAS の応答が想定と違います。');
     if (!l.json || l.json.ok !== true) throw new DeployError('閲覧者用 GAS の大会一覧が読めません。');
   });
   rec.step('GAS の動作確認', 'done', '運営用・閲覧者用とも今回のコミットで応答。大会一覧を読めました');
   return rec.state;
+}
+
+/** 今回のコードのスキーマの版（00_config.js の SCHEMA_VERSION）。反映後の運営用 GAS がこの版で応答することを確かめる */
+export function expectedSchema() {
+  const m = readFileSync(join(POC, 'admin', 'src', 'server', '00_config.js'), 'utf8').match(/SCHEMA_VERSION:\s*(\d+)/);
+  if (!m) fail('00_config.js に SCHEMA_VERSION が見つかりません。');
+  return Number(m[1]);
 }
 
 /* ---------- pages ---------- */
