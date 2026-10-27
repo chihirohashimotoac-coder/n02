@@ -241,7 +241,7 @@ CSV 取込（F11。確認してから登録）、設定の複製（F12）、毎�
 | History | history_id, at, actor, action, entity, entity_id, event_id, before_json, after_json | 監査・訂正の追跡 |
 | PublicSnapshots | event_id, is_default, version, published_at, chunk_count, chunk_01〜10 | 閲覧者向けの公開データ（1 行最大 40 万文字）。v1.0 から、上限を超える大会の試合一覧は `EVT-….P01` などの分割行（パート）に入る |
 | Leagues（v1.0） | league_id, name, config_json | 期制リーグ（境目・目標人数・定員・回数・勝ち点・ルール） |
-| LeagueSeasons（v1.0） | season_key, league_id, season_no, event_id, prev_event_id, plan_json, confirmed_at, confirmed_by | 期と大会の対応・次期の確定の記録（根拠・理由・照合） |
+| LeagueSeasons（v1.0） | season_key, league_id, season_no, event_id, prev_event_id, plan_json（〜plan_json_08 に分割）, confirmed_at, confirmed_by | 期と大会の対応・次期の確定の記録（根拠・理由・照合） |
 | LeagueMembers（v1.0） | member_id, league_id, display_name, status, meta_json | 期をまたぐ会員 ID（Players.member_id から参照） |
 
 全行に `rev`（版番号）と `created_at` / `updated_at`（ISO 8601、UTC）があります。文字列の列は「書式なしテキスト」にして、`1/2` のような名前が日付に自動変換されないようにしています。

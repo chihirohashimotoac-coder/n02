@@ -64,6 +64,8 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_LEAGUE_SEASONS: 99,
   MAX_SEASON_DIVISIONS: 16,
   MAX_LEAGUE_NAME_LENGTH: 60,
+  // 次期の確定記録（LeagueSeasons の plan_json）。1 セルの上限を超えないよう SNAPSHOT_CHUNK_SIZE ごとに列を分ける
+  SEASON_PLAN_MAX_CHUNKS: 8,
 });
 
 /** 試合状態（シートにはコード値で保存し、画面で日本語に変換する） */
@@ -345,6 +347,13 @@ var SCHEMA = Object.freeze({
       ['event_id', 'text'],
       ['prev_event_id', 'text'],
       ['plan_json', 'text'],
+      ['plan_json_02', 'text'],
+      ['plan_json_03', 'text'],
+      ['plan_json_04', 'text'],
+      ['plan_json_05', 'text'],
+      ['plan_json_06', 'text'],
+      ['plan_json_07', 'text'],
+      ['plan_json_08', 'text'],
       ['confirmed_at', 'text'],
       ['confirmed_by', 'text'],
       ['rev', 'int'],

@@ -345,6 +345,43 @@ function newLeagueRecord_(ctx, name, cfg) {
   return rec;
 }
 
+/** 確定記録を入れる列（plan_json と続きの列） */
+function seasonPlanColumns_() {
+  var cols = ['plan_json'];
+  for (var i = 2; i <= ADMIN_CONFIG.SEASON_PLAN_MAX_CHUNKS; i++) cols.push('plan_json_' + (i < 10 ? '0' : '') + i);
+  return cols;
+}
+
+/** 確定記録を読む（分けた列をつなぐ） */
+function readSeasonPlan_(row, fallback) {
+  if (!row) return fallback;
+  var text = seasonPlanColumns_()
+    .map(function (col) {
+      var v = row[col] ? String(row[col]) : '';
+      return v.charAt(0) === SNAPSHOT_CHUNK_PREFIX_ ? v.slice(1) : v;
+    })
+    .join('');
+  return safeJson_(text, fallback);
+}
+
+/**
+ * 確定記録を行に入れる（書き込みは commitContext_）。1 セルの上限を超えないよう列を分ける。
+ * 列に収まらなければ、どのシートにも書く前に TOO_LARGE で止める（次期の大会だけが残ることはない）
+ */
+function writeSeasonPlan_(row, record) {
+  var json = record ? JSON.stringify(record) : '';
+  var size = ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE;
+  var cols = seasonPlanColumns_();
+  if (json.length > size * cols.length) {
+    throw appError_('TOO_LARGE', '次期の配置の記録が大きすぎて保存できません（' + json.length + ' 文字）。手動の修正の理由を短くしてください。');
+  }
+  cols.forEach(function (col, i) {
+    var part = json.slice(i * size, (i + 1) * size);
+    // 分けた続きの先頭が = や + でも数式扱いされないよう、公開データと同じ接頭辞を付ける
+    row[col] = part ? SNAPSHOT_CHUNK_PREFIX_ + part : '';
+  });
+}
+
 function newSeasonRecord_(ctx, leagueId, seasonNo, eventId, prevEventId, plan) {
   var table = ctx.table('LeagueSeasons');
   var id = newId_('LSN', table.byKey);
@@ -354,13 +391,13 @@ function newSeasonRecord_(ctx, leagueId, seasonNo, eventId, prevEventId, plan) {
     season_no: seasonNo,
     event_id: eventId,
     prev_event_id: prevEventId || '',
-    plan_json: plan ? JSON.stringify(plan) : '',
     confirmed_at: plan ? ctx.now : '',
     confirmed_by: plan && ctx.user ? ctx.user.label : '',
     rev: 1,
     created_at: ctx.now,
     updated_at: ctx.now,
   };
+  writeSeasonPlan_(rec, plan);
   appendRecords_(table, [rec]);
   return rec;
 }
@@ -931,7 +968,8 @@ function actionConfirmNextSeason_(ctx, payload) {
   newSeasonRecord_(ctx, sc.league.league_id, nextNo, ev.event_id, eventId, record);
   recordHistory_(ctx, 'season.next', 'League', sc.league.league_id, eventId, null, { nextEventId: ev.event_id, season: nextNo, divisions: plan.divisionCount, sizes: record.sizes, by: ctx.user ? ctx.user.label : '' });
   recordHistory_(ctx, 'season.created', 'League', sc.league.league_id, ev.event_id, null, { from: eventId, season: nextNo, rows: record.rows.length });
-  return { eventId: ev.event_id, alsoPublish: [eventId], createdFrom: eventId };
+  // 各期の公開データは期の一覧を持つので、前期だけでなく全部の期を作り直す
+  return { eventId: ev.event_id, alsoPublish: seasonSiblings_(ctx, ev.event_id), createdFrom: eventId };
 }
 
 /* ---------- 前期の訂正の照合（次期を作った後） ---------- */
@@ -955,7 +993,7 @@ function storedEdits_(record) {
  * 次期の所属は黙って書き換えない（主催者が照合の画面で、反映か承認（記録として残す）を選ぶ）
  */
 function seasonDrift_(ctx, nextRow) {
-  var record = safeJson_(nextRow.plan_json, null);
+  var record = readSeasonPlan_(nextRow, null);
   if (!record || !nextRow.prev_event_id || !ctx.table('Events').byKey[nextRow.prev_event_id]) return null;
   var nextEvent = ctx.table('Events').byKey[nextRow.event_id];
   if (!nextEvent) return null;
@@ -1034,7 +1072,7 @@ function actionReconcileNextSeason_(ctx, payload) {
   var drift = seasonDrift_(ctx, row);
   if (!drift || !drift.changed) throw appError_('LOCKED', '前期の結果は、次期を作った時から変わっていません。');
   var reason = cleanText_(payload.reason, '理由', ADMIN_CONFIG.MAX_NOTE_LENGTH);
-  var record = safeJson_(row.plan_json, {});
+  var record = readSeasonPlan_(row, {});
   var apply = Array.isArray(payload.apply) ? payload.apply : [];
   if (apply.length > ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT) throw appError_('BAD_REQUEST', '指定が多すぎます。');
   var applied = [];
@@ -1104,7 +1142,7 @@ function actionReconcileNextSeason_(ctx, payload) {
   } else if (!applied.length) {
     throw appError_('VALIDATION', '反映する選手を選ぶか、「記録として承認」を選んでください。');
   }
-  row.plan_json = JSON.stringify(record);
+  writeSeasonPlan_(row, record);
   row.rev = (row.rev || 0) + 1;
   row.updated_at = ctx.now;
   updateRecord_(seasons, row);
@@ -1193,7 +1231,7 @@ function seasonDetail_(ctx, bundle, view, role) {
     if (nev) out.next.drift = seasonDrift_(ctx, sc.next);
   }
   if (sc.row.prev_event_id) {
-    var record = safeJson_(sc.row.plan_json, null);
+    var record = readSeasonPlan_(sc.row, null);
     out.plan = record ? { rows: record.rows, divisionCount: record.divisionCount, sizes: record.sizes, playoffs: record.playoffs, warnings: record.warnings || [], confirmedAt: sc.row.confirmed_at, confirmedBy: owner ? sc.row.confirmed_by : '', log: record.log || [], acknowledged: record.acknowledged || null } : null;
     out.drift = seasonDrift_(ctx, sc.row);
   }
@@ -1242,7 +1280,7 @@ function seasonPublicView_(bundle, stages) {
     });
   }
   if (sc.next && sc.events[sc.next.event_id]) {
-    var record = safeJson_(sc.next.plan_json, null);
+    var record = readSeasonPlan_(sc.next, null);
     if (record && Array.isArray(record.rows)) {
       var playerOfMember = {};
       bundle.players.forEach(function (p) {

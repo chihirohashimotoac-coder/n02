@@ -673,6 +673,8 @@ test('公開データ: 期の一覧は公開中の期だけ大会 ID を出す�
   assert.equal(out['選手08'], 'playoff_win_promote→1部');
   assert.equal(out['選手05'], 'playoff_lose_relegate→2部');
   assert.equal(out['選手09'], 'stay→1部', '手動で変えた所属は結果だけを出す');
+  // 3 期目を作ると、公開中の 1 期目の公開データ（期の一覧）も作り直す
+  assert.equal(p.viewer.run('getPublicSnapshot', { eventId: id1 }).data.event.season.seasons.length, 3);
   const text = JSON.stringify(data);
   for (const secret of ['非公開の理由です', '運営メモ', 'LMB-', 'LSN-', 'reasons', 'manual', '@']) assert.ok(!text.includes(secret), secret);
   // 次期を公開すると、前期の公開データに次期の ID が出る
@@ -680,4 +682,26 @@ test('公開データ: 期の一覧は公開中の期だけ大会 ID を出す�
   p.clock.advance(21000);
   assert.equal(p.viewer.run('getPublicSnapshot', { eventId: id2 }).data.event.season.next.eventId, id3);
   assert.equal(p.viewer.run('getPublicSnapshot', { eventId: id3 }).data.event.season.seasons.length, 3);
+});
+
+test('確定の記録が 1 セルの上限（50,000 文字）を超える大きさでも、列を分けて保存し、そのまま読み戻せる', () => {
+  const p = ready();
+  const id = season1(p, 64, { thresholds: [10] });
+  playAll(p, id, 0);
+  const pv = p.ok('previewNextSeason', { eventId: id });
+  assert.equal(pv.divisionCount, 2);
+  // 全員の所属を手動で入れ替える（理由は上限の 200 文字）
+  const moves = pv.rows.map((r, i) => ({ key: r.key, division: r.newDivision === 1 ? 2 : 1, reason: ('入れ替えの理由' + i + '。').padEnd(200, 'あ') }));
+  const pv2 = p.ok('previewNextSeason', { eventId: id, edits: { moves } });
+  assert.equal(pv2.ok, true, JSON.stringify(pv2.problems));
+  const c = p.ok('confirmNextSeason', { eventId: id, edits: { moves }, planVersion: pv2.planVersion });
+  const row = p.store.get().getSheetByName('LeagueSeasons').records().find((r) => r.event_id === c.eventId);
+  const cells = Object.keys(row).filter((k) => /^plan_json/.test(k)).map((k) => String(row[k] || ''));
+  assert.ok(cells.filter(Boolean).length >= 2, '1 つの列に収まらない大きさ: ' + cells.join('').length);
+  assert.ok(cells.every((x) => x.length <= 50000));
+  const plan = p.ok('eventDetail', { eventId: c.eventId }).season.plan;
+  assert.equal(plan.rows.length, 64);
+  assert.ok(plan.rows.every((r) => r.manual));
+  assert.ok(plan.rows.some((r) => r.reasons.join().includes('入れ替えの理由63。')));
+  assert.equal(p.ok('eventDetail', { eventId: c.eventId }).season.drift.changed, false);
 });
