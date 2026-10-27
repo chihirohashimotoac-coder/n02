@@ -63,8 +63,10 @@ jobs:
       TOURNAMENT_VIEWER_SCRIPT_ID: ${{ vars.TOURNAMENT_VIEWER_SCRIPT_ID }}
       TOURNAMENT_PAGES_URL: ${{ vars.TOURNAMENT_PAGES_URL }}
       VIEWER_SITE_DIR: ${{ github.workspace }}/viewer-site
-      TOURNAMENT_DEPLOY_STATE: ${{ github.workspace }}/.tournament-deploy/state.json
-      TOURNAMENT_BACKUP_DIR: ${{ github.workspace }}/.tournament-deploy/backup
+      # 記録とバックアップの置き場所。名前を「.」で始めない（upload-artifact@v4 は既定で隠しファイル・隠しフォルダを除くため、
+      # v0.8.0〜v0.9.0 の反映では成果物が空になっていた）
+      TOURNAMENT_DEPLOY_STATE: ${{ github.workspace }}/tournament-deploy-record/state.json
+      TOURNAMENT_BACKUP_DIR: ${{ github.workspace }}/tournament-deploy-record/backup
     steps:
       - uses: actions/checkout@v4
         with:
@@ -140,6 +142,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tournament-backup-${{ github.sha }}
-          path: ${{ github.workspace }}/.tournament-deploy
-          if-no-files-found: ignore
+          path: ${{ github.workspace }}/tournament-deploy-record
+          # 反映の前に止まった実行では何もないことがあるが、見落とさないよう警告は出す
+          if-no-files-found: warn
           retention-days: 90
