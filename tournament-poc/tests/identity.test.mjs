@@ -167,7 +167,8 @@ function migratedFromV080() {
 test('移行（v2 → v3）: 共同主催者のメールアドレスは招待に移し、権限は本人のログインで紐付くまで付かない。件数・バックアップ・やり直し', () => {
   const w = migratedFromV080();
   assert.equal(w.migrated.migrateResult.from, 2);
-  assert.equal(w.migrated.migrateResult.to, 3);
+  // v1.0: v0.8 の保存先は v3 の移し替えを経て、v4（期制リーグのシート・列の追加）まで 1 回で上がる
+  assert.equal(w.migrated.migrateResult.to, 4);
   assert.equal(w.migrated.migrateResult.records.collaboratorsMoved, 2);
   const book = w.store.get();
   const collabs = book.getSheetByName('Collaborators').records();
@@ -228,7 +229,7 @@ test('移行のやり直し: 値の移し替えの途中で止まっても SCHEM
   assert.equal(post(next, 'eventDetail', { eventId: id }, { adminKey: ADMIN_KEY }).ok, true);
   const second = post(next, 'migrateStorage', {}, { adminKey: ADMIN_KEY });
   assert.equal(second.ok, true, JSON.stringify(second.error));
-  assert.equal(next.properties.getProperty('SCHEMA_VERSION'), '3');
+  assert.equal(next.properties.getProperty('SCHEMA_VERSION'), '4');
   assert.deepEqual(sheet.records().map((r) => [r.email, r.invite_email]), [['', 'h1@gmail.com'], ['', 'h2@gmail.com']]);
 });
 

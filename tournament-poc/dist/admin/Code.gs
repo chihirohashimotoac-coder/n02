@@ -289,10 +289,11 @@ function estimateFormat_(id, params) {
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.9.0',
+  APP_VERSION: '1.0.0',
   // 1 = v0.7 まで。2 = v0.8（大会設定・所属/Rt・試合の予定/特殊な結果・共同主催者など。列とシートの追加だけ）
   // 3 = v0.9（主催者・共同主催者を Google の不変 ID（sub）で識別する列。共同主催者の旧 email 列は invite_email へ移す）
-  SCHEMA_VERSION: 3,
+  // 4 = v1.0（期制リーグ: Leagues・LeagueSeasons・LeagueMembers のシートと Players.member_id。追加だけで値の移し替えはない）
+  SCHEMA_VERSION: 4,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
   // 二重送信（ボタン連打・通信再試行）を requestId で弾く期間
@@ -324,6 +325,10 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_RESTORE_REQUEST_CHARS: 2000000,
   // 公開データ（閲覧ページの JSON）の上限。セル 10 個 × 40,000 文字
   MAX_SNAPSHOT_CHARS: 400000,
+  // v1.0: 上限を超える大会の試合一覧を分ける行（パート）の 1 つあたりの目安と、1 大会のパートの上限。
+  // 上限そのもの（1 行 40 万文字）は変えない。パートは閲覧者用アプリのキャッシュ（1 値 3 万文字 × 20）に収まる大きさにする
+  SNAPSHOT_PART_TARGET_CHARS: 60000,
+  MAX_SNAPSHOT_PARTS: 40,
   MAX_COLLABORATORS: 10,
   MAX_SERIES_NIGHTS: 30,
   MAX_SWISS_ROUNDS: 15,
@@ -333,6 +338,11 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_MY_EVENTS: 100,
   // v0.9: 1 つの大会・招待に記録する「確認待ちのログイン」（同じメールアドレスの別アカウント）の上限
   MAX_LINK_CLAIMS: 5,
+  // v1.0: 期制リーグ。会員（期をまたぐ選手の ID）の上限・期の数・ディビジョン数の上限（グループの上限と同じ）
+  MAX_LEAGUE_MEMBERS: 1000,
+  MAX_LEAGUE_SEASONS: 99,
+  MAX_SEASON_DIVISIONS: 16,
+  MAX_LEAGUE_NAME_LENGTH: 60,
 });
 
 /** 試合状態（シートにはコード値で保存し、画面で日本語に変換する） */
@@ -368,6 +378,7 @@ var STAGE_TYPE = Object.freeze({
   DOUBLE_ELIMINATION: 'double_elimination', // v0.8: ダブルエリミネーション（勝者側・敗者側・グランドファイナル）
   SWISS: 'swiss', // v0.8: スイス式（成績の近い選手どうしを回戦ごとに組む）
   SERIES: 'series', // v0.8: ポイントシリーズ（節ごとの小トーナメントの順位ポイントを累計）
+  PROMOTION: 'promotion', // v1.0: 期制リーグの入替戦（隣接ディビジョンの組ごとに 1 試合。期制リーグの大会にだけ作る）
 });
 
 var RULE_FORMAT = Object.freeze({
@@ -401,6 +412,7 @@ var STAGE_TYPE_LABEL = Object.freeze({
   double_elimination: 'ダブルエリミネーション',
   swiss: 'スイス式',
   series: 'ポイントシリーズ',
+  promotion: '入替戦',
 });
 
 /**
@@ -468,6 +480,7 @@ var SCHEMA = Object.freeze({
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
+      ['member_id', 'text', 4], // v1.0: 期制リーグの会員 ID（LeagueMembers。期をまたいで同じ人を指す。名前では対応付けない）。期制リーグでない大会は空欄
     ],
   },
   Stages: {
@@ -587,6 +600,52 @@ var SCHEMA = Object.freeze({
       ['link_json', 'text', 3], // v0.9: 紐付けた時のメールアドレス・方法、確認待ちのログイン
     ],
   },
+  // v1.0: 期制リーグ（複数の期の大会をたどるための系列）。権限は各期の大会（主催者・管理者）で判定する
+  Leagues: {
+    key: 'league_id',
+    since: 4,
+    columns: [
+      ['league_id', 'text'],
+      ['name', 'text'],
+      ['config_json', 'text'], // ディビジョン数の境目・目標人数・定員・総当たりの回数・勝ち点・ルール（04g_season.js の leagueConfig_）
+      ['rev', 'int'],
+      ['created_at', 'text'],
+      ['updated_at', 'text'],
+    ],
+  },
+  // v1.0: 期制リーグの各期（大会）。2 期目以降は、確定した配置（前期の所属・順位・昇降格・入替戦・手動の修正）を plan_json に残す
+  LeagueSeasons: {
+    key: 'season_key',
+    since: 4,
+    columns: [
+      ['season_key', 'text'],
+      ['league_id', 'text'],
+      ['season_no', 'int'],
+      ['event_id', 'text'],
+      ['prev_event_id', 'text'],
+      ['plan_json', 'text'],
+      ['confirmed_at', 'text'],
+      ['confirmed_by', 'text'],
+      ['rev', 'int'],
+      ['created_at', 'text'],
+      ['updated_at', 'text'],
+    ],
+  },
+  // v1.0: 期制リーグの会員（期をまたぐ選手の ID）。表示名は最新の期の選手名に合わせる（名前の履歴は meta_json）
+  LeagueMembers: {
+    key: 'member_id',
+    since: 4,
+    columns: [
+      ['member_id', 'text'],
+      ['league_id', 'text'],
+      ['display_name', 'text'],
+      ['status', 'text'], // active = 参加中 / left = 脱退（次期に入れない。再参加で active に戻す）
+      ['meta_json', 'text'], // 参加した期・脱退した期・名前の履歴
+      ['rev', 'int'],
+      ['created_at', 'text'],
+      ['updated_at', 'text'],
+    ],
+  },
   PublicSnapshots: {
     key: 'event_id',
     columns: [
@@ -621,6 +680,9 @@ var SHEET_ORDER = Object.freeze([
   'History',
   'PublicSnapshots',
   'Collaborators',
+  'Leagues',
+  'LeagueSeasons',
+  'LeagueMembers',
 ]);
 
 // ---- 01_util.js ----
@@ -1643,7 +1705,9 @@ function writeAppends_(table) {
  * 公開データの削除 → 大会に属する行 → 大会の行 → 履歴 → 公開データの更新。
  * 各表の中では 更新 → 削除 → 追加（更新は読み込んだときの行番号で書くため、削除より先）。
  */
-var COMMIT_ORDER_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators', 'Events', 'History'];
+// v1.0: 期制リーグの行（会員・系列・期の連結）は大会の行より先に書く。次期の作成が途中で止まっても、期の連結が残っていれば
+// 次の確定の操作が「途中で止まった作成」と分かり、作り直せる（06c_season.js の removeBrokenSeason_）
+var COMMIT_ORDER_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators', 'LeagueMembers', 'Leagues', 'LeagueSeasons', 'Events', 'History'];
 
 function commitContext_(ctx) {
   var tables = ctx.loadedTables();
@@ -2547,6 +2611,8 @@ function collectEvent_(ctx, eventId) {
     entries: entries,
     players: players,
     matches: matches,
+    // v1.0: 期制リーグの期なら、その系列と前後の期（06c_season.js）。期制リーグでなければ null
+    season: seasonContext_(ctx, eventId),
   };
 }
 
@@ -3319,7 +3385,7 @@ function judgeMatch_(bundle, match, playerById, members) {
   }
   var result = evaluateMatchInput_(status, input, spec);
   problems = problems.concat(result.problems);
-  if (result.draw && isBracketStage_(stage)) problems.push('勝ち抜き戦では引き分けを確定できません');
+  if (result.draw && (isBracketStage_(stage) || stage.type === STAGE_TYPE.PROMOTION)) problems.push('勝ち抜き戦・入替戦では引き分けを確定できません');
   if (problems.length) return { state: 'check', input: null, winnerSide: 0, problems: problems };
   return { state: status, input: input, winnerSide: result.winnerSide, draw: !!result.draw, problems: [] };
 }
@@ -3458,6 +3524,7 @@ function buildEventView_(bundle, includePrivate) {
     if (isGroupStage_(stage)) progress = groupStageView_(bundle, ctxStage, view);
     else if (stage.type === STAGE_TYPE.SERIES) progress = seriesStageView_(bundle, ctxStage, view);
     else if (stage.type === STAGE_TYPE.DOUBLE_ELIMINATION) progress = doubleEliminationView_(bundle, ctxStage, view);
+    else if (stage.type === STAGE_TYPE.PROMOTION) progress = promotionStageView_(bundle, ctxStage, view);
     else progress = eliminationView_(bundle, ctxStage, view);
     addProgress_(allProgress, progress);
     view.progress = progress;
@@ -3531,6 +3598,8 @@ function buildEventView_(bundle, includePrivate) {
   if (evCfg.announcement) view.event.announcement = evCfg.announcement;
   if (evCfg.ruleDisplay) view.event.ruleDisplay = evCfg.ruleDisplay;
   view.event.timezone = evCfg.timezone;
+  // v1.0: 期制リーグの期（期の一覧・順位表の昇降格の帯・次期を確定した後の結果）
+  if (bundle.season) view.event.season = seasonPublicView_(bundle, stages);
   var completion = eventCompletionFromStages_(stages);
   view.complete = completion.complete;
   if (includePrivate) {
@@ -3909,6 +3978,51 @@ function seriesStageView_(bundle, c, view) {
   return progress;
 }
 
+/**
+ * v1.0: 期制リーグの入替戦。隣接するディビジョンの組（グループ）ごとに 1 試合。
+ * 選手の source（「1部 5位」など）は入替戦を組んだ時の順位
+ */
+function promotionStageView_(bundle, c, view) {
+  var progress = emptyProgress_();
+  view.pairs = bundle.groups
+    .filter(function (g) {
+      return g.stage_id === c.stage.stage_id;
+    })
+    .sort(byOrder_)
+    .map(function (g) {
+      var meta = groupMeta_(g);
+      var match = null;
+      c.matches.forEach(function (m) {
+        if (m.group_id !== g.group_id || match) return;
+        var judge = judgeMatch_(bundle, m, c.playerById, null);
+        countProgress_(progress, judge.state);
+        match = c.matchView(m, judge, m.label || '入替戦');
+      });
+      var pair = {
+        id: g.group_id,
+        name: g.name,
+        upper: meta.upper || 0,
+        lower: meta.lower || 0,
+        players: c.entries
+          .filter(function (e) {
+            return e.group_id === g.group_id;
+          })
+          .sort(function (a, b) {
+            return (a.seed || 0) - (b.seed || 0);
+          })
+          .map(function (e) {
+            var r = c.playerRef(e.player_id);
+            r.source = e.source_label || '';
+            return r;
+          }),
+        match: match,
+      };
+      if (c.includePrivate && match) match.confirmedAt = match.confirmedAt || '';
+      return pair;
+    });
+  return progress;
+}
+
 /* ---------- 完了の判定（F05 自動終了） ---------- */
 
 /** 段階が終わったか。理由（終わっていない理由）も返す */
@@ -4138,10 +4252,512 @@ function assignGroups_(players, groupCount, opts) {
   };
 }
 
+// ---- 04g_season.js ----
+/* 期制リーグの配置計算（v1.0。スプレッドシートに依存しない純粋な関数）
+ *
+ * 用語: 期 = 1 つの大会（Events の 1 行）。ディビジョン = 期の大会のリーグ段階のグループ（上から 1 部・2 部…）。
+ * 会員 = 期をまたいで同じ人を指す ID（LeagueMembers。名前では対応付けない）。
+ *
+ * 隣接する上位ディビジョン A（a 人）と下位ディビジョン B について（依頼の仕様どおり）:
+ *   B の 1 位 → A へ自動昇格 / A の最下位 → B へ自動降格 / A の下から 2 位 と B の 2 位 → 入替戦
+ *   入替戦で A 側が勝てば両者とも残留、B 側が勝てば B 側が昇格・A 側が降格。最上位・最下位の外側には昇降格を作らない。
+ * この関数は「次期の配置案」と、その理由・問題点（確定を止める理由）を返すだけで、何も書き込まない。
+ */
+
+/** 期制リーグの設定（Leagues.config_json）。主催者が決める値で、アプリが勝手に決める境目はない */
+function leagueConfig_(league) {
+  var c = safeJson_(league && league.config_json, {});
+  var ints = function (arr, min, max) {
+    return Array.isArray(arr)
+      ? arr.map(function (v) {
+          return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v >= min && v <= max ? v : null;
+        })
+      : [];
+  };
+  return {
+    // thresholds[i] = (i + 2) ディビジョンにする最少の人数（空 = 人数によらず 1 ディビジョン）
+    thresholds: ints(c.thresholds, 2, 9999).filter(function (v) {
+      return v !== null;
+    }),
+    // targets[k - 1] = k 部の目標人数（空欄 = 残りを均等に分ける。最下位は常に残りの人数）
+    targets: ints(c.targets, 2, 999),
+    // capacities[k - 1] = k 部の定員（空欄 = なし）
+    capacities: ints(c.capacities, 2, 999),
+    cycles: c.cycles === 2 ? 2 : 1,
+    points: isValidPoints_(c.points) ? { win: c.points.win, draw: c.points.draw, loss: c.points.loss } : { win: 2, draw: 1, loss: 0 },
+    rule: c.rule && typeof c.rule === 'object' ? c.rule : null,
+    playoffRule: c.playoffRule && typeof c.playoffRule === 'object' ? c.playoffRule : null,
+  };
+}
+
+/** k 部の名前（1 ディビジョンなら「リーグ」） */
+function seasonDivisionName_(k, count) {
+  return count > 1 ? k + '部' : 'リーグ';
+}
+
+/** 次期の人数からディビジョン数を決める（主催者の境目だけで決める） */
+function seasonDivisionCount_(n, thresholds) {
+  var d = 1;
+  (thresholds || []).forEach(function (t) {
+    if (n >= t) d++;
+  });
+  return Math.min(d, ADMIN_CONFIG.MAX_SEASON_DIVISIONS);
+}
+
+/**
+ * 各ディビジョンの人数。1〜(D-1) 部は目標人数があればその人数、なければ残りを均等に分ける。最下位は残り。
+ * 割り切れない端数は下の部から 1 人ずつ多くする（上の部に多く配ると、降格した選手が端数の都合で上に戻ってしまうため）。
+ * 戻り値: { sizes: [..], problems: [..] }
+ */
+function seasonDivisionSizes_(n, d, targets) {
+  if (d === 1) return { sizes: [n], problems: [] };
+  var fixed = {};
+  var sum = 0;
+  for (var k = 1; k < d; k++) {
+    var t = targets[k - 1];
+    if (t) {
+      fixed[k] = t;
+      sum += t;
+    }
+  }
+  var free = [];
+  for (var j = 1; j <= d; j++) if (!fixed[j]) free.push(j);
+  var rest = n - sum;
+  if (rest < free.length * 2) {
+    return { sizes: [], problems: ['目標人数の合計（' + sum + ' 人）が多すぎて、残りのディビジョンに 2 人以上を入れられません（次期 ' + n + ' 人・' + d + ' 部制）。目標人数を見直してください。'] };
+  }
+  var base = Math.floor(rest / free.length);
+  var extra = rest % free.length;
+  var sizes = [];
+  for (var i = 1; i <= d; i++) {
+    if (fixed[i]) sizes.push(fixed[i]);
+    else {
+      var pos = free.length - 1 - free.indexOf(i);
+      sizes.push(base + (pos < extra ? 1 : 0));
+    }
+  }
+  return { sizes: sizes, problems: [] };
+}
+
+/** 次期にそのディビジョンで昇降格の規則を当てはめるのに必要な最少人数（重なりがないこと） */
+function seasonMinSize_(k, d) {
+  if (d === 1) return 2;
+  if (k === 1 || k === d) return 2; // 最上位: 下から 2 位（入替戦）と最下位（自動降格）。最下位: 1 位（自動昇格）と 2 位（入替戦）
+  return 4; // 中間: 1 位・2 位（上側）と下から 2 位・最下位（下側）が重ならない
+}
+
+var SEASON_MOVE_LABEL_ = {
+  rank: '順位',
+  stay: '残留',
+  auto_promote: '自動昇格',
+  auto_relegate: '自動降格',
+  playoff_win_promote: '入替戦に勝って昇格',
+  playoff_win_stay: '入替戦に勝って残留',
+  playoff_lose_relegate: '入替戦に負けて降格',
+  playoff_lose_stay: '入替戦に負けて残留',
+  playoff_pending: '入替戦の結果待ち',
+  new: '新規参加',
+  return: '復帰',
+  leave: '不参加（脱退）',
+};
+
+/**
+ * 今期のディビジョンの順位から、各選手の役割（自動昇格・入替戦など）を決める。
+ * divisions = [{ index, name, rows: [{ key, name, rank, tied }] }]（rows は順位表の順）
+ * 戻り値: { roles: { key: { division, role, pos } }, problems: [..], playoffs: [{ upper, lower, upperKey, lowerKey }] }
+ * 同順位の塊の中で役割が分かれるときは問題にする（名前順などで決めない。主催者が順位を手で決める）
+ */
+function seasonRoles_(divisions) {
+  var d = divisions.length;
+  var roles = {};
+  var problems = [];
+  var playoffs = [];
+  divisions.forEach(function (div) {
+    var a = div.rows.length;
+    var k = div.index;
+    var hasUpper = k > 1;
+    var hasLower = k < d;
+    var tooSmall = d > 1 && a < seasonMinSize_(k, d);
+    if (tooSmall) {
+      problems.push(div.name + ' は ' + a + ' 人のため、昇格・降格・入替戦の対象が重なります（この位置のディビジョンには ' + seasonMinSize_(k, d) + ' 人以上が必要）。次期の所属を手動で決めてください。');
+    }
+    div.rows.forEach(function (row, i) {
+      var pos = i + 1;
+      var role = 'stay';
+      if (d === 1) role = 'rank';
+      else if (!tooSmall) {
+        if (hasUpper && pos === 1) role = 'auto_promote';
+        else if (hasUpper && pos === 2) role = 'playoff_up';
+        else if (hasLower && pos === a) role = 'auto_relegate';
+        else if (hasLower && pos === a - 1) role = 'playoff_down';
+      } else {
+        role = 'conflict';
+      }
+      roles[row.key] = { division: k, role: role, pos: pos, rank: row.rank, tied: !!row.tied };
+    });
+    if (d > 1 && !tooSmall) {
+      // 同順位の塊で役割が分かれていたら止める
+      var seen = {};
+      div.rows.forEach(function (row) {
+        if (!row.tied) return;
+        var r = roles[row.key];
+        if (!seen[row.rank]) seen[row.rank] = {};
+        seen[row.rank][r.role] = true;
+      });
+      Object.keys(seen).forEach(function (rank) {
+        if (Object.keys(seen[rank]).length > 1) {
+          problems.push(div.name + ' の ' + rank + '位が同順位のため、昇格・入替戦・降格の対象が決まりません。この期の大会の「組み合わせ」タブで順位を手動で決めてください。');
+        }
+      });
+    }
+  });
+  if (d > 1) {
+    for (var k = 1; k < d; k++) {
+      var up = divisions[k - 1].rows;
+      var low = divisions[k].rows;
+      if (up.length < seasonMinSize_(k, d) || low.length < seasonMinSize_(k + 1, d)) continue;
+      playoffs.push({ upper: k, lower: k + 1, upperKey: up[up.length - 2].key, lowerKey: low[1].key });
+    }
+  }
+  return { roles: roles, problems: problems, playoffs: playoffs };
+}
+
+/**
+ * 次期の配置案。
+ * input = {
+ *   seasonNo, config（leagueConfig_）,
+ *   divisions: [{ index, name, complete, progress: { final, total }, rows: [{ key, name, rank, tied, withdrawn }] }],
+ *   playoffs: [{ upper, lower, upperKey, lowerKey, state, winnerKey, confirmedAt, resultType }]（生成済みの入替戦）,
+ *   candidates: { key: { name, status } }（今期にいない会員。復帰の候補）,
+ *   edits: { leave: [key], join: [{ key, name }], rejoin: [key], moves: { key: { division, reason } }, names: { key: name } }
+ * }
+ * 戻り値: { divisionCount, sizes, divisions, rows, problems, warnings, counts, basis }
+ */
+function planSeasonPlacement_(input) {
+  var cfg = input.config;
+  var edits = input.edits || {};
+  var problems = [];
+  var warnings = [];
+  var divisions = input.divisions;
+  var d = divisions.length;
+  var label = input.seasonNo ? '第' + input.seasonNo + '期' : '今期';
+
+  divisions.forEach(function (div) {
+    if (!div.complete) problems.push(label + 'の ' + div.name + ' の全試合が確定していません（確定 ' + div.progress.final + ' / ' + div.progress.total + '）。');
+  });
+  var r = seasonRoles_(divisions);
+  problems = problems.concat(r.problems);
+  var rowOf = {};
+  divisions.forEach(function (div) {
+    div.rows.forEach(function (row) {
+      rowOf[row.key] = row;
+    });
+  });
+
+  // 入替戦の結果
+  var moves = edits.moves || {};
+  var movement = {};
+  var base = {};
+  Object.keys(r.roles).forEach(function (key) {
+    var role = r.roles[key];
+    var k = role.division;
+    if (role.role === 'rank') {
+      movement[key] = 'rank';
+      base[key] = null; // 次期の境目で決める
+    } else if (role.role === 'auto_promote') {
+      movement[key] = 'auto_promote';
+      base[key] = k - 1;
+    } else if (role.role === 'auto_relegate') {
+      movement[key] = 'auto_relegate';
+      base[key] = k + 1;
+    } else {
+      movement[key] = 'stay';
+      base[key] = k;
+    }
+  });
+  var playoffInfo = [];
+  r.playoffs.forEach(function (exp) {
+    var got = (input.playoffs || []).filter(function (p) {
+      return p.upper === exp.upper;
+    })[0];
+    var upName = divisions[exp.upper - 1].name;
+    var lowName = divisions[exp.lower - 1].name;
+    var title = upName + '・' + lowName + 'の入替戦';
+    var info = { upper: exp.upper, lower: exp.lower, upperKey: exp.upperKey, lowerKey: exp.lowerKey, state: got ? got.state : 'none', winnerKey: '', confirmedAt: got ? got.confirmedAt || '' : '', resultType: got ? got.resultType || '' : '', matchId: got ? got.matchId || '' : '' };
+    playoffInfo.push(info);
+    var manualBoth = moves[exp.upperKey] && moves[exp.lowerKey];
+    var pend = function (msg) {
+      movement[exp.upperKey] = 'playoff_pending';
+      movement[exp.lowerKey] = 'playoff_pending';
+      if (!manualBoth) problems.push(msg);
+    };
+    if (!got) return pend(title + 'がまだ組まれていません（この期の大会の「期・昇降格」タブで「入替戦を組む」）。行わない場合は、対象の 2 人の次期の所属を手動で決めてください。');
+    if (got.upperKey !== exp.upperKey || got.lowerKey !== exp.lowerKey) {
+      info.mismatch = true;
+      return pend(title + 'の対戦者が今の順位と合いません（入替戦を組んだ後に順位が変わった可能性があります）。入替戦を組み直すか、対象の選手の次期の所属を手動で決めてください。');
+    }
+    if (got.state !== 'final' || !got.winnerKey) return pend(title + 'の結果が確定していません。');
+    info.winnerKey = got.winnerKey;
+    if (got.winnerKey === exp.upperKey) {
+      movement[exp.upperKey] = 'playoff_win_stay';
+      movement[exp.lowerKey] = 'playoff_lose_stay';
+      base[exp.upperKey] = exp.upper;
+      base[exp.lowerKey] = exp.lower;
+    } else {
+      movement[exp.upperKey] = 'playoff_lose_relegate';
+      movement[exp.lowerKey] = 'playoff_win_promote';
+      base[exp.upperKey] = exp.lower;
+      base[exp.lowerKey] = exp.upper;
+    }
+  });
+  if (d > 1) {
+    // 入替戦を組んだが、今の規則では入替戦がない組（人数不足など）
+    (input.playoffs || []).forEach(function (p) {
+      if (!r.playoffs.some(function (e) { return e.upper === p.upper; })) warnings.push((divisions[p.upper - 1] ? divisions[p.upper - 1].name : p.upper + '部') + 'の下の入替戦は、今の人数では規則に当てはまらないため、配置に使っていません。');
+    });
+  }
+
+  // 昇降格の後の並び（梯子）。次期の部は梯子を上から目標人数で区切って決める
+  var ladder = [];
+  var tieKey = function (key) {
+    var row = rowOf[key];
+    var role = r.roles[key];
+    return row && row.tied ? role.division + ':' + row.rank : key;
+  };
+  if (d === 1) {
+    divisions[0].rows.forEach(function (row) {
+      ladder.push({ key: row.key, tie: tieKey(row.key) });
+    });
+  } else {
+    for (var b = 1; b <= d; b++) {
+      var down = [];
+      var stay = [];
+      var upIn = [];
+      divisions.forEach(function (div) {
+        div.rows.forEach(function (row) {
+          if (base[row.key] !== b) return;
+          if (div.index === b - 1) down.push(row);
+          else if (div.index === b) stay.push(row);
+          else if (div.index === b + 1) upIn.push(row);
+        });
+      });
+      // 降りてきた選手は上位のディビジョンでの順位の順、残留は順位の順、上がってきた選手は下位のディビジョンでの順位の順
+      down.concat(stay, upIn).forEach(function (row) {
+        ladder.push({ key: row.key, tie: tieKey(row.key) });
+      });
+    }
+  }
+
+  // 参加・不参加
+  var leave = {};
+  (edits.leave || []).forEach(function (key) {
+    if (!rowOf[key]) problems.push('不参加にした選手（' + key + '）はこの期にいません。');
+    leave[key] = true;
+  });
+  ladder = ladder.filter(function (x) {
+    return !leave[x.key];
+  });
+  var names = {};
+  Object.keys(rowOf).forEach(function (key) {
+    names[key] = rowOf[key].name;
+  });
+  var kinds = {};
+  (edits.rejoin || []).forEach(function (key) {
+    var c = (input.candidates || {})[key];
+    if (!c) {
+      problems.push('復帰させる会員（' + key + '）が見つからないか、すでにこの期にいます。');
+      return;
+    }
+    names[key] = c.name;
+    kinds[key] = 'return';
+    ladder.push({ key: key, tie: key, joined: true });
+  });
+  (edits.join || []).forEach(function (j) {
+    names[j.key] = j.name;
+    kinds[j.key] = 'new';
+    ladder.push({ key: j.key, tie: j.key, joined: true });
+  });
+  Object.keys(edits.names || {}).forEach(function (key) {
+    if (names[key] !== undefined) names[key] = edits.names[key];
+  });
+
+  var n = ladder.length;
+  var nd = seasonDivisionCount_(n, cfg.thresholds);
+  var sz = seasonDivisionSizes_(n, nd, cfg.targets);
+  problems = problems.concat(sz.problems);
+  var sizes = sz.sizes.length ? sz.sizes : [n];
+  if (!sz.sizes.length) nd = 1;
+  var auto = {};
+  var start = 0;
+  var bands = [];
+  sizes.forEach(function (size, i) {
+    for (var p = start; p < start + size; p++) auto[ladder[p].key] = i + 1;
+    bands.push({ index: i + 1, from: start + 1, to: start + size });
+    if (i > 0) {
+      var a = ladder[start - 1];
+      var c = ladder[start];
+      if (a && c && a.tie === c.tie && !a.joined) {
+        var row = rowOf[c.key];
+        var role = r.roles[c.key];
+        problems.push(divisions[role.division - 1].name + ' の ' + row.rank + '位の同順位が、次期の ' + seasonDivisionName_(i, nd) + ' と ' + seasonDivisionName_(i + 1, nd) + ' の境目にかかります。この期の大会の「組み合わせ」タブで順位を手動で決めてください。');
+      }
+    }
+    start += size;
+  });
+
+  // 行（理由つき）
+  var rows = [];
+  var finalOf = {};
+  var reasonOfChange = function (key, autoDiv, baseDiv) {
+    if (nd > d) return 'ディビジョン増設（次期 ' + n + ' 人 → ' + nd + ' 部制）により ' + seasonDivisionName_(autoDiv, nd);
+    if (nd < d) return 'ディビジョン統合（次期 ' + n + ' 人 → ' + nd + ' 部制）により ' + seasonDivisionName_(autoDiv, nd);
+    if (autoDiv < baseDiv) return '人数調整（目標人数・欠員）のため ' + seasonDivisionName_(autoDiv, nd) + ' へ繰り上げ';
+    return '人数調整（目標人数・欠員）のため ' + seasonDivisionName_(autoDiv, nd) + ' へ繰り下げ';
+  };
+  var ladderPos = {};
+  ladder.forEach(function (x, i) {
+    ladderPos[x.key] = i + 1;
+  });
+  var allKeys = Object.keys(rowOf).concat(
+    ladder
+      .filter(function (x) {
+        return x.joined;
+      })
+      .map(function (x) {
+        return x.key;
+      })
+  );
+  allKeys.forEach(function (key) {
+    var row = rowOf[key];
+    var role = r.roles[key];
+    var kind = leave[key] ? 'leave' : kinds[key] || movement[key];
+    var out = {
+      key: key,
+      name: names[key],
+      from: row ? { division: role.division, divisionName: divisions[role.division - 1].name, rank: row.rank, tied: !!row.tied, withdrawn: row.withdrawn || null } : null,
+      movement: kind,
+      movementLabel: SEASON_MOVE_LABEL_[kind] || kind,
+      ladder: ladderPos[key] || null,
+      baseDivision: null,
+      autoDivision: null,
+      newDivision: null,
+      reasons: [],
+      manual: null,
+    };
+    if (kind === 'leave') {
+      out.reasons.push('次期は不参加（脱退）');
+      rows.push(out);
+      return;
+    }
+    out.autoDivision = auto[key];
+    var baseDiv = kinds[key] ? nd : base[key];
+    out.baseDivision = baseDiv;
+    if (row && kind !== 'leave') {
+      if (kind === 'rank') {
+        var band = bands[auto[key] - 1];
+        out.reasons.push((d === 1 && input.seasonNo === 1 ? '1期目 ' : '') + row.rank + '位' + (row.tied ? '（同順位）' : '') + 'のため ' + seasonDivisionName_(auto[key], nd) + (nd > 1 ? '（' + band.from + '〜' + band.to + '位が ' + seasonDivisionName_(auto[key], nd) + '）' : ''));
+      } else {
+        out.reasons.push(divisions[role.division - 1].name + ' ' + row.rank + '位・' + out.movementLabel);
+        if (baseDiv !== null && baseDiv !== auto[key]) out.reasons.push(reasonOfChange(key, auto[key], baseDiv));
+        else if (nd !== d) out.reasons.push((nd > d ? 'ディビジョン増設' : 'ディビジョン統合') + '（次期 ' + n + ' 人 → ' + nd + ' 部制）・' + seasonDivisionName_(auto[key], nd) + 'のまま');
+      }
+      if (row.withdrawn) warnings.push(row.name + ' は' + label + 'を' + (row.withdrawn.kind === 'disqualified' ? '失格' : '棄権') + 'しています。次期に参加するか確かめてください（参加しないなら「不参加」）。');
+    } else if (kinds[key] === 'new') {
+      out.reasons.push('新規参加のため最下位の ' + seasonDivisionName_(auto[key], nd) + '（変える場合は手動で）');
+    } else if (kinds[key] === 'return') {
+      out.reasons.push('復帰（前期は不参加）のため最下位の ' + seasonDivisionName_(auto[key], nd) + '（変える場合は手動で）');
+    }
+    var mv = moves[key];
+    if (mv) {
+      out.manual = { division: mv.division, reason: mv.reason || '' };
+      if (!(mv.division >= 1 && mv.division <= nd)) problems.push(names[key] + ' の手動の所属（' + mv.division + '）が、次期のディビジョン（1〜' + nd + '）の範囲にありません。');
+      if (!mv.reason) problems.push(names[key] + ' の手動の所属の理由を入力してください。');
+      out.newDivision = mv.division;
+      out.reasons.push('手動で ' + seasonDivisionName_(mv.division, nd) + (mv.reason ? '（' + mv.reason + '）' : ''));
+    } else {
+      out.newDivision = auto[key];
+      if (kind === 'playoff_pending') problems.push(names[key] + ' の次期の所属は、入替戦が終わるか手動で決めるまで確定できません。');
+      if (role && role.role === 'conflict') problems.push(names[key] + ' の次期の所属を手動で決めてください（' + divisions[role.division - 1].name + ' の人数不足）。');
+    }
+    finalOf[key] = out.newDivision;
+    rows.push(out);
+  });
+  Object.keys(moves).forEach(function (key) {
+    if (!names[key] || leave[key]) problems.push('手動の所属を指定した選手（' + key + '）は次期の参加者にいません。');
+  });
+
+  // 次期の各ディビジョンの人数と規則の成り立ち
+  var outDivisions = [];
+  for (var k = 1; k <= nd; k++) {
+    var members = rows
+      .filter(function (x) {
+        return x.newDivision === k;
+      })
+      .sort(function (a, b) {
+        return (a.ladder || 9999) - (b.ladder || 9999);
+      })
+      .map(function (x) {
+        return x.key;
+      });
+    var cap = cfg.capacities[k - 1] || null;
+    var target = k < nd ? cfg.targets[k - 1] || null : null;
+    outDivisions.push({ index: k, name: seasonDivisionName_(k, nd), size: members.length, target: target, capacity: cap, members: members });
+    if (members.length < seasonMinSize_(k, nd)) {
+      problems.push('次期の ' + seasonDivisionName_(k, nd) + ' は ' + members.length + ' 人です。' + (nd > 1 ? '昇格・降格・入替戦の対象が重ならないよう、' : '総当たりには ') + seasonMinSize_(k, nd) + ' 人以上が必要です。所属を変えるか、ディビジョン数の境目・目標人数を見直してください。');
+    }
+    if (cap && members.length > cap) problems.push('次期の ' + seasonDivisionName_(k, nd) + ' は ' + members.length + ' 人で、定員（' + cap + ' 人）を超えています。所属を変えるか、定員・目標人数を見直してください。');
+  }
+  var namesSeen = {};
+  rows.forEach(function (x) {
+    if (x.movement === 'leave') return;
+    if (namesSeen[x.name]) problems.push('次期に同じ表示名「' + x.name + '」が 2 人います。どちらかの表示名を区別してください（同じ人として扱うことはありません）。');
+    namesSeen[x.name] = true;
+  });
+
+  return {
+    divisionCount: nd,
+    previousDivisionCount: d,
+    total: n,
+    sizes: sizes,
+    divisions: outDivisions,
+    rows: rows,
+    playoffs: playoffInfo,
+    problems: problems.filter(function (p, i) {
+      return problems.indexOf(p) === i;
+    }),
+    warnings: warnings.filter(function (p, i) {
+      return warnings.indexOf(p) === i;
+    }),
+    finalOf: finalOf,
+  };
+}
+
+/**
+ * 配置の根拠（前期の順位と入替戦の結果）。次期を作った後に前期の結果が変わったかを見分ける。
+ * 名前・時刻は入れない（表示名を変えただけでは変わらない）
+ */
+function seasonBasis_(divisions, playoffs) {
+  return {
+    divisions: divisions.map(function (div) {
+      return {
+        complete: !!div.complete,
+        rows: div.rows.map(function (r) {
+          return [r.key, r.rank, r.tied ? 1 : 0];
+        }),
+      };
+    }),
+    playoffs: (playoffs || []).map(function (p) {
+      return [p.upper, p.upperKey, p.lowerKey, p.state, p.winnerKey || ''];
+    }),
+  };
+}
+
 // ---- 05_publish.js ----
 /* 閲覧者向け公開データ（PublicSnapshots シート）の生成 */
 
 var SNAPSHOT_CHUNK_PREFIX_ = '~'; // 分割した JSON の先頭が = や + になっても数式扱いされないための接頭辞
+// v1.0: 分割した公開データの行の ID（大会 ID + ".P" + 2 桁）。閲覧者用アプリの旧版は大会 ID の形でない行を読まない
+var SNAPSHOT_PART_SEPARATOR_ = '.P';
 
 function chunkColumns_() {
   var cols = [];
@@ -4156,55 +4772,124 @@ function buildPublicSnapshot_(bundle) {
   return view;
 }
 
+function snapshotLimit_() {
+  return Math.min(ADMIN_CONFIG.MAX_SNAPSHOT_CHARS, ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE * ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS);
+}
+
+function isSnapshotPartKey_(key, eventId) {
+  var k = String(key || '');
+  return k.indexOf(eventId + SNAPSHOT_PART_SEPARATOR_) === 0 && /^\d{2}$/.test(k.slice(eventId.length + SNAPSHOT_PART_SEPARATOR_.length));
+}
+
+/* ---------- 分割（v1.0） ---------- */
+
+var PART_STATUS_CODE_ = { scheduled: 's', live: 'l', final: 'f', check: 'c', pending: 'p', void: 'v', bye: 'b' };
+
 /**
- * 大会の公開状態をシートへ反映する。書き込み系の操作の最後に必ず呼ぶ。
- * - 公開中: 公開データを作り直して保存（内容が同じなら書き込まない）
- * - 非公開: 公開データの行を削除する（閲覧画面から消える）
- * v0.8: 他の変更と同じく書き込み待ちにするだけで、シートへは commitContext_ が書く。
- * 公開データが上限を超えるときは、その操作ごと保存しない（TOO_LARGE）。
+ * グループの試合 1 件を、閲覧ページが元の形に戻せる配列にする（閲覧ページの hydrateParts と対になる）。
+ * [id, round, order, 選手1, 選手2, p1Legs, p2Legs, p1Sets, p2Sets, 状態, 勝者(0/1/2), bestOf, 追加の項目?]
+ * 選手はグループの players の番号（グループにいない選手は [id, name]、空欄は -1）。
+ * 追加の項目は matchView の任意の項目（draw・resultType・fixedLegs・side・schedule）だけ。ラベルはパートの labels に回戦ごとに持つ。
  */
-function syncPublication_(ctx, eventId) {
-  ctx.invalidate();
-  var bundle = collectEvent_(ctx, eventId);
-  var table = ctx.table('PublicSnapshots');
-  var rows = table.rows.filter(function (r) {
-    return r.event_id === eventId;
+function compactMatch_(m, indexOf) {
+  var ref = function (p) {
+    if (!p.id) return -1;
+    return indexOf[p.id] !== undefined ? indexOf[p.id] : [p.id, p.name];
+  };
+  var winner = m.winnerId ? (m.winnerId === m.p1.id ? 1 : m.winnerId === m.p2.id ? 2 : [m.winnerId]) : 0;
+  var row = [m.id, m.round, m.order, ref(m.p1), ref(m.p2), m.p1.legs, m.p2.legs, m.p1.sets, m.p2.sets, PART_STATUS_CODE_[m.status] || m.status, winner, m.bestOf];
+  var extra = {};
+  ['draw', 'resultType', 'fixedLegs', 'side', 'schedule'].forEach(function (k) {
+    if (m[k] !== undefined) extra[k] = m[k];
   });
+  if (Object.keys(extra).length) row.push(extra);
+  return row;
+}
 
-  if (!bundle.event.is_public) {
-    if (rows.length) {
-      deleteRecords_(table, rows);
-      ctx.invalidate('PublicSnapshots');
-    }
-    return { published: false };
+/**
+ * 公開データを、上限に収まる本体と分割行（パート）にする。
+ * 上限内ならそのまま（従来と同じ出力・同じ版）。超えるときだけ、ロビン・リーグ・スイス式のグループの試合一覧を
+ * 回戦の順に圧縮してパートへ移し、本体の各グループには matchesInParts・matchCount と、パートの一覧（parts）を入れる。
+ * 戻り値: { json, parts: [{ key, json, version }], fullSize, partitioned }
+ */
+function buildPublication_(bundle) {
+  var view = buildPublicSnapshot_(bundle);
+  var json = JSON.stringify(view);
+  var limit = snapshotLimit_();
+  if (json.length <= limit) return { json: json, parts: [], fullSize: json.length, partitioned: false };
+  var fullSize = json.length;
+  var eventId = bundle.event.event_id;
+  var target = ADMIN_CONFIG.SNAPSHOT_PART_TARGET_CHARS;
+  var parts = [];
+  var list = [];
+  (view.stages || []).forEach(function (st) {
+    (st.groups || []).forEach(function (g) {
+      if (!g.matches || !g.matches.length) return;
+      var indexOf = {};
+      (g.players || []).forEach(function (p, i) {
+        indexOf[p.id] = i;
+      });
+      var current = null;
+      var flush = function () {
+        if (!current || !current.rows.length) return;
+        var body = { schema: 1, kind: 'matches', eventId: eventId, stageId: st.id, groupId: g.id, labels: current.labels, rows: current.rows };
+        parts.push({ body: body, meta: { stageId: st.id, groupId: g.id, fromRound: current.from, toRound: current.to, count: current.rows.length } });
+        current = null;
+      };
+      // 回戦の途中では区切らない（閲覧ページの節の切り替えで、1 つの節が 2 つのパートにまたがらないように）
+      var byRound = [];
+      g.matches.forEach(function (m) {
+        var last = byRound[byRound.length - 1];
+        if (last && last.round === m.round) last.matches.push(m);
+        else byRound.push({ round: m.round, label: m.label, matches: [m] });
+      });
+      byRound.forEach(function (r) {
+        var rows = r.matches.map(function (m) {
+          return compactMatch_(m, indexOf);
+        });
+        var size = JSON.stringify(rows).length;
+        if (current && current.size + size > target) flush();
+        if (!current) current = { rows: [], labels: {}, size: 0, from: r.round, to: r.round };
+        current.rows = current.rows.concat(rows);
+        current.labels[String(r.round)] = r.label;
+        current.size += size;
+        current.to = r.round;
+      });
+      flush();
+      g.matchCount = g.matches.length;
+      g.matchesInParts = true;
+      g.matches = [];
+    });
+  });
+  if (parts.length > ADMIN_CONFIG.MAX_SNAPSHOT_PARTS) {
+    throw appError_(
+      'TOO_LARGE',
+      '閲覧ページの公開データが大きすぎるため、この変更は保存していません（試合一覧の分割が ' + parts.length + ' 個 / 上限 ' + ADMIN_CONFIG.MAX_SNAPSHOT_PARTS + ' 個）。段階・グループを分けるか、大会を非公開にしてから操作してください。'
+    );
   }
-
-  var json = JSON.stringify(buildPublicSnapshot_(bundle));
+  var out = parts.map(function (p, i) {
+    var key = eventId + SNAPSHOT_PART_SEPARATOR_ + (i < 9 ? '0' : '') + (i + 1);
+    var pj = JSON.stringify(p.body);
+    assertSnapshotSize_(pj);
+    var version = md5Hex_(pj);
+    list.push({ id: key, version: version, stageId: p.meta.stageId, groupId: p.meta.groupId, fromRound: p.meta.fromRound, toRound: p.meta.toRound, count: p.meta.count });
+    return { key: key, json: pj, version: version };
+  });
+  view.parts = list;
+  json = JSON.stringify(view);
   assertSnapshotSize_(json);
-  var version = md5Hex_(json);
-  var existing = rows[0] || null;
-  if (rows.length > 1) {
-    // 手作業などで重複した行は 1 行にまとめる
-    deleteRecords_(table, rows.slice(1));
-    ctx.invalidate('PublicSnapshots');
-    table = ctx.table('PublicSnapshots');
-    existing = table.byKey[eventId] || null;
-  }
-  if (existing && existing.version === version && existing.is_default === bundle.event.is_featured) {
-    return { published: true, version: version, publishedAt: existing.published_at, unchanged: true };
-  }
+  return { json: json, parts: out, fullSize: fullSize, partitioned: true };
+}
 
+/** 公開データの行（本体・パート）を書き込み待ちにする。内容が同じなら書かない */
+function upsertSnapshotRow_(ctx, table, key, json, version, isDefault) {
+  var existing = table.byKey[key] || null;
+  if (existing && existing.version === version && existing.is_default === isDefault) return false;
   var size = ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE;
   var chunks = [];
   for (var i = 0; i < json.length; i += size) chunks.push(SNAPSHOT_CHUNK_PREFIX_ + json.slice(i, i + size));
   if (chunks.length > ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS) assertSnapshotSize_(json, true);
-  var rec = {
-    event_id: eventId,
-    is_default: bundle.event.is_featured,
-    version: version,
-    published_at: ctx.now,
-    chunk_count: chunks.length,
-  };
+  var rec = { event_id: key, is_default: isDefault, version: version, published_at: ctx.now, chunk_count: chunks.length };
   chunkColumns_().forEach(function (col, idx) {
     rec[col] = chunks[idx] || '';
   });
@@ -4216,13 +4901,83 @@ function syncPublication_(ctx, eventId) {
   } else {
     appendRecords_(table, [rec]);
   }
+  return true;
+}
+
+/**
+ * 大会の公開状態をシートへ反映する。書き込み系の操作の最後に必ず呼ぶ。
+ * - 公開中: 公開データを作り直して保存（内容が同じなら書き込まない）
+ * - 非公開: 公開データの行を削除する（閲覧画面から消える）
+ * v0.8: 他の変更と同じく書き込み待ちにするだけで、シートへは commitContext_ が書く。
+ * 公開データが上限を超えるときは、その操作ごと保存しない（TOO_LARGE）。
+ * v1.0: 上限を超える大会は本体とパート（分割行）に分ける。使わなくなったパートの行は消す。
+ */
+function syncPublication_(ctx, eventId) {
+  ctx.invalidate();
+  var bundle = collectEvent_(ctx, eventId);
+  var table = ctx.table('PublicSnapshots');
+  var rows = table.rows.filter(function (r) {
+    return r.event_id === eventId;
+  });
+  var partRows = table.rows.filter(function (r) {
+    return isSnapshotPartKey_(r.event_id, eventId);
+  });
+
+  if (!bundle.event.is_public) {
+    if (rows.length || partRows.length) {
+      deleteRecords_(table, rows.concat(partRows));
+      ctx.invalidate('PublicSnapshots');
+    }
+    return { published: false };
+  }
+
+  var pub = buildPublication_(bundle);
+  var version = md5Hex_(pub.json);
+  if (rows.length > 1) {
+    // 手作業などで重複した行は 1 行にまとめる
+    deleteRecords_(table, rows.slice(1));
+    ctx.invalidate('PublicSnapshots');
+    table = ctx.table('PublicSnapshots');
+  }
+  var keep = {};
+  var partsChanged = false;
+  pub.parts.forEach(function (p) {
+    keep[p.key] = true;
+    if (table.duplicates[p.key]) {
+      deleteRecords_(table, table.rows.filter(function (r) { return r.event_id === p.key; }).slice(1));
+    }
+    if (upsertSnapshotRow_(ctx, table, p.key, p.json, p.version, false)) partsChanged = true;
+  });
+  var stale = partRows.filter(function (r) {
+    return !keep[r.event_id] && !r._deleted;
+  });
+  if (stale.length) {
+    deleteRecords_(table, stale);
+    partsChanged = true;
+  }
+  var existing = table.byKey[eventId] || null;
+  var info = { published: true, version: version, parts: pub.parts.length, partitioned: pub.partitioned };
+  if (!upsertSnapshotRow_(ctx, table, eventId, pub.json, version, bundle.event.is_featured) && !partsChanged) {
+    info.publishedAt = existing.published_at;
+    info.unchanged = true;
+    return info;
+  }
   ctx.invalidate('PublicSnapshots');
-  return { published: true, version: version, publishedAt: ctx.now, unchanged: false };
+  info.publishedAt = ctx.now;
+  info.unchanged = false;
+  return info;
+}
+
+/** 大会の公開データの行（本体とパート）。削除のときに使う */
+function snapshotRowsOf_(table, eventId) {
+  return table.rows.filter(function (r) {
+    return r.event_id === eventId || isSnapshotPartKey_(r.event_id, eventId);
+  });
 }
 
 /** 公開データの大きさの確認。上限を超えるなら、その操作を保存しない */
 function assertSnapshotSize_(json, force) {
-  var limit = Math.min(ADMIN_CONFIG.MAX_SNAPSHOT_CHARS, ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE * ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS);
+  var limit = snapshotLimit_();
   if (force || json.length > limit) {
     throw appError_(
       'TOO_LARGE',
@@ -4231,18 +4986,36 @@ function assertSnapshotSize_(json, force) {
   }
 }
 
-/** 公開データの大きさの目安（運営画面の表示用。公開していない大会でも、公開したときの大きさを返す） */
+/**
+ * 公開データの大きさの目安（運営画面の表示用。公開していない大会でも、公開したときの大きさを返す）。
+ * v1.0: 分割したときは本体の大きさ（size）・分割前の大きさ（fullSize）・パートの数と合計を返す。上限を超えて公開できないときは error
+ */
 function snapshotBudget_(bundle) {
-  var limit = Math.min(ADMIN_CONFIG.MAX_SNAPSHOT_CHARS, ADMIN_CONFIG.SNAPSHOT_CHUNK_SIZE * ADMIN_CONFIG.SNAPSHOT_MAX_CHUNKS);
-  var size = JSON.stringify(buildPublicSnapshot_(bundle)).length;
-  return { size: size, limit: limit, percent: Math.floor((size * 100) / limit) };
+  var limit = snapshotLimit_();
+  try {
+    var pub = buildPublication_(bundle);
+    var total = pub.parts.reduce(function (sum, p) {
+      return sum + p.json.length;
+    }, pub.json.length);
+    return { size: pub.json.length, limit: limit, percent: Math.floor((pub.json.length * 100) / limit), partitioned: pub.partitioned, parts: pub.parts.length, totalSize: total, fullSize: pub.fullSize };
+  } catch (e) {
+    if (!e || e.appCode !== 'TOO_LARGE') throw e;
+    var size = JSON.stringify(buildPublicSnapshot_(bundle)).length;
+    return { size: size, limit: limit, percent: Math.floor((size * 100) / limit), error: e.publicMessage };
+  }
 }
 
 /** 公開状態の概要（運営画面の表示用） */
 function publicationStatus_(ctx, eventId) {
-  var row = ctx.table('PublicSnapshots').byKey[eventId];
+  var table = ctx.table('PublicSnapshots');
+  var row = table.byKey[eventId];
   if (!row) return { published: false };
-  return { published: true, version: row.version, publishedAt: row.published_at, isDefault: row.is_default };
+  var parts = table.rows.filter(function (r) {
+    return isSnapshotPartKey_(r.event_id, eventId);
+  }).length;
+  var out = { published: true, version: row.version, publishedAt: row.published_at, isDefault: row.is_default };
+  if (parts) out.parts = parts;
+  return out;
 }
 
 // ---- 06_actions.js ----
@@ -4385,6 +5158,8 @@ function eventDetail_(ctx, eventId) {
         return { id: r.collab_id, email: collabEmailOf_(r), role: r.role || 'editor', addedAt: r.created_at, rev: r.rev || 0, status: active ? 'active' : claims.length ? 'pending' : 'invited', claims: claims };
       });
   }
+  // v1.0: 期制リーグ（期の一覧・入替戦・次期・前期の訂正との照合）。期制リーグでなく移行もできない大会は null
+  view.season = seasonDetail_(ctx, bundle, view, role);
   view.snapshotBudget = snapshotBudget_(bundle);
   view.publication = publicationStatus_(ctx, eventId);
   view.history = ctx
@@ -4965,6 +5740,8 @@ function actionUpdateEvent_(ctx, payload) {
   }
   ctx.invalidate();
   recordHistory_(ctx, 'event.update', 'Event', eventId, eventId, eventForLog_(before), eventForLog_(event));
+  // v1.0: 期制リーグの期の公開・名前が変わったら、前後の期の公開データ（期の一覧・次期の ID）も作り直す
+  if (before.is_public !== event.is_public || before.name !== event.name) others = others.concat(seasonSiblings_(ctx, eventId));
   return { eventId: eventId, alsoPublish: others };
 }
 
@@ -5174,6 +5951,7 @@ function actionAddStage_(ctx, payload) {
   if (bundle.stages.length >= ADMIN_CONFIG.MAX_STAGES) throw appError_('LIMIT', '段階は ' + ADMIN_CONFIG.MAX_STAGES + ' つまでです。');
   var type = payload.type;
   if (!STAGE_TYPE_LABEL[type]) throw appError_('VALIDATION', '段階の種類が不正です。');
+  if (type === STAGE_TYPE.PROMOTION) throw appError_('VALIDATION', '入替戦は、期制リーグの「期・昇降格」タブから作ります。');
   var name = cleanText_(payload.name || STAGE_TYPE_LABEL[type], '段階の名前', ADMIN_CONFIG.MAX_LABEL_LENGTH);
   var baseRule = bundle.rule ? ruleSpecOf_(bundle.rule) : { format: 'legs', bestOf: 5, setBestOf: null, provisional: true };
   // 勝ち抜き戦では引き分けありの固定 Leg 数は使えないので、その場合は Best of 5 Legs で作る（あとで変えられる）
@@ -5292,7 +6070,7 @@ function actionUpdateStage_(ctx, payload) {
     var rules = ctx.table('Rules');
     var rule = findRecord_(rules, stage.rule_id, 'ルール');
     var spec = parseRuleInput_(payload.rule);
-    if (spec.format === 'fixed' && bracket) throw appError_('VALIDATION', '固定 Leg 数（引き分けあり）は勝ち抜き戦の段階では使えません（決着がつかないため）。');
+    if (spec.format === 'fixed' && (bracket || type === STAGE_TYPE.PROMOTION)) throw appError_('VALIDATION', '固定 Leg 数（引き分けあり）は勝ち抜き戦・入替戦の段階では使えません（決着がつかないため）。');
     assertRuleChangeAllowed_(bundle, rule, spec);
     applyRule_(rule, spec, ctx.now);
     rule.rev = (rule.rev || 0) + 1;
@@ -6775,7 +7553,7 @@ function prepareMatchResult_(ctx, payload) {
     if (sets && (input.p1Legs === null) !== (input.p2Legs === null)) throw appError_('VALIDATION', '取得 Leg 数は両方入力するか、両方空欄にしてください。');
     var result = evaluateMatchInput_(status, input, spec);
     if (!result.ok) throw appError_('VALIDATION', result.problems.join(' / '));
-    if (result.draw && isBracketStage_(stage)) throw appError_('VALIDATION', '勝ち抜き戦では引き分けを確定できません。');
+    if (result.draw && (isBracketStage_(stage) || stage.type === STAGE_TYPE.PROMOTION)) throw appError_('VALIDATION', '勝ち抜き戦・入替戦では引き分けを確定できません。');
     winnerSide = result.winnerSide;
     draw = !!result.draw;
   }
@@ -6880,7 +7658,7 @@ function actionRepublish_(ctx, payload) {
 /* ---------- 大会の削除（アーカイブ） ---------- */
 
 /** 大会に属する行を持つシート（Events・PublicSnapshots 以外） */
-var EVENT_CHILD_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History', 'Collaborators'];
+var EVENT_CHILD_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History', 'Collaborators', 'LeagueSeasons'];
 /** 保存用ファイル（JSON）に入れるシート。共同主催者のメールアドレスは入れない */
 var ARCHIVE_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History'];
 
@@ -6935,10 +7713,12 @@ function actionDeleteEvent_(ctx, payload) {
   var typed = typeof payload.confirmName === 'string' ? payload.confirmName.normalize('NFC').replace(/\s+/g, ' ').trim() : '';
   if (typed !== event.name) throw appError_('VALIDATION', '確認のため、大会名「' + event.name + '」を正しく入力してください。');
 
+  var siblings = seasonSiblings_(ctx, eventId);
   var counts = {};
   ['PublicSnapshots'].concat(EVENT_CHILD_TABLES_).forEach(function (name) {
     var table = ctx.table(name);
-    var rows = table.rows.filter(function (r) {
+    // 公開データは分割した行（パート）も消す（v1.0）
+    var rows = name === 'PublicSnapshots' ? snapshotRowsOf_(table, eventId) : table.rows.filter(function (r) {
       return r.event_id === eventId;
     });
     counts[name] = rows.length;
@@ -6958,7 +7738,8 @@ function actionDeleteEvent_(ctx, payload) {
     by: ctx.user.label,
   });
   // eventId を返すと、削除後に公開データの同期・詳細の再読み込みが走るので、別の名前で返す
-  return { deletedEventId: eventId, deletedName: event.name };
+  // v1.0: 期制リーグの期なら、残った期の公開データ（期の一覧）を作り直す
+  return { deletedEventId: eventId, deletedName: event.name, alsoPublish: siblings };
 }
 
 /* ---------- サンプル ---------- */
@@ -8280,6 +9061,1271 @@ function afterEventChange_(ctx, eventId) {
   updateRecord_(events, event);
 }
 
+// ---- 06c_season.js ----
+/* 期制リーグ（v1.0）の操作: 作成・既存のリーグ大会からの移行・設定・入替戦・次期のプレビュー / 確定・前期の訂正の照合・会員の付け替え
+ *
+ * 権限は既存の大会ごとの仕組みに従う（07_api.js の scope と 02_auth.js）。期制リーグそのものには権限を持たせない。
+ * - 期の大会を運営できる人（主催者・共同主催者・管理パスワード・管理者）: 入替戦を組む・プレビュー
+ * - 期の大会の主催者・管理者だけ: 期制リーグの設定・次期の作成・訂正の照合・会員の付け替え・既存の大会の移行
+ * - 次期の大会の主催者は前期の大会の主催者（同じ Google アカウント）。共同主催者・管理パスワードは引き継がない
+ * 送られた大会 ID・会員 ID・選手 ID は、すべてサーバー側でその期制リーグのものか確かめる。
+ */
+
+/* ---------- 読み込み ---------- */
+
+/** その大会の期の行（LeagueSeasons）。期制リーグの大会でなければ null */
+function seasonRowOfEvent_(ctx, eventId) {
+  var table = ctx.table('LeagueSeasons');
+  var rows = table.rows.filter(function (r) {
+    return r.event_id === eventId && !table.duplicates[r.season_key];
+  });
+  return rows.length === 1 ? rows[0] : null;
+}
+
+/** 大会の期制リーグの情報（collectEvent_ が bundle.season に入れる）。期制リーグでなければ null */
+function seasonContext_(ctx, eventId) {
+  var row = seasonRowOfEvent_(ctx, eventId);
+  if (!row) return null;
+  var league = ctx.table('Leagues').byKey[row.league_id];
+  if (!league) return null;
+  var all = ctx.table('LeagueSeasons')
+    .rows.filter(function (r) {
+      return r.league_id === row.league_id;
+    })
+    .sort(function (a, b) {
+      return (a.season_no || 0) - (b.season_no || 0);
+    });
+  var next =
+    all.filter(function (r) {
+      return r.prev_event_id === eventId;
+    })[0] || null;
+  return { league: league, row: row, all: all, next: next, events: ctx.table('Events').byKey };
+}
+
+function requireSeason_(ctx, eventId) {
+  var sc = seasonContext_(ctx, eventId);
+  if (!sc) throw appError_('BAD_REQUEST', 'この大会は期制リーグの大会ではありません。');
+  return sc;
+}
+
+function seasonLeagueStage_(bundle) {
+  return (
+    bundle.stages.filter(function (s) {
+      return s.type === STAGE_TYPE.LEAGUE;
+    })[0] || null
+  );
+}
+
+function seasonPromotionStage_(bundle) {
+  return (
+    bundle.stages.filter(function (s) {
+      return s.type === STAGE_TYPE.PROMOTION;
+    })[0] || null
+  );
+}
+
+/** 選手 ID → 会員 ID */
+function memberOfPlayers_(bundle) {
+  var out = {};
+  bundle.players.forEach(function (p) {
+    if (p.member_id) out[p.player_id] = p.member_id;
+  });
+  return out;
+}
+
+/**
+ * 配置計算の入力: 今期のディビジョン（リーグ段階のグループ）の順位表と、入替戦の結果。
+ * view は buildEventView_(bundle, true)
+ */
+function seasonInputs_(bundle, view) {
+  var leagueStage = seasonLeagueStage_(bundle);
+  if (!leagueStage) throw appError_('DATA_CONFLICT', 'この期の大会にリーグの段階がありません。');
+  var lv = view.stages.filter(function (s) {
+    return s.id === leagueStage.stage_id;
+  })[0];
+  var memberOf = memberOfPlayers_(bundle);
+  var playerById = {};
+  bundle.players.forEach(function (p) {
+    playerById[p.player_id] = p;
+  });
+  var missing = [];
+  var divisions = (lv.groups || []).map(function (g, i) {
+    var gp = g.progress;
+    return {
+      index: i + 1,
+      groupId: g.id,
+      name: g.name,
+      complete: gp.total > 0 && gp.final === gp.total,
+      progress: { final: gp.final, total: gp.total },
+      rows: g.standings.map(function (s) {
+        var p = playerById[s.playerId];
+        var key = memberOf[s.playerId];
+        if (!key) missing.push(p ? p.display_name : s.playerId);
+        return { key: key || 'player:' + s.playerId, playerId: s.playerId, name: p ? p.display_name : '', rank: s.rank, tied: !!s.tied, withdrawn: p ? playerMeta_(p).withdrawn || null : null };
+      }),
+    };
+  });
+  var playoffs = [];
+  var promo = seasonPromotionStage_(bundle);
+  if (promo) {
+    var pv = view.stages.filter(function (s) {
+      return s.id === promo.stage_id;
+    })[0];
+    (pv.pairs || []).forEach(function (pair) {
+      if (!pair.match) return;
+      var m = pair.match;
+      playoffs.push({
+        upper: pair.upper,
+        lower: pair.lower,
+        upperKey: memberOf[m.p1.id] || '',
+        lowerKey: memberOf[m.p2.id] || '',
+        state: m.status,
+        winnerKey: m.status === MATCH_STATUS.FINAL && m.winnerId ? memberOf[m.winnerId] || '' : '',
+        confirmedAt: m.confirmedAt || '',
+        resultType: m.resultType || '',
+        matchId: m.id,
+      });
+    });
+  }
+  return { leagueStage: leagueStage, divisions: divisions, playoffs: playoffs, missing: missing };
+}
+
+/** 同じ期制リーグのほかの期の大会 ID（残っているものだけ） */
+function seasonSiblings_(ctx, eventId) {
+  var row = seasonRowOfEvent_(ctx, eventId);
+  if (!row) return [];
+  var events = ctx.table('Events').byKey;
+  return ctx.table('LeagueSeasons')
+    .rows.filter(function (r) {
+      return r.league_id === row.league_id && r.event_id !== eventId && events[r.event_id];
+    })
+    .map(function (r) {
+      return r.event_id;
+    });
+}
+
+/** 期制リーグの会員（league の全員） */
+function leagueMembers_(ctx, leagueId) {
+  return ctx.table('LeagueMembers').rows.filter(function (m) {
+    return m.league_id === leagueId;
+  });
+}
+
+/** 今期にいない会員のうち、どこかの期に出たことがある人（復帰の候補） */
+function rejoinCandidates_(ctx, sc, inSeason) {
+  var seasonEvents = {};
+  sc.all.forEach(function (r) {
+    seasonEvents[r.event_id] = true;
+  });
+  var played = {};
+  ctx.table('Players').rows.forEach(function (p) {
+    if (p.member_id && seasonEvents[p.event_id]) played[p.member_id] = true;
+  });
+  var out = {};
+  leagueMembers_(ctx, sc.league.league_id).forEach(function (m) {
+    if (inSeason[m.member_id] || !played[m.member_id]) return;
+    out[m.member_id] = { name: m.display_name, status: m.status || 'active' };
+  });
+  return out;
+}
+
+/* ---------- 入力の検証 ---------- */
+
+function parseThresholds_(value) {
+  if (value === undefined || value === null || value === '') return [];
+  if (!Array.isArray(value) || value.length > ADMIN_CONFIG.MAX_SEASON_DIVISIONS - 1) throw appError_('VALIDATION', 'ディビジョン数の境目の指定が不正です。');
+  var out = value.map(function (v, i) {
+    var n = typeof v === 'number' ? v : parseNonNegativeInt_(v);
+    if (n === null || n < 2 || n > 9999 || Math.floor(n) !== n) throw appError_('VALIDATION', (i + 2) + ' 部制にする人数は 2〜9999 の整数で指定してください。');
+    return n;
+  });
+  for (var i = 1; i < out.length; i++) {
+    if (out[i] <= out[i - 1]) throw appError_('VALIDATION', 'ディビジョン数の境目は、部の数が増えるほど大きい人数にしてください（' + (i + 1) + ' 部制 ' + out[i - 1] + ' 人・' + (i + 2) + ' 部制 ' + out[i] + ' 人）。');
+  }
+  return out;
+}
+
+/** 部ごとの人数（目標人数・定員）。空欄は null */
+function parseDivisionInts_(value, label) {
+  if (value === undefined || value === null || value === '') return [];
+  if (!Array.isArray(value) || value.length > ADMIN_CONFIG.MAX_SEASON_DIVISIONS) throw appError_('VALIDATION', label + 'の指定が不正です。');
+  return value.map(function (v, i) {
+    if (v === '' || v === null || v === undefined) return null;
+    var n = typeof v === 'number' ? v : parseNonNegativeInt_(v);
+    if (n === null || n < 2 || n > 999 || Math.floor(n) !== n) throw appError_('VALIDATION', (i + 1) + '部の' + label + 'は 2〜999 の整数で指定してください（空欄 = 指定なし）。');
+    return n;
+  });
+}
+
+/** 期制リーグの設定（作成・変更で共通）。送られた項目だけを変える */
+function parseLeagueConfig_(payload, current) {
+  var cfg = current ? JSON.parse(JSON.stringify(current)) : {};
+  if (payload.thresholds !== undefined) cfg.thresholds = parseThresholds_(payload.thresholds);
+  if (payload.targets !== undefined) cfg.targets = parseDivisionInts_(payload.targets, '目標人数');
+  if (payload.capacities !== undefined) cfg.capacities = parseDivisionInts_(payload.capacities, '定員');
+  if (payload.cycles !== undefined) {
+    // 総当たりの回数は既存と同じく 1 回・2 回だけ
+    if (payload.cycles !== 1 && payload.cycles !== 2) throw appError_('VALIDATION', '総当たりの回数は 1 回か 2 回です。');
+    cfg.cycles = payload.cycles;
+  }
+  if (payload.points !== undefined) cfg.points = parsePoints_(payload.points, { win: 2, draw: 1, loss: 0 });
+  if (payload.rule !== undefined) cfg.rule = parseRuleInput_(payload.rule);
+  if (payload.playoffRule !== undefined) {
+    var pr = parseRuleInput_(payload.playoffRule);
+    if (pr.format === 'fixed') throw appError_('VALIDATION', '入替戦は勝敗を決める必要があるため、固定 Leg 数（引き分けあり）は使えません。');
+    cfg.playoffRule = pr;
+  }
+  // 勝ち点の既定値は、既存のリーグの作成と同じアプリの既定値（勝 2・分 1・負 0。主催者が変えられる）
+  if (!isValidPoints_(cfg.points)) cfg.points = { win: 2, draw: 1, loss: 0 };
+  if (cfg.cycles !== 2) cfg.cycles = 1;
+  if (!cfg.thresholds) cfg.thresholds = [];
+  if (!cfg.targets) cfg.targets = [];
+  if (!cfg.capacities) cfg.capacities = [];
+  (cfg.targets || []).forEach(function (t, i) {
+    var cap = (cfg.capacities || [])[i];
+    if (t && cap && t > cap) throw appError_('VALIDATION', (i + 1) + '部の目標人数（' + t + '）が定員（' + cap + '）を超えています。');
+  });
+  return cfg;
+}
+
+/**
+ * 次期の配置の修正（プレビュー・確定で同じものを送る）。
+ * edits = { leave: [会員 ID], rejoin: [会員 ID], join: [{ name }], moves: [{ key, division, reason }], names: [{ key, name }] }
+ * join の選手は key = 'new:1'…（送った順）。会員 ID はこの期の会員・復帰の候補だけを受け付ける
+ */
+function parseSeasonEdits_(raw, inSeason, candidates) {
+  var e = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  var list = function (v, label, max) {
+    if (v === undefined || v === null) return [];
+    if (!Array.isArray(v) || v.length > max) throw appError_('VALIDATION', label + 'の指定が不正です。');
+    return v;
+  };
+  var seen = {};
+  var leave = list(e.leave, '不参加', ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT).map(function (k) {
+    if (!isValidId_(k) || !inSeason[k] || seen[k]) throw appError_('NOT_FOUND', '不参加にする選手が見つかりません。画面を再読み込みしてください。');
+    seen[k] = true;
+    return k;
+  });
+  var rejoin = list(e.rejoin, '復帰', ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT).map(function (k) {
+    if (!isValidId_(k) || !candidates[k] || seen[k]) throw appError_('NOT_FOUND', '復帰させる会員が見つかりません。画面を再読み込みしてください。');
+    seen[k] = true;
+    return k;
+  });
+  var join = list(e.join, '新規参加', ADMIN_CONFIG.MAX_BULK_PLAYERS).map(function (j, i) {
+    return { key: 'new:' + (i + 1), name: cleanText_(j && j.name, '新規参加の選手名（' + (i + 1) + '人目）', ADMIN_CONFIG.MAX_PLAYER_NAME_LENGTH) };
+  });
+  var known = function (k) {
+    return (inSeason[k] && !seen[k]) || rejoin.indexOf(k) !== -1 || /^new:\d{1,3}$/.test(k) && Number(k.slice(4)) >= 1 && Number(k.slice(4)) <= join.length;
+  };
+  var moves = {};
+  list(e.moves, '手動の所属', ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT + ADMIN_CONFIG.MAX_BULK_PLAYERS).forEach(function (m) {
+    var k = m && m.key;
+    if (typeof k !== 'string' || !known(k) || moves[k]) throw appError_('NOT_FOUND', '手動の所属を指定した選手が見つかりません。画面を再読み込みしてください。');
+    var div = typeof m.division === 'number' ? m.division : parseNonNegativeInt_(m.division);
+    if (!(div >= 1 && div <= ADMIN_CONFIG.MAX_SEASON_DIVISIONS) || Math.floor(div) !== div) throw appError_('VALIDATION', '手動の所属のディビジョンが不正です。');
+    moves[k] = { division: div, reason: cleanText_(m.reason, '手動の所属の理由', ADMIN_CONFIG.MAX_NOTE_LENGTH, { allowEmpty: true }) };
+  });
+  var names = {};
+  list(e.names, '表示名', ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT).forEach(function (x) {
+    var k = x && x.key;
+    if (typeof k !== 'string' || !known(k) || names[k]) throw appError_('NOT_FOUND', '表示名を変える選手が見つかりません。画面を再読み込みしてください。');
+    names[k] = cleanText_(x.name, '表示名', ADMIN_CONFIG.MAX_PLAYER_NAME_LENGTH);
+  });
+  return { leave: leave, rejoin: rejoin, join: join, moves: moves, names: names };
+}
+
+/* ---------- 配置案（プレビュー・確定・照合で共通） ---------- */
+
+/** 期の大会の配置案。edits は parseSeasonEdits_ 済み。何も書き込まない */
+function seasonPlanFor_(ctx, eventId, edits, opts) {
+  var sc = requireSeason_(ctx, eventId);
+  var bundle = collectEvent_(ctx, eventId);
+  var view = buildEventView_(bundle, true);
+  var inputs = seasonInputs_(bundle, view);
+  var inSeason = {};
+  inputs.divisions.forEach(function (div) {
+    div.rows.forEach(function (r) {
+      inSeason[r.key] = true;
+    });
+  });
+  var candidates = rejoinCandidates_(ctx, sc, inSeason);
+  if (opts && opts.extraCandidates) {
+    Object.keys(opts.extraCandidates).forEach(function (k) {
+      candidates[k] = opts.extraCandidates[k];
+    });
+  }
+  var cfg = leagueConfig_(sc.league);
+  var plan = planSeasonPlacement_({
+    seasonNo: sc.row.season_no,
+    config: cfg,
+    divisions: inputs.divisions,
+    playoffs: inputs.playoffs,
+    candidates: candidates,
+    edits: edits || {},
+  });
+  if (inputs.missing.length) plan.problems.unshift('会員の ID がない選手がいます（' + inputs.missing.slice(0, 5).join('、') + '）。画面を再読み込みしてからもう一度お試しください。');
+  var basis = seasonBasis_(inputs.divisions, plan.playoffs);
+  var basisVersion = md5Hex_(JSON.stringify(basis));
+  var planVersion = md5Hex_(JSON.stringify({ basis: basis, edits: edits || {}, config: cfg, eventId: eventId, rows: plan.rows.map(function (r) { return [r.key, r.name, r.newDivision]; }) }));
+  return { sc: sc, bundle: bundle, view: view, inputs: inputs, plan: plan, basis: basis, basisVersion: basisVersion, planVersion: planVersion, candidates: candidates, config: cfg, inSeason: inSeason };
+}
+
+/** プレビューの応答（画面用）。会員 ID・名前・前期の所属と順位・昇降格・新しい所属・理由 */
+function seasonPlanView_(res) {
+  var plan = res.plan;
+  return {
+    seasonNo: res.sc.row.season_no,
+    nextSeasonNo: res.sc.row.season_no + 1,
+    leagueName: res.sc.league.name,
+    divisionCount: plan.divisionCount,
+    previousDivisionCount: plan.previousDivisionCount,
+    total: plan.total,
+    divisions: plan.divisions.map(function (d) {
+      return { index: d.index, name: d.name, size: d.size, target: d.target, capacity: d.capacity };
+    }),
+    rows: plan.rows,
+    playoffs: plan.playoffs,
+    problems: plan.problems,
+    warnings: plan.warnings,
+    ok: plan.problems.length === 0,
+    planVersion: res.planVersion,
+    basisVersion: res.basisVersion,
+    candidates: Object.keys(res.candidates).map(function (k) {
+      return { key: k, name: res.candidates[k].name, status: res.candidates[k].status };
+    }),
+    thresholds: res.config.thresholds,
+    targets: res.config.targets,
+    capacities: res.config.capacities,
+  };
+}
+
+/* ---------- 作成・移行・設定 ---------- */
+
+function newLeagueRecord_(ctx, name, cfg) {
+  var table = ctx.table('Leagues');
+  var id = newId_('LGS', table.byKey);
+  var rec = { league_id: id, name: name, config_json: JSON.stringify(cfg), rev: 1, created_at: ctx.now, updated_at: ctx.now };
+  appendRecords_(table, [rec]);
+  return rec;
+}
+
+function newSeasonRecord_(ctx, leagueId, seasonNo, eventId, prevEventId, plan) {
+  var table = ctx.table('LeagueSeasons');
+  var id = newId_('LSN', table.byKey);
+  var rec = {
+    season_key: id,
+    league_id: leagueId,
+    season_no: seasonNo,
+    event_id: eventId,
+    prev_event_id: prevEventId || '',
+    plan_json: plan ? JSON.stringify(plan) : '',
+    confirmed_at: plan ? ctx.now : '',
+    confirmed_by: plan && ctx.user ? ctx.user.label : '',
+    rev: 1,
+    created_at: ctx.now,
+    updated_at: ctx.now,
+  };
+  appendRecords_(table, [rec]);
+  return rec;
+}
+
+function parseLeagueName_(value) {
+  return cleanText_(value, '期制リーグの名前', ADMIN_CONFIG.MAX_LEAGUE_NAME_LENGTH);
+}
+
+function seasonEventName_(leagueName, no) {
+  var name = leagueName + ' 第' + no + '期';
+  return name.length > ADMIN_CONFIG.MAX_EVENT_NAME_LENGTH ? name.slice(0, ADMIN_CONFIG.MAX_EVENT_NAME_LENGTH) : name;
+}
+
+/** 入替戦の段階（ルールと、隣接するディビジョンの組ごとのグループ）を作る */
+function addPromotionStage_(ctx, eventId, order, spec, divisionCount) {
+  var rule = newRuleRecord_(ctx, eventId, spec, Object.assign({}, ctx.table('Rules').byKey));
+  var stage = newStageRecord_(ctx, eventId, { name: '入替戦', type: STAGE_TYPE.PROMOTION, order: order, ruleId: rule.rule_id, config: {} }, Object.assign({}, ctx.table('Stages').byKey));
+  appendRecords_(ctx.table('Rules'), [rule]);
+  appendRecords_(ctx.table('Stages'), [stage]);
+  syncPromotionGroups_(ctx, stage, divisionCount);
+  return stage;
+}
+
+/** 入替戦の段階のグループを、ディビジョン数に合わせる（k 部・k+1 部の組ごとに 1 つ） */
+function syncPromotionGroups_(ctx, stage, divisionCount) {
+  var groups = ctx.table('Groups');
+  var current = groups.rows
+    .filter(function (g) {
+      return g.stage_id === stage.stage_id;
+    })
+    .sort(byOrder_);
+  var want = Math.max(0, divisionCount - 1);
+  var taken = Object.assign({}, groups.byKey);
+  var add = [];
+  for (var k = 1; k <= want; k++) {
+    var meta = JSON.stringify({ upper: k, lower: k + 1 });
+    var name = k + '部・' + (k + 1) + '部 入替戦';
+    var g = current[k - 1];
+    if (g) {
+      if (g.name !== name || g.meta_json !== meta || g.order !== k) {
+        g.name = name;
+        g.meta_json = meta;
+        g.order = k;
+        g.rev = (g.rev || 0) + 1;
+        g.updated_at = ctx.now;
+        updateRecord_(groups, g);
+      }
+    } else {
+      var id = newId_('GRP', taken);
+      taken[id] = true;
+      add.push({ group_id: id, event_id: stage.event_id, stage_id: stage.stage_id, name: name, order: k, meta_json: meta, rev: 1, created_at: ctx.now, updated_at: ctx.now });
+    }
+  }
+  appendRecords_(groups, add);
+  if (current.length > want) deleteRecords_(groups, current.slice(want));
+}
+
+/** 入替戦のルール（期制リーグの設定。なければリーグのルール。固定 Leg 数のときは Best of 5 Legs） */
+function playoffRuleSpec_(cfg, leagueRuleSpec) {
+  if (cfg.playoffRule) return cfg.playoffRule;
+  var base = leagueRuleSpec || { format: 'legs', bestOf: 5, setBestOf: null, provisional: true };
+  if (base.format === 'fixed') return { format: 'legs', bestOf: 5, setBestOf: null, provisional: base.provisional };
+  return base;
+}
+
+/**
+ * 期制リーグを作る（1 期目の大会と一緒に）。1 期目は全員が 1 つのリーグで総当たり（1 回・2 回）。
+ * payload = { name, dateLabel, organizerName, rule, cycles, points, thresholds, targets, capacities, playoffRule }
+ */
+function actionCreateSeasonLeague_(ctx, payload) {
+  assertCreateAllowed_(ctx);
+  var name = parseLeagueName_(payload.name);
+  var cfg = parseLeagueConfig_({
+    thresholds: payload.thresholds,
+    targets: payload.targets,
+    capacities: payload.capacities,
+    cycles: payload.cycles === 2 ? 2 : 1,
+    points: payload.points,
+    rule: payload.rule || { format: 'legs', bestOf: 5, provisional: true },
+    playoffRule: payload.playoffRule,
+  });
+  var created = createEventRecords_(ctx, {
+    organizerName: cleanText_(payload.organizerName, '主催者名', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
+    name: seasonEventName_(name, 1),
+    dateLabel: cleanText_(payload.dateLabel, '開催日', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
+    rule: cfg.rule,
+    template: 'league',
+    divisions: 1,
+    cycles: cfg.cycles,
+    points: cfg.points,
+    owner: creatorOwner_(ctx),
+  });
+  var league = newLeagueRecord_(ctx, name, cfg);
+  newSeasonRecord_(ctx, league.league_id, 1, created.event.event_id, '', null);
+  recordHistory_(ctx, 'season.leagueCreate', 'League', league.league_id, created.event.event_id, null, { league: name, season: 1, config: cfg, by: ctx.user ? ctx.user.label : '' });
+  return { eventId: created.event.event_id, leagueId: league.league_id };
+}
+
+/**
+ * 既存のリーグの大会（リーグの段階だけの大会）を、期制リーグの期にする（移行）。
+ * 選手ごとに新しい会員 ID を作る（名前で他の大会の選手と結び付けない）。ディビジョンが 2 つ以上なら入替戦の段階を足す
+ * payload = { eventId, name, seasonNo?, thresholds, targets, capacities, playoffRule? }
+ */
+function actionConvertToSeasonLeague_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '期制リーグへの移行');
+  if (seasonRowOfEvent_(ctx, eventId) || ctx.table('LeagueSeasons').rows.some(function (r) { return r.event_id === eventId; })) {
+    throw appError_('LOCKED', 'この大会はすでに期制リーグの期です。');
+  }
+  var bundle = collectEvent_(ctx, eventId);
+  if (bundle.stages.length !== 1 || bundle.stages[0].type !== STAGE_TYPE.LEAGUE) {
+    throw appError_('VALIDATION', '期制リーグにできるのは、リーグの段階だけの大会です（プレーオフなど他の段階がある大会は移行できません）。');
+  }
+  var stage = bundle.stages[0];
+  var stageCfg = stageConfig_(stage);
+  var leagueRule = stageRule_(bundle, stage);
+  var seasonNo = parseSmallInt_(payload.seasonNo, 'この大会の期', 1, ADMIN_CONFIG.MAX_LEAGUE_SEASONS, 1);
+  var cfg = parseLeagueConfig_({
+    thresholds: payload.thresholds,
+    targets: payload.targets,
+    capacities: payload.capacities,
+    cycles: stageCfg.cycles,
+    points: stageCfg.points || { win: 2, draw: 1, loss: 0 },
+    rule: leagueRule ? ruleSpecOf_(leagueRule) : { format: 'legs', bestOf: 5, provisional: true },
+    playoffRule: payload.playoffRule,
+  });
+  var league = newLeagueRecord_(ctx, parseLeagueName_(payload.name), cfg);
+  newSeasonRecord_(ctx, league.league_id, seasonNo, eventId, '', null);
+  var groups = bundle.groups.filter(function (g) {
+    return g.stage_id === stage.stage_id;
+  });
+  if (groups.length > 1) addPromotionStage_(ctx, eventId, (stage.order || 1) + 1, playoffRuleSpec_(cfg, cfg.rule), groups.length);
+  ensureSeasonMembers_(ctx, eventId);
+  recordHistory_(ctx, 'season.convert', 'League', league.league_id, eventId, null, { league: league.name, season: seasonNo, divisions: groups.length, players: bundle.players.length });
+  return { eventId: eventId, leagueId: league.league_id };
+}
+
+/** 期制リーグの設定（主催者・管理者）。payload = { eventId, rev（Leagues の版）, name?, thresholds?, targets?, capacities?, cycles?, points?, rule?, playoffRule? } */
+function actionUpdateLeagueSettings_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '期制リーグの設定');
+  var sc = requireSeason_(ctx, eventId);
+  var table = ctx.table('Leagues');
+  var league = findRecord_(table, sc.league.league_id, '期制リーグ');
+  assertRev_(league, requireRev_(payload.rev), '期制リーグの設定');
+  var before = safeJson_(league.config_json, {});
+  var cfg = parseLeagueConfig_(payload, before);
+  if (payload.name !== undefined) league.name = parseLeagueName_(payload.name);
+  league.config_json = JSON.stringify(cfg);
+  league.rev = (league.rev || 0) + 1;
+  league.updated_at = ctx.now;
+  updateRecord_(table, league);
+  recordHistory_(ctx, 'season.settings', 'League', league.league_id, eventId, before, cfg);
+  // 期の一覧（期制リーグの名前）が公開データに入るので、公開中の期を作り直す
+  return { eventId: eventId, alsoPublish: seasonSiblings_(ctx, eventId) };
+}
+
+/* ---------- 会員の付与（書き込み操作の後に呼ぶ） ---------- */
+
+/**
+ * 期の大会の選手に会員 ID がなければ新しく作る（1 人に 1 つ。名前で他の期の選手と結び付けない）。
+ * どの期の選手にもならなくなった参加中の会員（選手を消した場合）は消す。
+ */
+function ensureSeasonMembers_(ctx, eventId) {
+  var row = seasonRowOfEvent_(ctx, eventId);
+  if (!row) return 0;
+  var players = ctx.table('Players');
+  var members = ctx.table('LeagueMembers');
+  var mine = players.rows.filter(function (p) {
+    return p.event_id === eventId;
+  });
+  var taken = Object.assign({}, members.byKey);
+  var add = [];
+  mine.forEach(function (p) {
+    if (p.member_id && members.byKey[p.member_id] && members.byKey[p.member_id].league_id === row.league_id) return;
+    var id = newId_('LMB', taken);
+    taken[id] = true;
+    add.push({ member_id: id, league_id: row.league_id, display_name: p.display_name, status: 'active', meta_json: JSON.stringify({ joinedSeason: row.season_no, via: 'player', at: ctx.now }), rev: 1, created_at: ctx.now, updated_at: ctx.now });
+    p.member_id = id;
+    p.rev = (p.rev || 0) + 1;
+    p.updated_at = ctx.now;
+    updateRecord_(players, p);
+  });
+  if (leagueMembers_(ctx, row.league_id).length + add.length > ADMIN_CONFIG.MAX_LEAGUE_MEMBERS) throw appError_('LIMIT', '期制リーグの会員は ' + ADMIN_CONFIG.MAX_LEAGUE_MEMBERS + ' 人までです。');
+  appendRecords_(members, add);
+  // 参加中なのにどの選手にもなっていない会員（この期で選手を消した場合）を消す
+  var used = {};
+  players.rows.forEach(function (p) {
+    if (p.member_id) used[p.member_id] = true;
+  });
+  var orphans = members.rows.filter(function (m) {
+    return m.league_id === row.league_id && (m.status || 'active') === 'active' && !used[m.member_id] && safeJson_(m.meta_json, {}).via === 'player';
+  });
+  if (orphans.length) deleteRecords_(members, orphans);
+  return add.length;
+}
+
+/**
+ * 選手を、同じ期制リーグの別の会員に付け替える（主催者・管理者。期の途中で復帰した人を以前の会員に戻すなど）。
+ * 付け替え先は、この期にまだいない会員だけ。名前での自動の対応付けはしない
+ */
+function actionSetPlayerMember_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '会員の付け替え');
+  var sc = requireSeason_(ctx, eventId);
+  var players = ctx.table('Players');
+  var player = findRecord_(players, requireId_(payload.playerId, '選手'), '選手');
+  if (player.event_id !== eventId) throw appError_('NOT_FOUND', '選手が見つかりません。');
+  assertRev_(player, requireRev_(payload.rev), '選手');
+  var memberId = requireId_(payload.memberId, '会員');
+  var member = ctx.table('LeagueMembers').byKey[memberId];
+  if (!member || member.league_id !== sc.league.league_id) throw appError_('NOT_FOUND', '会員が見つかりません。');
+  var already = players.rows.some(function (p) {
+    return p.event_id === eventId && p.member_id === memberId && p.player_id !== player.player_id;
+  });
+  if (already) throw appError_('VALIDATION', 'その会員はこの期の別の選手に付いています。');
+  var before = player.member_id;
+  player.member_id = memberId;
+  player.rev = (player.rev || 0) + 1;
+  player.updated_at = ctx.now;
+  updateRecord_(players, player);
+  if (member.status === 'left') {
+    var meta = safeJson_(member.meta_json, {});
+    meta.rejoinedSeason = sc.row.season_no;
+    member.status = 'active';
+    member.meta_json = JSON.stringify(meta);
+    member.rev = (member.rev || 0) + 1;
+    member.updated_at = ctx.now;
+    updateRecord_(ctx.table('LeagueMembers'), member);
+  }
+  recordHistory_(ctx, 'season.setMember', 'Player', player.player_id, eventId, { member: before }, { member: memberId });
+  return { eventId: eventId };
+}
+
+/* ---------- 入替戦 ---------- */
+
+/**
+ * 入替戦を組む（今期のリーグの全試合が確定した後）。A の下から 2 位（1 番目の枠）と B の 2 位（2 番目の枠）。
+ * redo: true で組み直し（入替戦の試合がどれも始まっていないときだけ）。棄権・失格した選手の試合は相手の不戦勝にする
+ */
+function actionGeneratePlayoffs_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var sc = requireSeason_(ctx, eventId);
+  var bundle = collectEvent_(ctx, eventId);
+  var view = buildEventView_(bundle, true);
+  var inputs = seasonInputs_(bundle, view);
+  var d = inputs.divisions.length;
+  if (d < 2) throw appError_('VALIDATION', 'ディビジョンが 1 つの期には入替戦はありません。');
+  var open = inputs.divisions.filter(function (div) {
+    return !div.complete;
+  });
+  if (open.length) throw appError_('LOCKED', 'リーグの全試合が確定してから入替戦を組んでください（' + open.map(function (div) { return div.name + ' 確定 ' + div.progress.final + ' / ' + div.progress.total; }).join('、') + '）。');
+  var roles = seasonRoles_(inputs.divisions);
+  if (roles.problems.length) throw appError_('TIE', roles.problems.join(' / '));
+  var stage = seasonPromotionStage_(bundle);
+  var cfg = leagueConfig_(sc.league);
+  if (!stage) {
+    var lr = stageRule_(bundle, inputs.leagueStage);
+    stage = addPromotionStage_(ctx, eventId, bundle.stages.reduce(function (mx, s) { return Math.max(mx, s.order || 0); }, 0) + 1, playoffRuleSpec_(cfg, lr ? ruleSpecOf_(lr) : null), d);
+  } else {
+    syncPromotionGroups_(ctx, stage, d);
+  }
+  var matchesTable = ctx.table('Matches');
+  var existing = matchesTable.rows.filter(function (m) {
+    return m.stage_id === stage.stage_id;
+  });
+  var memberOf = memberOfPlayers_(bundle);
+  var playerOfMember = {};
+  Object.keys(memberOf).forEach(function (pid) {
+    playerOfMember[memberOf[pid]] = pid;
+  });
+  var same = existing.length === roles.playoffs.length && roles.playoffs.every(function (pf) {
+    return existing.some(function (m) {
+      return memberOf[m.player1_id] === pf.upperKey && memberOf[m.player2_id] === pf.lowerKey;
+    });
+  });
+  if (existing.length && same && payload.redo !== true) throw appError_('LOCKED', '入替戦は組んであります（今の順位と同じ対戦です）。');
+  if (existing.some(matchStarted_)) throw appError_('LOCKED', '入替戦の試合に結果が入っているため組み直せません。組み直す場合は、先に入替戦の試合を「未開始に戻す」にしてください。');
+  deleteRecords_(matchesTable, existing);
+  var entries = ctx.table('Entries');
+  deleteRecords_(entries, entries.rows.filter(function (e) {
+    return e.stage_id === stage.stage_id;
+  }));
+  var groups = ctx.table('Groups').rows
+    .filter(function (g) {
+      return g.stage_id === stage.stage_id;
+    })
+    .sort(byOrder_);
+  var taken = Object.assign({}, matchesTable.byKey);
+  var entTaken = Object.assign({}, entries.byKey);
+  var newMatches = [];
+  var newEntries = [];
+  var playerById = {};
+  bundle.players.forEach(function (p) {
+    playerById[p.player_id] = p;
+  });
+  roles.playoffs.forEach(function (pf, i) {
+    var g = groups[pf.upper - 1];
+    var up = inputs.divisions[pf.upper - 1];
+    var low = inputs.divisions[pf.lower - 1];
+    var p1 = playerOfMember[pf.upperKey];
+    var p2 = playerOfMember[pf.lowerKey];
+    var rank1 = up.rows[up.rows.length - 2].rank;
+    var rank2 = low.rows[1].rank;
+    newEntries.push(newEntry_(ctx, stage, g.group_id, p1, 1, entTaken, up.name + ' ' + rank1 + '位'));
+    newEntries.push(newEntry_(ctx, stage, g.group_id, p2, 2, entTaken, low.name + ' ' + rank2 + '位'));
+    var id = newId_('MAT', taken);
+    taken[id] = true;
+    var m = blankMatch_(ctx, stage, g.group_id, id);
+    m.round = 1;
+    m.order = i + 1;
+    m.label = '入替戦';
+    m.player1_id = p1;
+    m.player2_id = p2;
+    m.meta_json = JSON.stringify({ playoff: { upper: pf.upper, lower: pf.lower, upperRank: rank1, lowerRank: rank2, at: ctx.now } });
+    // 棄権・失格した選手（片方だけ）の入替戦は相手の不戦勝
+    var w1 = isWithdrawn_(playerById[p1]);
+    var w2 = isWithdrawn_(playerById[p2]);
+    if (w1 !== w2) {
+      var loser = w1 ? playerById[p1] : playerById[p2];
+      var wd = playerMeta_(loser).withdrawn;
+      m.status = MATCH_STATUS.FINAL;
+      m.result_type = wd.kind === 'disqualified' ? RESULT_TYPE.DISQUALIFIED : RESULT_TYPE.WALKOVER;
+      m.result_note = wd.reason || '';
+      m.player1_legs = null;
+      m.player2_legs = null;
+      m.winner_id = w1 ? p2 : p1;
+      m.confirmed_at = ctx.now;
+    }
+    newMatches.push(m);
+  });
+  appendRecords_(entries, newEntries);
+  appendRecords_(matchesTable, newMatches);
+  recordHistory_(ctx, existing.length ? 'season.playoffsRedo' : 'season.playoffs', 'Stage', stage.stage_id, eventId, existing.length ? { removed: existing.length } : null, {
+    pairs: newMatches.map(function (m) {
+      return [m.player1_id, m.player2_id, m.result_type || ''];
+    }),
+  });
+  return { eventId: eventId, created: newMatches.length };
+}
+
+/** 入替戦の組み合わせを消す（どれも始まっていないときだけ） */
+function actionClearPlayoffs_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  requireSeason_(ctx, eventId);
+  var bundle = collectEvent_(ctx, eventId);
+  var stage = seasonPromotionStage_(bundle);
+  if (!stage) return { eventId: eventId, removed: 0 };
+  var table = ctx.table('Matches');
+  var list = table.rows.filter(function (m) {
+    return m.stage_id === stage.stage_id;
+  });
+  if (list.some(matchStarted_)) throw appError_('LOCKED', '入替戦の試合に結果が入っているため消せません。先に「未開始に戻す」にしてください。');
+  deleteRecords_(table, list);
+  deleteRecords_(ctx.table('Entries'), ctx.table('Entries').rows.filter(function (e) {
+    return e.stage_id === stage.stage_id;
+  }));
+  recordHistory_(ctx, 'season.playoffsClear', 'Stage', stage.stage_id, eventId, { removed: list.length }, null);
+  return { eventId: eventId, removed: list.length };
+}
+
+/* ---------- 次期のプレビュー・確定 ---------- */
+
+function actionPreviewNextSeason_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  var sc = requireSeason_(ctx, eventId);
+  var probe = seasonPlanFor_(ctx, eventId, {});
+  var edits = parseSeasonEdits_(payload.edits, probe.inSeason, probe.candidates);
+  var res = seasonPlanFor_(ctx, eventId, edits);
+  var out = seasonPlanView_(res);
+  if (sc.next) out.nextEventId = ctx.table('Events').byKey[sc.next.event_id] ? sc.next.event_id : '';
+  out.canConfirm = eventRole_(ctx.user, ctx.table('Events').byKey[eventId], ctx) === 'owner' || eventRole_(ctx.user, ctx.table('Events').byKey[eventId], ctx) === 'admin';
+  return out;
+}
+
+/**
+ * 次期の作成が途中で止まった跡（期の行はあるが大会の行がない）を消す。大会に属する行も消してから作り直す
+ */
+function removeBrokenSeason_(ctx, seasonRow) {
+  var id = seasonRow.event_id;
+  ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators'].forEach(function (name) {
+    var t = ctx.table(name);
+    deleteRecords_(t, t.rows.filter(function (r) {
+      return r.event_id === id;
+    }));
+  });
+  deleteRecords_(ctx.table('LeagueSeasons'), [seasonRow]);
+  recordHistory_(ctx, 'season.repair', 'League', seasonRow.league_id, '', null, { removedEventId: id, seasonNo: seasonRow.season_no });
+}
+
+/**
+ * 確定して次期の大会を作る（期の大会の主催者・管理者）。
+ * payload = { eventId（今期）, edits, planVersion（プレビューの版）, name?, dateLabel? }
+ * - 同じ期から次期を 2 つ作らない（作成済みなら、その大会を返すだけ。二重送信・再試行・別の画面からの確定）
+ * - プレビューの後に結果・設定・修正が変わっていたら作らない（CONFLICT。プレビューし直してもらう）
+ * - 問題（同順位・入替戦の未確定・人数不足・定員超過など）が残っていれば作らない
+ */
+function actionConfirmNextSeason_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '次期の作成');
+  var sc = requireSeason_(ctx, eventId);
+  if (sc.next) {
+    if (ctx.table('Events').byKey[sc.next.event_id]) return { eventId: sc.next.event_id, existing: true };
+    removeBrokenSeason_(ctx, sc.next);
+  }
+  var later = sc.all.filter(function (r) {
+    return (r.season_no || 0) > (sc.row.season_no || 0) && ctx.table('Events').byKey[r.event_id];
+  });
+  if (later.length) throw appError_('LOCKED', 'この期より後の期（第' + later[0].season_no + '期）があるため、次期は作れません。');
+  if (sc.row.season_no >= ADMIN_CONFIG.MAX_LEAGUE_SEASONS) throw appError_('LIMIT', '期は ' + ADMIN_CONFIG.MAX_LEAGUE_SEASONS + ' 期までです。');
+  var probe = seasonPlanFor_(ctx, eventId, {});
+  var edits = parseSeasonEdits_(payload.edits, probe.inSeason, probe.candidates);
+  var res = seasonPlanFor_(ctx, eventId, edits);
+  if (typeof payload.planVersion !== 'string' || payload.planVersion !== res.planVersion) {
+    throw appError_('CONFLICT', 'プレビューの後に結果・設定・修正が変わりました。もう一度「次期の配置をプレビュー」してから確定してください。');
+  }
+  if (res.plan.problems.length) throw appError_('VALIDATION', '次の点を解決するまで次期は作れません: ' + res.plan.problems.slice(0, 6).join(' / ') + (res.plan.problems.length > 6 ? ' ほか ' + (res.plan.problems.length - 6) + ' 件' : ''));
+  // 大会の作成の上限（1 時間あたりの作成数など）は、作れることが分かってから数える
+  assertCreateAllowed_(ctx);
+  var prev = res.bundle.event;
+  var cfg = res.config;
+  var nextNo = sc.row.season_no + 1;
+  var plan = res.plan;
+  var leagueStagePrev = res.inputs.leagueStage;
+  var prevRule = stageRule_(res.bundle, leagueStagePrev);
+  var ruleSpec = cfg.rule || (prevRule ? ruleSpecOf_(prevRule) : { format: 'legs', bestOf: 5, setBestOf: null, provisional: true });
+  var created = createEventRecords_(ctx, {
+    organizerName: prev.organizer_name || '',
+    name: payload.name ? cleanText_(payload.name, '大会名', ADMIN_CONFIG.MAX_EVENT_NAME_LENGTH) : seasonEventName_(sc.league.name, nextNo),
+    dateLabel: cleanText_(payload.dateLabel, '開催日', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
+    rule: ruleSpec,
+    template: 'league',
+    divisions: plan.divisionCount,
+    cycles: cfg.cycles,
+    points: cfg.points,
+    // 主催者は前期と同じ（管理者が作っても主催者は変わらない）。共同主催者・管理パスワードは引き継がない
+    owner: { owner_email: prev.owner_email, owner_sub: prev.owner_sub, owner_link_json: prev.owner_link_json },
+  });
+  var ev = created.event;
+  // 前期の大会の表示の設定（タイムゾーン・ルールの表示・公開する項目）を引き継ぐ。お知らせは引き継がない
+  var prevCfg = safeJson_(prev.config_json, {});
+  var evCfg = safeJson_(ev.config_json, {});
+  ['timezone', 'ruleDisplay', 'publicFields'].forEach(function (k) {
+    if (prevCfg[k] !== undefined) evCfg[k] = prevCfg[k];
+  });
+  ev.config_json = JSON.stringify(evCfg);
+  var leagueStage = created.stages[0];
+  var lsCfg = safeJson_(leagueStage.config_json, {});
+  var prevLsCfg = safeJson_(leagueStagePrev.config_json, {});
+  if (Array.isArray(prevLsCfg.tiebreakers)) lsCfg.tiebreakers = prevLsCfg.tiebreakers;
+  if (prevLsCfg.walkoverLegs) lsCfg.walkoverLegs = prevLsCfg.walkoverLegs;
+  leagueStage.config_json = JSON.stringify(lsCfg);
+  var groups = created.groups.sort(byOrder_);
+  groups.forEach(function (g, i) {
+    g.name = seasonDivisionName_(i + 1, plan.divisionCount);
+  });
+  if (plan.divisionCount > 1) addPromotionStage_(ctx, ev.event_id, 2, playoffRuleSpec_(cfg, ruleSpec), plan.divisionCount);
+
+  // 会員: 新規参加を作り、復帰を参加中に、不参加を脱退にする。表示名は今期の名前（変えたものはその名前）
+  var membersTable = ctx.table('LeagueMembers');
+  var memTaken = Object.assign({}, membersTable.byKey);
+  var keyToMember = {};
+  var addMembers = [];
+  plan.rows.forEach(function (row) {
+    if (row.movement === 'new') {
+      var id = newId_('LMB', memTaken);
+      memTaken[id] = true;
+      keyToMember[row.key] = id;
+      addMembers.push({ member_id: id, league_id: sc.league.league_id, display_name: row.name, status: 'active', meta_json: JSON.stringify({ joinedSeason: nextNo, via: 'season', at: ctx.now, names: [] }), rev: 1, created_at: ctx.now, updated_at: ctx.now });
+      return;
+    }
+    keyToMember[row.key] = row.key;
+    var m = membersTable.byKey[row.key];
+    if (!m) return;
+    var meta = safeJson_(m.meta_json, {});
+    var changed = false;
+    if (row.movement === 'leave') {
+      if (m.status !== 'left') {
+        m.status = 'left';
+        meta.leftAfterSeason = sc.row.season_no;
+        changed = true;
+      }
+    } else {
+      if (m.status === 'left' || row.movement === 'return') {
+        m.status = 'active';
+        meta.rejoinedSeason = nextNo;
+        changed = true;
+      }
+      if (m.display_name !== row.name) {
+        meta.names = (Array.isArray(meta.names) ? meta.names : []).concat([{ name: m.display_name, until: ctx.now }]).slice(-20);
+        m.display_name = row.name;
+        changed = true;
+      }
+      // 期をまたいで続く会員は、選手を消しても会員は消さない
+      if (meta.via === 'player') {
+        meta.via = 'season';
+        changed = true;
+      }
+    }
+    if (changed) {
+      m.meta_json = JSON.stringify(meta);
+      m.rev = (m.rev || 0) + 1;
+      m.updated_at = ctx.now;
+      updateRecord_(membersTable, m);
+    }
+  });
+  appendRecords_(membersTable, addMembers);
+
+  // 選手と所属（梯子の順をシードにする）。所属・Rt は前期の選手から写す（非公開メモは写さない）
+  var prevPlayerOf = {};
+  res.bundle.players.forEach(function (p) {
+    if (p.member_id) prevPlayerOf[p.member_id] = p;
+  });
+  var playersTable = ctx.table('Players');
+  var plTaken = Object.assign({}, playersTable.byKey);
+  var newPlayers = [];
+  var playerOfKey = {};
+  plan.rows.forEach(function (row) {
+    if (row.movement === 'leave') return;
+    var pid = newId_('PLY', plTaken);
+    plTaken[pid] = true;
+    var old = prevPlayerOf[row.key];
+    playerOfKey[row.key] = pid;
+    newPlayers.push({ player_id: pid, event_id: ev.event_id, display_name: row.name, external_ref: '', notes: '', affiliation: old ? old.affiliation || '' : '', rating: old && old.rating !== null && old.rating !== undefined ? String(old.rating) : '', seed: null, meta_json: '', rev: 1, created_at: ctx.now, updated_at: ctx.now, member_id: keyToMember[row.key] });
+  });
+  if (newPlayers.length > ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT) throw appError_('VALIDATION', '1 大会の選手は ' + ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT + ' 名までです（次期 ' + newPlayers.length + ' 名）。');
+  appendRecords_(playersTable, newPlayers);
+  var entTaken = Object.assign({}, ctx.table('Entries').byKey);
+  var newEntries = [];
+  plan.divisions.forEach(function (div) {
+    var g = groups[div.index - 1];
+    div.members.forEach(function (key, i) {
+      newEntries.push(newEntry_(ctx, leagueStage, g.group_id, playerOfKey[key], i + 1, entTaken, ''));
+    });
+  });
+  appendRecords_(ctx.table('Entries'), newEntries);
+
+  // 確定の記録（前期の所属・順位・昇降格・入替戦・新しい所属・理由・手動の修正）
+  var record = {
+    planVersion: res.planVersion,
+    basis: res.basis,
+    basisVersion: res.basisVersion,
+    divisionCount: plan.divisionCount,
+    sizes: plan.divisions.map(function (dv) {
+      return dv.size;
+    }),
+    playoffs: plan.playoffs,
+    edits: {
+      leave: edits.leave,
+      rejoin: edits.rejoin.concat(
+        edits.join.map(function (j) {
+          return keyToMember[j.key];
+        })
+      ),
+      moves: Object.keys(edits.moves).map(function (k) {
+        return { key: keyToMember[k] || k, division: edits.moves[k].division, reason: edits.moves[k].reason };
+      }),
+      names: Object.keys(edits.names).map(function (k) {
+        return { key: keyToMember[k] || k, name: edits.names[k] };
+      }),
+    },
+    rows: plan.rows.map(function (r) {
+      return { key: keyToMember[r.key] || r.key, name: r.name, from: r.from, movement: r.movement, autoDivision: r.autoDivision, newDivision: r.newDivision, reasons: r.reasons, manual: r.manual };
+    }),
+    warnings: plan.warnings,
+    log: [],
+  };
+  newSeasonRecord_(ctx, sc.league.league_id, nextNo, ev.event_id, eventId, record);
+  recordHistory_(ctx, 'season.next', 'League', sc.league.league_id, eventId, null, { nextEventId: ev.event_id, season: nextNo, divisions: plan.divisionCount, sizes: record.sizes, by: ctx.user ? ctx.user.label : '' });
+  recordHistory_(ctx, 'season.created', 'League', sc.league.league_id, ev.event_id, null, { from: eventId, season: nextNo, rows: record.rows.length });
+  return { eventId: ev.event_id, alsoPublish: [eventId], createdFrom: eventId };
+}
+
+/* ---------- 前期の訂正の照合（次期を作った後） ---------- */
+
+/** 確定の記録（plan_json）から、照合に使う修正（会員 ID に置き換えたもの）を作る */
+function storedEdits_(record) {
+  var e = record && record.edits ? record.edits : {};
+  var moves = {};
+  (e.moves || []).forEach(function (m) {
+    moves[m.key] = { division: m.division, reason: m.reason };
+  });
+  var names = {};
+  (e.names || []).forEach(function (x) {
+    names[x.key] = x.name;
+  });
+  return { leave: e.leave || [], rejoin: e.rejoin || [], join: [], moves: moves, names: names };
+}
+
+/**
+ * 次期（nextRow）を作った後に前期の結果が変わったか。変わっていれば、今の結果で計算した所属と、次期の実際の所属の違い。
+ * 次期の所属は黙って書き換えない（主催者が照合の画面で、反映か承認（記録として残す）を選ぶ）
+ */
+function seasonDrift_(ctx, nextRow) {
+  var record = safeJson_(nextRow.plan_json, null);
+  if (!record || !nextRow.prev_event_id || !ctx.table('Events').byKey[nextRow.prev_event_id]) return null;
+  var nextEvent = ctx.table('Events').byKey[nextRow.event_id];
+  if (!nextEvent) return null;
+  var edits = storedEdits_(record);
+  // 次期に作った会員（新規参加）は前期にいないので、復帰の候補として扱う
+  var extra = {};
+  record.rows.forEach(function (r) {
+    if (r.movement === 'new') extra[r.key] = { name: r.name, status: 'active' };
+  });
+  var res;
+  try {
+    res = seasonPlanFor_(ctx, nextRow.prev_event_id, edits, { extraCandidates: extra });
+  } catch (e) {
+    if (!e.appCode) throw e;
+    return { changed: true, problems: [e.publicMessage], diffs: [], basisVersion: '' };
+  }
+  var changed = res.basisVersion !== record.basisVersion;
+  var nextBundle = collectEvent_(ctx, nextRow.event_id);
+  var nls = seasonLeagueStage_(nextBundle);
+  var groups = nextBundle.groups
+    .filter(function (g) {
+      return nls && g.stage_id === nls.stage_id;
+    })
+    .sort(byOrder_);
+  var divOfGroup = {};
+  groups.forEach(function (g, i) {
+    divOfGroup[g.group_id] = i + 1;
+  });
+  var memberOf = memberOfPlayers_(nextBundle);
+  var actual = {};
+  nextBundle.entries.forEach(function (e) {
+    if (nls && e.stage_id === nls.stage_id && memberOf[e.player_id]) actual[memberOf[e.player_id]] = divOfGroup[e.group_id];
+  });
+  var started = {};
+  nextBundle.matches.forEach(function (m) {
+    var k = divOfGroup[m.group_id];
+    if (!k) return;
+    if (matchStarted_(m)) started[k] = 'started';
+    else if (!started[k]) started[k] = 'cards';
+  });
+  var diffs = [];
+  res.plan.rows.forEach(function (r) {
+    if (r.movement === 'leave' || !r.newDivision) return;
+    var now = actual[r.key];
+    if (now === undefined || now === r.newDivision) return;
+    var lock = started[now] === 'started' || started[r.newDivision] === 'started' ? 'started' : started[now] || started[r.newDivision] || '';
+    diffs.push({
+      key: r.key,
+      name: r.name,
+      confirmed: now,
+      confirmedName: groups[now - 1] ? groups[now - 1].name : now + '部',
+      now: r.newDivision,
+      nowName: groups[r.newDivision - 1] ? groups[r.newDivision - 1].name : r.newDivision + '部',
+      reasons: r.reasons,
+      canApply: !lock && !res.plan.problems.length && r.newDivision <= groups.length,
+      lock: lock === 'started' ? '次期の該当ディビジョンの試合が始まっているため、所属は変えられません（記録として承認してください）。' : lock === 'cards' ? '次期の該当ディビジョンに対戦カードがあります。試合が始まっていなければ、先に対戦カードを削除すると反映できます。' : r.newDivision > groups.length ? '次期のディビジョン数が足りません。' : '',
+    });
+  });
+  var ack = record.acknowledged && record.acknowledged.basisVersion === res.basisVersion ? record.acknowledged : null;
+  return { changed: changed, acknowledged: ack, diffs: diffs, problems: res.plan.problems, basisVersion: res.basisVersion, confirmedBasisVersion: record.basisVersion, log: record.log || [] };
+}
+
+/**
+ * 前期の訂正を次期に反映する・記録として承認する（次期の大会の主催者・管理者）。
+ * payload = { eventId（次期）, rev（期の行の版）, apply: [会員 ID], acknowledge?: true, reason }
+ * 反映は、次期の該当ディビジョンに対戦カードがないときだけ（試合が始まった所属は変えない）
+ */
+function actionReconcileNextSeason_(ctx, payload) {
+  var eventId = requireId_(payload.eventId, '大会');
+  assertOwnerRole_(ctx, eventId, '次期の所属の照合');
+  var row = seasonRowOfEvent_(ctx, eventId);
+  if (!row || !row.prev_event_id) throw appError_('BAD_REQUEST', 'この大会は、前期から作った期ではありません。');
+  var seasons = ctx.table('LeagueSeasons');
+  row = findRecord_(seasons, row.season_key, '期');
+  assertRev_(row, requireRev_(payload.rev), '期');
+  var drift = seasonDrift_(ctx, row);
+  if (!drift || !drift.changed) throw appError_('LOCKED', '前期の結果は、次期を作った時から変わっていません。');
+  var reason = cleanText_(payload.reason, '理由', ADMIN_CONFIG.MAX_NOTE_LENGTH);
+  var record = safeJson_(row.plan_json, {});
+  var apply = Array.isArray(payload.apply) ? payload.apply : [];
+  if (apply.length > ADMIN_CONFIG.MAX_PLAYERS_PER_EVENT) throw appError_('BAD_REQUEST', '指定が多すぎます。');
+  var applied = [];
+  if (apply.length) {
+    var byKey = {};
+    drift.diffs.forEach(function (x) {
+      byKey[x.key] = x;
+    });
+    var nextBundle = collectEvent_(ctx, eventId);
+    var nls = seasonLeagueStage_(nextBundle);
+    var groups = nextBundle.groups
+      .filter(function (g) {
+        return g.stage_id === nls.stage_id;
+      })
+      .sort(byOrder_);
+    var memberOf = memberOfPlayers_(nextBundle);
+    var entries = ctx.table('Entries');
+    var seen = {};
+    apply.forEach(function (key) {
+      var x = isValidId_(key) ? byKey[key] : null;
+      if (!x || seen[key]) throw appError_('NOT_FOUND', '反映する会員が、違いの一覧にありません。画面を再読み込みしてください。');
+      seen[key] = true;
+      if (!x.canApply) throw appError_('LOCKED', x.name + ': ' + (x.lock || '反映できません。'));
+      var entry = entries.rows.filter(function (e) {
+        return e.stage_id === nls.stage_id && memberOf[e.player_id] === key;
+      })[0];
+      var target = groups[x.now - 1];
+      var seed = entries.rows.filter(function (e) {
+        return e.group_id === target.group_id;
+      }).length + 1;
+      entry.group_id = target.group_id;
+      entry.seed = seed;
+      entry.rev = (entry.rev || 0) + 1;
+      entry.updated_at = ctx.now;
+      updateRecord_(entries, entry);
+      applied.push({ key: key, name: x.name, from: x.confirmed, to: x.now });
+      (record.rows || []).forEach(function (r) {
+        if (r.key === key) {
+          r.newDivision = x.now;
+          r.reasons = (r.reasons || []).concat(['前期の訂正を反映して ' + x.nowName + ' へ（' + reason + '）']);
+        }
+      });
+    });
+    // 反映後の人数が規則に合うか
+    var counts = {};
+    entries.rows.forEach(function (e) {
+      if (e.stage_id === nls.stage_id) counts[e.group_id] = (counts[e.group_id] || 0) + 1;
+    });
+    groups.forEach(function (g, i) {
+      var need = seasonMinSize_(i + 1, groups.length);
+      if ((counts[g.group_id] || 0) < need) throw appError_('VALIDATION', '反映すると ' + g.name + ' が ' + (counts[g.group_id] || 0) + ' 人になります（' + need + ' 人以上が必要）。反映する選手を見直してください。');
+    });
+  }
+  var remaining = drift.diffs.filter(function (x) {
+    return !applied.some(function (a) {
+      return a.key === x.key;
+    });
+  });
+  record.log = (record.log || []).concat([{ at: ctx.now, by: ctx.user ? ctx.user.label : '', reason: reason, applied: applied, acknowledged: payload.acknowledge === true, basisVersion: drift.basisVersion }]).slice(-50);
+  if (!remaining.length && !drift.problems.length) {
+    // 違いがなくなった: 今の前期の結果を、次期の根拠にする
+    record.basisVersion = drift.basisVersion;
+    record.basis = seasonPlanFor_(ctx, row.prev_event_id, storedEdits_(record), { extraCandidates: {} }).basis;
+    delete record.acknowledged;
+  } else if (payload.acknowledge === true) {
+    record.acknowledged = { basisVersion: drift.basisVersion, at: ctx.now, by: ctx.user ? ctx.user.label : '', reason: reason, kept: remaining.map(function (x) { return { key: x.key, name: x.name, confirmed: x.confirmed, now: x.now }; }) };
+  } else if (!applied.length) {
+    throw appError_('VALIDATION', '反映する選手を選ぶか、「記録として承認」を選んでください。');
+  }
+  row.plan_json = JSON.stringify(record);
+  row.rev = (row.rev || 0) + 1;
+  row.updated_at = ctx.now;
+  updateRecord_(seasons, row);
+  recordHistory_(ctx, 'season.reconcile', 'League', row.league_id, eventId, null, { applied: applied, acknowledged: payload.acknowledge === true, reason: reason });
+  return { eventId: eventId, applied: applied.length, alsoPublish: [row.prev_event_id] };
+}
+
+/* ---------- 運営画面の情報 ---------- */
+
+/**
+ * 運営画面の「期・昇降格」タブの情報（eventDetail に入れる）。
+ * 期制リーグの大会でなければ、移行できるか（リーグの段階だけの大会・主催者か管理者）だけを返す
+ */
+function seasonDetail_(ctx, bundle, view, role) {
+  var eventId = bundle.event.event_id;
+  var sc = bundle.season;
+  var owner = role === 'owner' || role === 'admin';
+  if (!sc) {
+    var convertible = bundle.stages.length === 1 && bundle.stages[0].type === STAGE_TYPE.LEAGUE;
+    return convertible ? { linked: false, convertible: true, canEdit: owner } : null;
+  }
+  var events = ctx.table('Events').byKey;
+  var out = {
+    linked: true,
+    canEdit: owner,
+    league: { id: sc.league.league_id, name: sc.league.name, rev: sc.league.rev || 0, config: leagueConfig_(sc.league) },
+    seasonNo: sc.row.season_no,
+    seasonRev: sc.row.rev || 0,
+    seasons: sc.all.map(function (r) {
+      var ev = events[r.event_id];
+      return { no: r.season_no, eventId: r.event_id, name: ev ? ev.name : '（削除済み）', exists: !!ev, isPublic: ev ? !!ev.is_public : false, current: r.event_id === eventId, canOpen: !!ev && canManageEvent_(ctx.user, ev, ctx) };
+    }),
+    next: null,
+    prevEventId: sc.row.prev_event_id || '',
+  };
+  // 入替戦（今の順位から決まる対戦と、組んだ入替戦）
+  try {
+    var inputs = seasonInputs_(bundle, view);
+    var roles = seasonRoles_(inputs.divisions);
+    out.divisions = inputs.divisions.map(function (d) {
+      return { index: d.index, name: d.name, size: d.rows.length, complete: d.complete, progress: d.progress };
+    });
+    out.playoffs = {
+      expected: roles.playoffs.map(function (pf) {
+        var got = inputs.playoffs.filter(function (p) {
+          return p.upper === pf.upper;
+        })[0];
+        var nameOf = function (key) {
+          var row = null;
+          inputs.divisions.forEach(function (d) {
+            d.rows.forEach(function (r) {
+              if (r.key === key) row = r;
+            });
+          });
+          return row ? row.name : '';
+        };
+        return { upper: pf.upper, lower: pf.lower, upperName: nameOf(pf.upperKey), lowerName: nameOf(pf.lowerKey), generated: !!got, matches: got ? got.upperKey === pf.upperKey && got.lowerKey === pf.lowerKey : false, state: got ? got.state : 'none', winnerName: got && got.winnerKey ? nameOf(got.winnerKey) : '' };
+      }),
+      problems: roles.problems,
+      ready: inputs.divisions.every(function (d) {
+        return d.complete;
+      }),
+      generated: inputs.playoffs.length,
+    };
+    var memberOf = memberOfPlayers_(bundle);
+    out.members = bundle.players.map(function (p) {
+      return { playerId: p.player_id, memberId: memberOf[p.player_id] || '', name: p.display_name, rev: p.rev || 0 };
+    });
+    var inSeason = {};
+    bundle.players.forEach(function (p) {
+      if (p.member_id) inSeason[p.member_id] = true;
+    });
+    var cand = rejoinCandidates_(ctx, sc, inSeason);
+    out.otherMembers = Object.keys(cand).map(function (k) {
+      return { memberId: k, name: cand[k].name, status: cand[k].status };
+    });
+  } catch (e) {
+    if (!e.appCode) throw e;
+    out.error = e.publicMessage;
+  }
+  if (sc.next) {
+    var nev = events[sc.next.event_id];
+    out.next = { eventId: sc.next.event_id, no: sc.next.season_no, name: nev ? nev.name : '（削除済み）', exists: !!nev, confirmedAt: sc.next.confirmed_at, confirmedBy: owner ? sc.next.confirmed_by : '' };
+    if (nev) out.next.drift = seasonDrift_(ctx, sc.next);
+  }
+  if (sc.row.prev_event_id) {
+    var record = safeJson_(sc.row.plan_json, null);
+    out.plan = record ? { rows: record.rows, divisionCount: record.divisionCount, sizes: record.sizes, playoffs: record.playoffs, warnings: record.warnings || [], confirmedAt: sc.row.confirmed_at, confirmedBy: owner ? sc.row.confirmed_by : '', log: record.log || [], acknowledged: record.acknowledged || null } : null;
+    out.drift = seasonDrift_(ctx, sc.row);
+  }
+  return out;
+}
+
+/**
+ * 公開データの期制リーグの情報（閲覧ページ）。期の一覧は公開中の期だけ大会 ID を出す。
+ * 次期を確定した後は、各選手の昇降格の結果と次期の所属（理由・手動の修正の内容は出さない）
+ */
+function seasonPublicView_(bundle, stages) {
+  var sc = bundle.season;
+  var eventId = bundle.event.event_id;
+  var out = {
+    league: sc.league.name,
+    no: sc.row.season_no,
+    seasons: sc.all
+      .filter(function (r) {
+        return sc.events[r.event_id];
+      })
+      .map(function (r) {
+        var ev = sc.events[r.event_id];
+        var pub = !!ev.is_public;
+        return { no: r.season_no, eventId: pub || r.event_id === eventId ? r.event_id : null, current: r.event_id === eventId };
+      }),
+  };
+  // 順位表の昇降格の帯（規則から決まるもの。確定前は「予定」）
+  var league = stages.filter(function (s) {
+    return s.type === STAGE_TYPE.LEAGUE;
+  })[0];
+  if (league && league.groups && league.groups.length > 1) {
+    var d = league.groups.length;
+    league.groups.forEach(function (g, i) {
+      var k = i + 1;
+      var a = g.standings.length;
+      if (a < seasonMinSize_(k, d)) return;
+      g.standings.forEach(function (s, idx) {
+        var pos = idx + 1;
+        var zone = '';
+        if (k > 1 && pos === 1) zone = 'promote';
+        else if (k > 1 && pos === 2) zone = 'playoff';
+        else if (k < d && pos === a) zone = 'relegate';
+        else if (k < d && pos === a - 1) zone = 'playoff';
+        if (zone) s.zone = zone;
+      });
+    });
+  }
+  if (sc.next && sc.events[sc.next.event_id]) {
+    var record = safeJson_(sc.next.plan_json, null);
+    if (record && Array.isArray(record.rows)) {
+      var playerOfMember = {};
+      bundle.players.forEach(function (p) {
+        if (p.member_id) playerOfMember[p.member_id] = p.player_id;
+      });
+      out.next = {
+        no: sc.next.season_no,
+        eventId: sc.events[sc.next.event_id].is_public ? sc.next.event_id : null,
+        outcome: record.rows
+          .filter(function (r) {
+            return playerOfMember[r.key];
+          })
+          .map(function (r) {
+            return { playerId: playerOfMember[r.key], kind: r.movement, to: r.movement === 'leave' ? '' : seasonDivisionName_(r.newDivision, record.divisionCount) };
+          }),
+      };
+    }
+  }
+  return out;
+}
+
 // ---- 07_api.js ----
 /* 公開エントリポイント（外部から呼べるのはこのファイルの doGet と doPost だけ） */
 
@@ -8360,6 +10406,16 @@ function adminActions_() {
     linkAccount: { fn: actionLinkAccount_, scope: 'google', mutating: true },
     approveOwnerClaim: { fn: actionApproveOwnerClaim_, scope: 'event', mutating: true },
     approveCollaborator: { fn: actionApproveCollaborator_, scope: 'event', mutating: true },
+    // v1.0: 期制リーグ（06c_season.js）。主催者・管理者だけの操作は各関数の中で assertOwnerRole_ で確かめる
+    createSeasonLeague: { fn: actionCreateSeasonLeague_, scope: 'create', mutating: true },
+    convertToSeasonLeague: { fn: actionConvertToSeasonLeague_, scope: 'event', mutating: true },
+    updateLeagueSettings: { fn: actionUpdateLeagueSettings_, scope: 'event', mutating: true },
+    generatePlayoffs: { fn: actionGeneratePlayoffs_, scope: 'event', mutating: true },
+    clearPlayoffs: { fn: actionClearPlayoffs_, scope: 'event', mutating: true },
+    previewNextSeason: { fn: actionPreviewNextSeason_, scope: 'event', mutating: false },
+    confirmNextSeason: { fn: actionConfirmNextSeason_, scope: 'event', mutating: true },
+    reconcileNextSeason: { fn: actionReconcileNextSeason_, scope: 'event', mutating: true },
+    setPlayerMember: { fn: actionSetPlayerMember_, scope: 'event', mutating: true },
   };
 }
 
@@ -8471,6 +10527,7 @@ var NO_COMPLETION_CHECK_ = [
   'updateEvent', 'updateEventSettings', 'setStaffPassword', 'setOwner', 'addCollaborator', 'removeCollaborator', 'republish', 'renameGroup',
   'updatePlayer', 'setSchedule', 'postponeMatch', 'applyWeeklySchedule', 'updateNight', 'createEvent', 'createSampleEvent', 'duplicateEvent',
   'restoreEvent', 'importPlayers', 'addPlayers', 'deleteEvent', 'reinstatePlayer', 'linkAccount', 'approveOwnerClaim', 'approveCollaborator',
+  'createSeasonLeague', 'updateLeagueSettings', 'confirmNextSeason', 'setPlayerMember',
 ];
 var WRITE_JOURNAL_KEY_ = 'WRITE_JOURNAL';
 
@@ -8539,6 +10596,8 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
       });
       delete result.alsoPublish;
       eventIds.forEach(function (id) {
+        // v1.0: 期制リーグの期の選手には会員 ID を付ける（選手の追加・CSV 取込など、どの操作で選手が増えても）
+        if (ctx.table('Events').byKey[id]) ensureSeasonMembers_(ctx, id);
         afterEventChange_(ctx, id);
       });
       flushHistory_(ctx);
@@ -8565,7 +10624,7 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
     }
     SpreadsheetApp.flush();
     // 大会作成は、通信が切れて再送されても作った大会を開けるよう、大会 ID を保存する（サーバー内のみ・10 分）
-    var memo = (action === 'createEvent' || action === 'createSampleEvent' || action === 'duplicateEvent' || action === 'restoreEvent') && result && result.eventId ? { eventId: result.eventId } : {};
+    var memo = (action === 'createEvent' || action === 'createSampleEvent' || action === 'duplicateEvent' || action === 'restoreEvent' || action === 'createSeasonLeague' || action === 'confirmNextSeason') && result && result.eventId ? { eventId: result.eventId } : {};
     cache.put(dedupeKey, JSON.stringify(memo), ADMIN_CONFIG.REQUEST_DEDUPE_TTL_SEC);
     props.deleteProperty(WRITE_JOURNAL_KEY_);
     return result;
@@ -8604,6 +10663,7 @@ var SUMMARY_STAGE_LABEL_ = Object.freeze({
   double_elimination: 'ダブルエリミネーション',
   swiss: 'スイス式',
   series: 'ポイントシリーズ',
+  promotion: '入替戦',
 });
 
 /** 段階の種類 → 一覧の大分類（shared/formats.js の FORMAT_CATEGORY_LABEL） */
@@ -8614,6 +10674,7 @@ var SUMMARY_STAGE_KIND_ = Object.freeze({
   double_elimination: 'tournament',
   swiss: 'swiss',
   series: 'series',
+  promotion: 'league',
 });
 
 /** 対戦カードを作る前の段階の試合数の見積もり。見積もれないときは null */
@@ -8631,6 +10692,11 @@ function estimateStageMatches_(stage) {
     var sw = (stage.groups && stage.groups[0] ? stage.groups[0].players : []).length;
     var rounds = stage.swiss ? stage.swiss.rounds : 0;
     return sw >= 2 && rounds ? rounds * Math.floor(sw / 2) : null;
+  }
+  if (stage.type === 'promotion') {
+    // v1.0: 期制リーグの入替戦（隣接するディビジョンの組ごとに 1 試合）
+    var pairs = (stage.pairs || []).length;
+    return pairs ? pairs : null;
   }
   if (stage.type === 'series') {
     var roster = (stage.roster || []).length;

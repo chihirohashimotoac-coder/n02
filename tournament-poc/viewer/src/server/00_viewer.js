@@ -14,7 +14,7 @@
  */
 
 var VIEWER_CONFIG = Object.freeze({
-  APP_VERSION: '0.9.0',
+  APP_VERSION: '1.0.0',
   CACHE_TTL_SEC: 20,
   STALE_TTL_SEC: 21600, // CacheService の上限（6 時間）
   NONE_TTL_SEC: 20,
@@ -30,6 +30,8 @@ var VIEWER_CONFIG = Object.freeze({
 });
 
 var VIEWER_EVENT_ID_PATTERN_ = /^EVT-[A-Z0-9]{4,32}$/;
+// v1.0: 大きな大会の試合一覧を分けた行（パート）の ID。大会 ID + ".P" + 2 桁
+var VIEWER_PART_ID_PATTERN_ = /^(EVT-[A-Z0-9]{4,32})\.P(\d{2})$/;
 var DEFAULT_KEY_ = '_default';
 // 公開中の大会の一覧（ポータル用）。大会 ID の形（EVT-…）とは重ならない
 var LIST_KEY_ = '_list';
@@ -62,7 +64,7 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(list)).setMimeType(ContentService.MimeType.JSON);
   }
   if (p.format === 'json') {
-    var res = getPublicSnapshot({ eventId: p.event || '', knownVersion: p.known || '' });
+    var res = getPublicSnapshot({ eventId: p.event || '', part: p.part || '', knownVersion: p.known || '' });
     return ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON);
   }
   return HtmlService.createHtmlOutputFromFile('Index')
@@ -72,7 +74,9 @@ function doGet(e) {
 
 /**
  * 公開データを返す。
- * request = { eventId?: string, knownVersion?: string }
+ * request = { eventId?: string, part?: string, knownVersion?: string }
+ * v1.0: part（"EVT-….P01"）を指定すると、その大会の分割した試合一覧（パート）を返す。大会の本体が公開中で、
+ * 本体の parts に載っているパートだけを返す（消し忘れた行・非公開の大会のパートは返さない）。
  * 戻り値 = { ok, version, publishedAt, servedAt, stale, notModified?, data?, refresh } | { ok:false, error, refresh }
  * 例外は投げず、内部情報を含まない固定文言のエラーを返す。
  */
@@ -89,8 +93,16 @@ function getPublicSnapshot(request) {
       eventId = req.eventId;
     }
     var knownVersion = typeof req.knownVersion === 'string' ? req.knownVersion.slice(0, 64) : '';
+    var part = '';
+    if (req.part !== undefined && req.part !== null && req.part !== '') {
+      var pm = typeof req.part === 'string' ? req.part.match(VIEWER_PART_ID_PATTERN_) : null;
+      if (!pm || !eventId || pm[1] !== eventId) {
+        return { ok: false, error: { code: 'BAD_REQUEST', message: '大会の指定が正しくありません。' }, servedAt: servedAt, refresh: refresh };
+      }
+      part = req.part;
+    }
 
-    var entry = loadEntry_(eventId || DEFAULT_KEY_);
+    var entry = loadEntry_(part || eventId || DEFAULT_KEY_);
     if (!entry || entry.none) {
       return {
         ok: false,
@@ -272,8 +284,20 @@ function addCacheValue_(bag, fullKey, value) {
  * 戻り値: { [eventId | '_default']: entry }
  */
 function refreshFromSheet_(cache) {
-  var entries = readPublishedEntries_();
+  var all = readPublishedEntries_();
+  // v1.0: パートは、公開中の本体が parts に載せているものだけを配る
+  var listed = {};
+  var entries = all.filter(function (e) {
+    if (e.partOf) return false;
+    e.partIds.forEach(function (id) {
+      listed[id] = e.eventId;
+    });
+    return true;
+  });
   var fresh = {};
+  all.forEach(function (e) {
+    if (e.partOf && listed[e.eventId] === e.partOf) fresh[e.eventId] = { version: e.version, publishedAt: e.publishedAt, json: e.json };
+  });
   var staleValues = {};
   var freshValues = {};
   var defaultEntry = null;
@@ -358,10 +382,12 @@ function readPublishedEntries_() {
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
     var eventId = String(row[iEvent] || '').trim();
-    if (!VIEWER_EVENT_ID_PATTERN_.test(eventId)) continue;
+    var partOf = eventId.match(VIEWER_PART_ID_PATTERN_);
+    if (!VIEWER_EVENT_ID_PATTERN_.test(eventId) && !partOf) continue;
     var count = Number(row[iCount]);
     if (!(count >= 1 && count <= 10)) continue;
     var json = '';
+    var parsed = null;
     var broken = false;
     for (var c = 1; c <= count; c++) {
       var idx = col('chunk_' + (c < 10 ? '0' : '') + c);
@@ -374,7 +400,7 @@ function readPublishedEntries_() {
     }
     if (broken) continue;
     try {
-      JSON.parse(json);
+      parsed = JSON.parse(json);
     } catch (e) {
       console.warn('broken snapshot', eventId);
       continue;
@@ -382,6 +408,12 @@ function readPublishedEntries_() {
     var published = row[iPublished];
     out.push({
       eventId: eventId,
+      partOf: partOf ? partOf[1] : '',
+      partIds: !partOf && parsed && Array.isArray(parsed.parts)
+        ? parsed.parts.map(function (x) {
+            return x && x.id;
+          })
+        : [],
       isDefault: row[iDefault] === true || String(row[iDefault]).toUpperCase() === 'TRUE',
       version: String(row[iVersion] || ''),
       publishedAt: Object.prototype.toString.call(published) === '[object Date]' ? published.toISOString() : String(published || ''),

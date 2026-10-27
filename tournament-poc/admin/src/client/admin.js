@@ -1262,8 +1262,9 @@
         button.disabled = true;
         var f = file.files && file.files[0];
         if (!f) return;
-        if (f.size > 1900000) {
-          info.appendChild(el('p', { className: 'error', text: 'ファイルが大きすぎます（1.9MB まで）。' }));
+        // 送るのは各シートの行だけ（results を除く）なので、ファイル自体は大きくてもよい。送る内容の大きさは読み込んだ後に確かめる
+        if (f.size > 8000000) {
+          info.appendChild(el('p', { className: 'error', text: 'ファイルが大きすぎます（8MB まで）。' }));
           return;
         }
         var reader = new win.FileReader();
@@ -1276,6 +1277,11 @@
           }
           if (!data || data.format !== 'n02-tournament-archive' || !data.tables || !data.event) {
             info.appendChild(el('p', { className: 'error', text: 'n02 の大会データのファイル（「大会のデータを保存」で作ったもの）ではありません。' }));
+            return;
+          }
+          var sendSize = JSON.stringify({ format: data.format, formatVersion: data.formatVersion, event: data.event, tables: data.tables }).length;
+          if (sendSize > 1900000) {
+            info.appendChild(el('p', { className: 'error', text: 'この大会のデータは復元できる大きさ（約 190 万文字）を超えています（' + sendSize + ' 文字）。' }));
             return;
           }
           archive = data;
@@ -1293,7 +1299,12 @@
       });
       button.addEventListener('click', function () {
         if (!archive) return;
-        mutate('restoreEvent', { archive: archive, mode: mode.value, includePlayers: players.checked, name: nameInput.value }, function (r) {
+        // 復元に使うのは各シートの行だけ。閲覧ページと同じ形の結果（results）は送らない（大きな大会でも送れる大きさにする。v1.0）
+        var sent = {};
+        Object.keys(archive).forEach(function (k) {
+          if (k !== 'results') sent[k] = archive[k];
+        });
+        mutate('restoreEvent', { archive: sent, mode: mode.value, includePlayers: players.checked, name: nameInput.value }, function (r) {
           return '復元しました（選手 ' + r.restored.players + '・試合 ' + r.restored.matches + '）。';
         });
       });

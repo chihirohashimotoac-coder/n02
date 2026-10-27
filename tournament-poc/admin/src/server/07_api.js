@@ -77,6 +77,16 @@ function adminActions_() {
     linkAccount: { fn: actionLinkAccount_, scope: 'google', mutating: true },
     approveOwnerClaim: { fn: actionApproveOwnerClaim_, scope: 'event', mutating: true },
     approveCollaborator: { fn: actionApproveCollaborator_, scope: 'event', mutating: true },
+    // v1.0: 期制リーグ（06c_season.js）。主催者・管理者だけの操作は各関数の中で assertOwnerRole_ で確かめる
+    createSeasonLeague: { fn: actionCreateSeasonLeague_, scope: 'create', mutating: true },
+    convertToSeasonLeague: { fn: actionConvertToSeasonLeague_, scope: 'event', mutating: true },
+    updateLeagueSettings: { fn: actionUpdateLeagueSettings_, scope: 'event', mutating: true },
+    generatePlayoffs: { fn: actionGeneratePlayoffs_, scope: 'event', mutating: true },
+    clearPlayoffs: { fn: actionClearPlayoffs_, scope: 'event', mutating: true },
+    previewNextSeason: { fn: actionPreviewNextSeason_, scope: 'event', mutating: false },
+    confirmNextSeason: { fn: actionConfirmNextSeason_, scope: 'event', mutating: true },
+    reconcileNextSeason: { fn: actionReconcileNextSeason_, scope: 'event', mutating: true },
+    setPlayerMember: { fn: actionSetPlayerMember_, scope: 'event', mutating: true },
   };
 }
 
@@ -188,6 +198,7 @@ var NO_COMPLETION_CHECK_ = [
   'updateEvent', 'updateEventSettings', 'setStaffPassword', 'setOwner', 'addCollaborator', 'removeCollaborator', 'republish', 'renameGroup',
   'updatePlayer', 'setSchedule', 'postponeMatch', 'applyWeeklySchedule', 'updateNight', 'createEvent', 'createSampleEvent', 'duplicateEvent',
   'restoreEvent', 'importPlayers', 'addPlayers', 'deleteEvent', 'reinstatePlayer', 'linkAccount', 'approveOwnerClaim', 'approveCollaborator',
+  'createSeasonLeague', 'updateLeagueSettings', 'confirmNextSeason', 'setPlayerMember',
 ];
 var WRITE_JOURNAL_KEY_ = 'WRITE_JOURNAL';
 
@@ -256,6 +267,8 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
       });
       delete result.alsoPublish;
       eventIds.forEach(function (id) {
+        // v1.0: 期制リーグの期の選手には会員 ID を付ける（選手の追加・CSV 取込など、どの操作で選手が増えても）
+        if (ctx.table('Events').byKey[id]) ensureSeasonMembers_(ctx, id);
         afterEventChange_(ctx, id);
       });
       flushHistory_(ctx);
@@ -282,7 +295,7 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
     }
     SpreadsheetApp.flush();
     // 大会作成は、通信が切れて再送されても作った大会を開けるよう、大会 ID を保存する（サーバー内のみ・10 分）
-    var memo = (action === 'createEvent' || action === 'createSampleEvent' || action === 'duplicateEvent' || action === 'restoreEvent') && result && result.eventId ? { eventId: result.eventId } : {};
+    var memo = (action === 'createEvent' || action === 'createSampleEvent' || action === 'duplicateEvent' || action === 'restoreEvent' || action === 'createSeasonLeague' || action === 'confirmNextSeason') && result && result.eventId ? { eventId: result.eventId } : {};
     cache.put(dedupeKey, JSON.stringify(memo), ADMIN_CONFIG.REQUEST_DEDUPE_TTL_SEC);
     props.deleteProperty(WRITE_JOURNAL_KEY_);
     return result;

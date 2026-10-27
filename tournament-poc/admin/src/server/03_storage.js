@@ -285,7 +285,9 @@ function writeAppends_(table) {
  * 公開データの削除 → 大会に属する行 → 大会の行 → 履歴 → 公開データの更新。
  * 各表の中では 更新 → 削除 → 追加（更新は読み込んだときの行番号で書くため、削除より先）。
  */
-var COMMIT_ORDER_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators', 'Events', 'History'];
+// v1.0: 期制リーグの行（会員・系列・期の連結）は大会の行より先に書く。次期の作成が途中で止まっても、期の連結が残っていれば
+// 次の確定の操作が「途中で止まった作成」と分かり、作り直せる（06c_season.js の removeBrokenSeason_）
+var COMMIT_ORDER_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators', 'LeagueMembers', 'Leagues', 'LeagueSeasons', 'Events', 'History'];
 
 function commitContext_(ctx) {
   var tables = ctx.loadedTables();

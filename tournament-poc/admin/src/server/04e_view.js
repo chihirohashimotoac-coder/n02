@@ -102,7 +102,7 @@ function judgeMatch_(bundle, match, playerById, members) {
   }
   var result = evaluateMatchInput_(status, input, spec);
   problems = problems.concat(result.problems);
-  if (result.draw && isBracketStage_(stage)) problems.push('勝ち抜き戦では引き分けを確定できません');
+  if (result.draw && (isBracketStage_(stage) || stage.type === STAGE_TYPE.PROMOTION)) problems.push('勝ち抜き戦・入替戦では引き分けを確定できません');
   if (problems.length) return { state: 'check', input: null, winnerSide: 0, problems: problems };
   return { state: status, input: input, winnerSide: result.winnerSide, draw: !!result.draw, problems: [] };
 }
@@ -241,6 +241,7 @@ function buildEventView_(bundle, includePrivate) {
     if (isGroupStage_(stage)) progress = groupStageView_(bundle, ctxStage, view);
     else if (stage.type === STAGE_TYPE.SERIES) progress = seriesStageView_(bundle, ctxStage, view);
     else if (stage.type === STAGE_TYPE.DOUBLE_ELIMINATION) progress = doubleEliminationView_(bundle, ctxStage, view);
+    else if (stage.type === STAGE_TYPE.PROMOTION) progress = promotionStageView_(bundle, ctxStage, view);
     else progress = eliminationView_(bundle, ctxStage, view);
     addProgress_(allProgress, progress);
     view.progress = progress;
@@ -314,6 +315,8 @@ function buildEventView_(bundle, includePrivate) {
   if (evCfg.announcement) view.event.announcement = evCfg.announcement;
   if (evCfg.ruleDisplay) view.event.ruleDisplay = evCfg.ruleDisplay;
   view.event.timezone = evCfg.timezone;
+  // v1.0: 期制リーグの期（期の一覧・順位表の昇降格の帯・次期を確定した後の結果）
+  if (bundle.season) view.event.season = seasonPublicView_(bundle, stages);
   var completion = eventCompletionFromStages_(stages);
   view.complete = completion.complete;
   if (includePrivate) {
@@ -689,6 +692,51 @@ function seriesStageView_(bundle, c, view) {
   view.nightsComplete = view.nights.filter(function (n) {
     return n.status === 'complete' || n.status === 'cancelled';
   }).length;
+  return progress;
+}
+
+/**
+ * v1.0: 期制リーグの入替戦。隣接するディビジョンの組（グループ）ごとに 1 試合。
+ * 選手の source（「1部 5位」など）は入替戦を組んだ時の順位
+ */
+function promotionStageView_(bundle, c, view) {
+  var progress = emptyProgress_();
+  view.pairs = bundle.groups
+    .filter(function (g) {
+      return g.stage_id === c.stage.stage_id;
+    })
+    .sort(byOrder_)
+    .map(function (g) {
+      var meta = groupMeta_(g);
+      var match = null;
+      c.matches.forEach(function (m) {
+        if (m.group_id !== g.group_id || match) return;
+        var judge = judgeMatch_(bundle, m, c.playerById, null);
+        countProgress_(progress, judge.state);
+        match = c.matchView(m, judge, m.label || '入替戦');
+      });
+      var pair = {
+        id: g.group_id,
+        name: g.name,
+        upper: meta.upper || 0,
+        lower: meta.lower || 0,
+        players: c.entries
+          .filter(function (e) {
+            return e.group_id === g.group_id;
+          })
+          .sort(function (a, b) {
+            return (a.seed || 0) - (b.seed || 0);
+          })
+          .map(function (e) {
+            var r = c.playerRef(e.player_id);
+            r.source = e.source_label || '';
+            return r;
+          }),
+        match: match,
+      };
+      if (c.includePrivate && match) match.confirmedAt = match.confirmedAt || '';
+      return pair;
+    });
   return progress;
 }
 

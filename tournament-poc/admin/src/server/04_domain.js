@@ -559,6 +559,8 @@ function collectEvent_(ctx, eventId) {
     entries: entries,
     players: players,
     matches: matches,
+    // v1.0: 期制リーグの期なら、その系列と前後の期（06c_season.js）。期制リーグでなければ null
+    season: seasonContext_(ctx, eventId),
   };
 }
 

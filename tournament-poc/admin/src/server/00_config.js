@@ -10,10 +10,11 @@
  */
 
 var ADMIN_CONFIG = Object.freeze({
-  APP_VERSION: '0.9.0',
+  APP_VERSION: '1.0.0',
   // 1 = v0.7 まで。2 = v0.8（大会設定・所属/Rt・試合の予定/特殊な結果・共同主催者など。列とシートの追加だけ）
   // 3 = v0.9（主催者・共同主催者を Google の不変 ID（sub）で識別する列。共同主催者の旧 email 列は invite_email へ移す）
-  SCHEMA_VERSION: 3,
+  // 4 = v1.0（期制リーグ: Leagues・LeagueSeasons・LeagueMembers のシートと Players.member_id。追加だけで値の移し替えはない）
+  SCHEMA_VERSION: 4,
   // 書き込みはスクリプトロックで直列化する。取れなければ BUSY を返し、クライアントが再試行する。
   LOCK_WAIT_MS: 10000,
   // 二重送信（ボタン連打・通信再試行）を requestId で弾く期間
@@ -45,6 +46,10 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_RESTORE_REQUEST_CHARS: 2000000,
   // 公開データ（閲覧ページの JSON）の上限。セル 10 個 × 40,000 文字
   MAX_SNAPSHOT_CHARS: 400000,
+  // v1.0: 上限を超える大会の試合一覧を分ける行（パート）の 1 つあたりの目安と、1 大会のパートの上限。
+  // 上限そのもの（1 行 40 万文字）は変えない。パートは閲覧者用アプリのキャッシュ（1 値 3 万文字 × 20）に収まる大きさにする
+  SNAPSHOT_PART_TARGET_CHARS: 60000,
+  MAX_SNAPSHOT_PARTS: 40,
   MAX_COLLABORATORS: 10,
   MAX_SERIES_NIGHTS: 30,
   MAX_SWISS_ROUNDS: 15,
@@ -54,6 +59,11 @@ var ADMIN_CONFIG = Object.freeze({
   MAX_MY_EVENTS: 100,
   // v0.9: 1 つの大会・招待に記録する「確認待ちのログイン」（同じメールアドレスの別アカウント）の上限
   MAX_LINK_CLAIMS: 5,
+  // v1.0: 期制リーグ。会員（期をまたぐ選手の ID）の上限・期の数・ディビジョン数の上限（グループの上限と同じ）
+  MAX_LEAGUE_MEMBERS: 1000,
+  MAX_LEAGUE_SEASONS: 99,
+  MAX_SEASON_DIVISIONS: 16,
+  MAX_LEAGUE_NAME_LENGTH: 60,
 });
 
 /** 試合状態（シートにはコード値で保存し、画面で日本語に変換する） */
@@ -89,6 +99,7 @@ var STAGE_TYPE = Object.freeze({
   DOUBLE_ELIMINATION: 'double_elimination', // v0.8: ダブルエリミネーション（勝者側・敗者側・グランドファイナル）
   SWISS: 'swiss', // v0.8: スイス式（成績の近い選手どうしを回戦ごとに組む）
   SERIES: 'series', // v0.8: ポイントシリーズ（節ごとの小トーナメントの順位ポイントを累計）
+  PROMOTION: 'promotion', // v1.0: 期制リーグの入替戦（隣接ディビジョンの組ごとに 1 試合。期制リーグの大会にだけ作る）
 });
 
 var RULE_FORMAT = Object.freeze({
@@ -122,6 +133,7 @@ var STAGE_TYPE_LABEL = Object.freeze({
   double_elimination: 'ダブルエリミネーション',
   swiss: 'スイス式',
   series: 'ポイントシリーズ',
+  promotion: '入替戦',
 });
 
 /**
@@ -189,6 +201,7 @@ var SCHEMA = Object.freeze({
       ['rev', 'int'],
       ['created_at', 'text'],
       ['updated_at', 'text'],
+      ['member_id', 'text', 4], // v1.0: 期制リーグの会員 ID（LeagueMembers。期をまたいで同じ人を指す。名前では対応付けない）。期制リーグでない大会は空欄
     ],
   },
   Stages: {
@@ -308,6 +321,52 @@ var SCHEMA = Object.freeze({
       ['link_json', 'text', 3], // v0.9: 紐付けた時のメールアドレス・方法、確認待ちのログイン
     ],
   },
+  // v1.0: 期制リーグ（複数の期の大会をたどるための系列）。権限は各期の大会（主催者・管理者）で判定する
+  Leagues: {
+    key: 'league_id',
+    since: 4,
+    columns: [
+      ['league_id', 'text'],
+      ['name', 'text'],
+      ['config_json', 'text'], // ディビジョン数の境目・目標人数・定員・総当たりの回数・勝ち点・ルール（04g_season.js の leagueConfig_）
+      ['rev', 'int'],
+      ['created_at', 'text'],
+      ['updated_at', 'text'],
+    ],
+  },
+  // v1.0: 期制リーグの各期（大会）。2 期目以降は、確定した配置（前期の所属・順位・昇降格・入替戦・手動の修正）を plan_json に残す
+  LeagueSeasons: {
+    key: 'season_key',
+    since: 4,
+    columns: [
+      ['season_key', 'text'],
+      ['league_id', 'text'],
+      ['season_no', 'int'],
+      ['event_id', 'text'],
+      ['prev_event_id', 'text'],
+      ['plan_json', 'text'],
+      ['confirmed_at', 'text'],
+      ['confirmed_by', 'text'],
+      ['rev', 'int'],
+      ['created_at', 'text'],
+      ['updated_at', 'text'],
+    ],
+  },
+  // v1.0: 期制リーグの会員（期をまたぐ選手の ID）。表示名は最新の期の選手名に合わせる（名前の履歴は meta_json）
+  LeagueMembers: {
+    key: 'member_id',
+    since: 4,
+    columns: [
+      ['member_id', 'text'],
+      ['league_id', 'text'],
+      ['display_name', 'text'],
+      ['status', 'text'], // active = 参加中 / left = 脱退（次期に入れない。再参加で active に戻す）
+      ['meta_json', 'text'], // 参加した期・脱退した期・名前の履歴
+      ['rev', 'int'],
+      ['created_at', 'text'],
+      ['updated_at', 'text'],
+    ],
+  },
   PublicSnapshots: {
     key: 'event_id',
     columns: [
@@ -342,4 +401,7 @@ var SHEET_ORDER = Object.freeze([
   'History',
   'PublicSnapshots',
   'Collaborators',
+  'Leagues',
+  'LeagueSeasons',
+  'LeagueMembers',
 ]);
