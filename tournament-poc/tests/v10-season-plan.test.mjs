@@ -118,3 +118,68 @@ test('配置の根拠: 名前を変えても変わらず、順位・入替戦の
   assert.notEqual(basis(a, []), basis(swapped, []));
   assert.notEqual(basis(a, [{ upper: 1, upperKey: 'x', lowerKey: 'y', state: 'final', winnerKey: 'x' }]), basis(a, [{ upper: 1, upperKey: 'x', lowerKey: 'y', state: 'final', winnerKey: 'y' }]));
 });
+
+/* ---------- 欠員の補充（ディビジョン数が前期と同じとき） ---------- */
+
+const leaveOf = (pl) => Object.fromEntries(pl.rows.filter((r) => r.movement !== 'leave').map((r) => [r.key, r.newDivision]));
+const upperWins = (upper, upperKey, lowerKey) => ({ upper, lower: upper + 1, upperKey, lowerKey, state: 'final', winnerKey: upperKey });
+
+test('欠員: 上の部の欠員は、下の部に残った選手の順位の順（入替戦に負けた 2 位 → 3 位 …）で繰り上げる。自動降格・自動昇格は人数の調整で取り消さない', () => {
+  const divisions = [division(1, '1部', keys('a', 6)), division(2, '2部', keys('b', 6))];
+  const playoffs = [upperWins(1, 'a5', 'b2')];
+  const base = { seasonNo: 2, config: cfg({ thresholds: [8] }), divisions, playoffs };
+  // 欠員なし: 前期と同じ 6・6
+  let pl = plan({ ...base, edits: {} });
+  assert.deepEqual(pl.problems, []);
+  assert.deepEqual(pl.divisions.map((d) => d.members), [['a1', 'a2', 'a3', 'a4', 'a5', 'b1'], ['a6', 'b2', 'b3', 'b4', 'b5', 'b6']]);
+  // 1 部から 1 人抜ける → 2 部 2 位（入替戦の敗者）が繰り上がる。a6 は降格のまま
+  pl = plan({ ...base, edits: { leave: ['a3'] } });
+  let at = leaveOf(pl);
+  assert.equal(at.b2, 1);
+  assert.equal(at.a6, 2);
+  assert.deepEqual(pl.divisions.map((d) => d.size), [6, 5]);
+  assert.match(pl.rows.find((r) => r.key === 'b2').reasons.join(), /欠員の補充（1部 は前期と同じ 6 人）のため 1部 へ繰り上げ/);
+  // 1 部から 3 人抜ける → b2・b3・b4
+  pl = plan({ ...base, edits: { leave: ['a1', 'a2', 'a3'] } });
+  at = leaveOf(pl);
+  assert.deepEqual(['b2', 'b3', 'b4', 'b5', 'a6'].map((k) => at[k]), [1, 1, 1, 2, 2]);
+  // 2 部から抜けても、1 部の人数（と自動昇格の b1）は変わらない
+  pl = plan({ ...base, edits: { leave: ['b4'] } });
+  at = leaveOf(pl);
+  assert.equal(at.b1, 1);
+  assert.deepEqual(pl.divisions.map((d) => d.size), [6, 5]);
+  assert.deepEqual(pl.problems, []);
+  // 新規参加は最下位（欠員の補充には使わない。下の部の選手が先）
+  pl = plan({ ...base, edits: { leave: ['a3'], join: [{ key: 'new:1', name: '新人' }] } });
+  at = leaveOf(pl);
+  assert.equal(at.b2, 1);
+  assert.equal(at['new:1'], 2);
+});
+
+test('欠員: 3 部制では上から順に補充する（1 部の欠員を 2 部の次点で埋め、2 部の欠員を 3 部の次点で埋める）', () => {
+  const divisions = [division(1, '1部', keys('a', 5)), division(2, '2部', keys('b', 5)), division(3, '3部', keys('c', 5))];
+  const playoffs = [upperWins(1, 'a4', 'b2'), upperWins(2, 'b4', 'c2')];
+  const pl = plan({ seasonNo: 2, config: cfg({ thresholds: [6, 12] }), divisions, playoffs, edits: { leave: ['a1'] } });
+  assert.deepEqual(pl.problems, []);
+  const at = leaveOf(pl);
+  // 1 部: a2 a3 a4 + 自動昇格 b1 + 欠員の補充 b2（入替戦の敗者で 2 部に残った選手の最上位）
+  assert.deepEqual(pl.divisions.map((d) => d.members), [['a2', 'a3', 'a4', 'b1', 'b2'], ['a5', 'b3', 'b4', 'c1', 'c2'], ['b5', 'c3', 'c4', 'c5']]);
+  assert.equal(at.a5, 2, '自動降格はそのまま');
+  assert.equal(at.c2, 2, '2 部の欠員は 3 部に残った選手の最上位（c2）で埋める');
+  assert.equal(at.b5, 3);
+});
+
+test('欠員: 繰り上げの対象が同順位の塊の途中で切れるときは問題（名前順で決めない）。目標人数を減らしたときは残留した選手の下位から下げる', () => {
+  const divisions = [division(1, '1部', keys('a', 6)), division(2, '2部', keys('b', 6), { ties: [[3, 2]] })];
+  const playoffs = [upperWins(1, 'a5', 'b2')];
+  let pl = plan({ seasonNo: 2, config: cfg({ thresholds: [8] }), divisions, playoffs, edits: { leave: ['a1', 'a2'] } });
+  assert.match(pl.problems.join(), /2部 の 3位の同順位が、1部 への繰り上げの対象にかかります/);
+  pl = plan({ seasonNo: 2, config: cfg({ thresholds: [8] }), divisions, playoffs, edits: { leave: ['a1', 'a2', 'a3'] } });
+  assert.deepEqual(pl.problems, [], '同順位の 2 人とも繰り上がるなら問題にしない');
+  // 目標人数を 5 にすると、1 部に残留した選手の最下位（入替戦に勝った a5）が下がる。自動昇格の b1 は下げない
+  pl = plan({ seasonNo: 2, config: cfg({ thresholds: [8], targets: [5] }), divisions: [division(1, '1部', keys('a', 6)), division(2, '2部', keys('b', 6))], playoffs, edits: {} });
+  const at = leaveOf(pl);
+  assert.equal(at.b1, 1);
+  assert.equal(at.a5, 2);
+  assert.match(pl.rows.find((r) => r.key === 'a5').reasons.join(), /人数調整（1部 は目標人数 5 人）のため 2部 へ繰り下げ/);
+});

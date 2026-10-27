@@ -4033,14 +4033,14 @@
     function seasonRuleFields(prefix, cfg) {
       var c = cfg || {};
       var thresholds = el('input', { className: 'input', id: prefix + '-thresholds', value: listText(c.thresholds), placeholder: '例: 12, 30（12 人以上で 2 部制、30 人以上で 3 部制）', inputmode: 'numeric' });
-      var targets = el('input', { className: 'input', id: prefix + '-targets', value: listText(c.targets), placeholder: '例: 10, 12（1 部 10 人・2 部 12 人。空欄 = 均等）' });
+      var targets = el('input', { className: 'input', id: prefix + '-targets', value: listText(c.targets), placeholder: '例: 10, 12（1 部 10 人・2 部 12 人。空欄 = 前期と同じ人数）' });
       var capacities = el('input', { className: 'input', id: prefix + '-capacities', value: listText(c.capacities), placeholder: '例: 12, 14, 16（空欄 = 定員なし）' });
       return {
         nodes: [
           field('ディビジョン数の境目（2 部制・3 部制…にする人数を、小さい順にカンマ区切り。空欄なら人数によらず 1 ディビジョン）', thresholds),
-          field('各部の目標人数（1 部・2 部…の順。最下位の部は残りの人数。空欄の部は均等に分けます）', targets),
+          field('各部の目標人数（1 部・2 部…の順。最下位の部は残りの人数。空欄の部は前期と同じ人数を保ち、ディビジョン数が変わるときは均等に分けます）', targets),
           field('各部の定員（1 部・2 部…の順。超える配置は確定できません）', capacities),
-          el('p', { className: 'muted small', text: 'アプリは境目の人数を決めません。主催者が決めた境目と目標人数・定員だけで、次期のディビジョン数と人数を計算します。中間のディビジョンは 4 人以上、最上位・最下位は 2 人以上が必要です（昇格・降格・入替戦の対象が重ならないように）。' }),
+          el('p', { className: 'muted small', text: 'アプリは境目の人数を決めません。主催者が決めた境目と目標人数・定員だけで、次期のディビジョン数と人数を計算します。中間のディビジョンは 4 人以上、最上位・最下位は 2 人以上が必要です（昇格・降格・入替戦の対象が重ならないように）。上の部に欠員が出たら、下の部に残った選手の順位の順（入替戦に負けた 2 位 → 3 位 …）で繰り上げます。自動降格・自動昇格は欠員では取り消しません。' }),
         ],
         value: function () {
           return { thresholds: parseNumberList(thresholds.value), targets: parseNumberList(targets.value, true), capacities: parseNumberList(capacities.value, true) };

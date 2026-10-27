@@ -326,15 +326,27 @@ test('人数の増減: 増えて境目を超えれば増設、減れば統合。
   assert.equal(pv.divisionCount, 1);
   assert.ok(pv.rows.filter((r) => r.movement !== 'leave').every((r) => r.reasons.join().includes('ディビジョン統合')), JSON.stringify(pv.rows.map((r) => r.reasons)));
   assert.equal(pv.rows.filter((r) => r.movement === 'leave').length, 5);
-  // 欠員の繰り上げ: 1 部から 2 人抜けると、2 部の上位が 1 部へ（目標人数 6）
-  const d2 = p.ok('eventDetail', { eventId: id2 });
-  p.ok('updateLeagueSettings', { eventId: id2, rev: d2.season.league.rev, targets: [6] });
+  // 欠員の繰り上げ: 1 部から 2 人抜けると、2 部に残った選手の上位（入替戦に負けた 2 位 → 3 位）が 1 部へ。
+  // 自動降格の選手は欠員では残留させない。目標人数がなければ前期と同じ人数（6 人）を保つ
   const leave2 = prevRows.filter((r) => ['選手01', '選手02'].includes(r.name)).map((r) => r.key);
   pv = p.ok('previewNextSeason', { eventId: id2, edits: { leave: leave2 } });
   assert.equal(pv.divisionCount, 2);
-  const r2 = rowsByName(pv);
-  assert.equal(r2['選手06'].newDivision, 1, '自動降格の選手が欠員で繰り上がる');
-  assert.match(r2['選手06'].reasons.join(), /人数調整（目標人数・欠員）のため 1部 へ繰り上げ/);
+  assert.deepEqual(pv.divisions.map((x) => x.size), [6, 4]);
+  let r2 = rowsByName(pv);
+  assert.equal(r2['選手06'].newDivision, 2, '自動降格はそのまま');
+  assert.equal(r2['選手07'].newDivision, 1, '自動昇格はそのまま');
+  assert.equal(r2['選手08'].newDivision, 1, '入替戦に負けた 2 部 2 位が最初に繰り上がる');
+  assert.equal(r2['選手09'].newDivision, 1, '次は 2 部 3 位');
+  assert.match(r2['選手08'].reasons.join(), /欠員の補充（1部 は前期と同じ 6 人）のため 1部 へ繰り上げ/);
+  // 目標人数を決めていれば、その人数を保つ
+  const d2 = p.ok('eventDetail', { eventId: id2 });
+  p.ok('updateLeagueSettings', { eventId: id2, rev: d2.season.league.rev, targets: [5] });
+  pv = p.ok('previewNextSeason', { eventId: id2, edits: { leave: leave2 } });
+  assert.deepEqual(pv.divisions.map((x) => x.size), [5, 5]);
+  r2 = rowsByName(pv);
+  assert.equal(r2['選手08'].newDivision, 1);
+  assert.equal(r2['選手09'].newDivision, 2);
+  assert.match(r2['選手08'].reasons.join(), /欠員の補充（1部 は目標人数 5 人）のため 1部 へ繰り上げ/);
 });
 
 test('参加・脱退・再参加: 会員 ID は名前に依らず、脱退した人を後の期で復帰させても同じ ID。表示名の変更・同姓同名も扱える', () => {

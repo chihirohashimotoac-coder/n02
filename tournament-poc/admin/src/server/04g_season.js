@@ -24,7 +24,7 @@ function leagueConfig_(league) {
     thresholds: ints(c.thresholds, 2, 9999).filter(function (v) {
       return v !== null;
     }),
-    // targets[k - 1] = k 部の目標人数（空欄 = 残りを均等に分ける。最下位は常に残りの人数）
+    // targets[k - 1] = k 部の目標人数（空欄 = ディビジョン数が前期と同じなら前期と同じ人数、変わるときは残りを均等に分ける。最下位は常に残りの人数）
     targets: ints(c.targets, 2, 999),
     // capacities[k - 1] = k 部の定員（空欄 = なし）
     capacities: ints(c.capacities, 2, 999),
@@ -165,6 +165,94 @@ function seasonRoles_(divisions) {
     }
   }
   return { roles: roles, problems: problems, playoffs: playoffs };
+}
+
+/** 並べ替えの鍵（配列）を前から比べる */
+function compareKeys_(a, b) {
+  for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  return 0;
+}
+
+/**
+ * ディビジョン数が前期と同じときの所属。成績で決まった所属（昇降格・入替戦の結果）を基準に、上の部から順に人数を合わせる。
+ * - 目標人数がない部（最下位を除く）は前期と同じ人数を保つ。最下位の部は残り（不参加・新規参加による増減を受け持つ）
+ * - 人数が足りない部は、すぐ下の部から繰り上げる。順番は、下の部に残った選手の順位の順（入替戦に負けた 2 位 → 3 位 …）
+ *   → さらに下の部から上がってきた選手 → 上の部から降格した選手（最後の手段）→ 新規参加・復帰。成績による降格は欠員では取り消さない
+ * - 人数が多すぎる部（目標人数を減らしたときなど）は、その部に残った選手の下位から下げる（成績で上がった・降りてきた選手は後）
+ * - 繰り上げ・繰り下げが同順位の塊の途中で切れるときは問題にする（名前順などで決めない）
+ * entries = [{ key, base, from（前期の部。新規は null）, fromName, rank, tied, joined }]
+ * 戻り値: { auto: { key: 部 }, sizes, source: ['target' | 'previous' | 'rest'], problems }
+ */
+function seasonFillDivisions_(d, entries, targets, prevSizes) {
+  var sizes = [];
+  var source = [];
+  var sum = 0;
+  for (var k = 1; k < d; k++) {
+    var t = targets[k - 1];
+    sizes.push(t || prevSizes[k - 1]);
+    source.push(t ? 'target' : 'previous');
+    sum += sizes[k - 1];
+  }
+  sizes.push(Math.max(0, entries.length - sum));
+  source.push('rest');
+  var cur = {};
+  entries.forEach(function (e) {
+    cur[e.key] = e.joined ? d : e.base;
+  });
+  var inDiv = function (k) {
+    return entries.filter(function (e) {
+      return cur[e.key] === k;
+    });
+  };
+  // 小さいほど先に動かす
+  var fillKey = function (e, k) {
+    if (e.joined) return [3, 0, 0];
+    if (e.from === k + 1) return [0, 0, e.rank];
+    if (e.from > k + 1) return [1, e.from, e.rank];
+    return [2, e.from, e.rank];
+  };
+  var pushKey = function (e, k) {
+    if (e.joined) return [0, 0, 0];
+    if (e.from === k) return [1, 0, -e.rank];
+    if (e.from < k) return [2, -e.from, -e.rank];
+    return [3, -e.from, -e.rank];
+  };
+  var problems = [];
+  var tieCheck = function (moved, stayed, word, k) {
+    moved.forEach(function (e) {
+      if (!e.tied) return;
+      var split = stayed.some(function (x) {
+        return x.tied && x.from === e.from && x.rank === e.rank;
+      });
+      if (split) problems.push(e.fromName + ' の ' + e.rank + '位の同順位が、' + seasonDivisionName_(k, d) + ' への' + word + 'の対象にかかります。この期の大会の「組み合わせ」タブで順位を手動で決めてください。');
+    });
+  };
+  var pick = function (list, keyFn, k) {
+    return list.slice().sort(function (a, b) {
+      return compareKeys_(keyFn(a, k), keyFn(b, k));
+    })[0];
+  };
+  for (k = 1; k < d; k++) {
+    var moved = [];
+    while (inDiv(k).length < sizes[k - 1]) {
+      var below = inDiv(k + 1);
+      if (!below.length) break;
+      var up = pick(below, fillKey, k);
+      cur[up.key] = k;
+      moved.push(up);
+    }
+    tieCheck(moved, inDiv(k + 1), '繰り上げ', k);
+    moved = [];
+    while (inDiv(k).length > sizes[k - 1]) {
+      var down = pick(inDiv(k), pushKey, k);
+      cur[down.key] = k + 1;
+      moved.push(down);
+    }
+    tieCheck(moved, inDiv(k), '繰り下げ', k + 1);
+  }
+  var actual = [];
+  for (k = 1; k <= d; k++) actual.push(inDiv(k).length);
+  return { auto: cur, sizes: sizes, actual: actual, source: source, problems: problems };
 }
 
 /**
@@ -328,27 +416,55 @@ function planSeasonPlacement_(input) {
 
   var n = ladder.length;
   var nd = seasonDivisionCount_(n, cfg.thresholds);
-  var sz = seasonDivisionSizes_(n, nd, cfg.targets);
-  problems = problems.concat(sz.problems);
-  var sizes = sz.sizes.length ? sz.sizes : [n];
-  if (!sz.sizes.length) nd = 1;
   var auto = {};
-  var start = 0;
   var bands = [];
-  sizes.forEach(function (size, i) {
-    for (var p = start; p < start + size; p++) auto[ladder[p].key] = i + 1;
-    bands.push({ index: i + 1, from: start + 1, to: start + size });
-    if (i > 0) {
-      var a = ladder[start - 1];
-      var c = ladder[start];
-      if (a && c && a.tie === c.tie && !a.joined) {
-        var row = rowOf[c.key];
-        var role = r.roles[c.key];
-        problems.push(divisions[role.division - 1].name + ' の ' + row.rank + '位の同順位が、次期の ' + seasonDivisionName_(i, nd) + ' と ' + seasonDivisionName_(i + 1, nd) + ' の境目にかかります。この期の大会の「組み合わせ」タブで順位を手動で決めてください。');
+  var sizes;
+  var fill = null;
+  if (d > 1 && nd === d) {
+    // ディビジョン数が前期と同じ: 成績で決まった所属を基準に、欠員は下の部の次点から埋める（seasonFillDivisions_）
+    var entries = ladder.map(function (x) {
+      var role = r.roles[x.key];
+      var row = rowOf[x.key];
+      return { key: x.key, base: base[x.key], from: role ? role.division : null, fromName: role ? divisions[role.division - 1].name : '', rank: row ? row.rank : 0, tied: !!(row && row.tied), joined: !!x.joined };
+    });
+    fill = seasonFillDivisions_(d, entries, cfg.targets, divisions.map(function (div) {
+      return div.rows.length;
+    }));
+    problems = problems.concat(fill.problems);
+    auto = fill.auto;
+    sizes = fill.actual;
+    // 表示の並び: 新しい部ごとに、前期の上の部の選手から順位の順（新規参加・復帰は最後）
+    var order = {};
+    ladder.forEach(function (x, i) {
+      order[x.key] = i;
+    });
+    var sorted = entries.slice().sort(function (a, b) {
+      return compareKeys_([auto[a.key], a.joined ? 1 : 0, a.from || 0, a.rank, order[a.key]], [auto[b.key], b.joined ? 1 : 0, b.from || 0, b.rank, order[b.key]]);
+    });
+    ladder = sorted.map(function (e) {
+      return { key: e.key, tie: e.key, joined: e.joined };
+    });
+  } else {
+    var sz = seasonDivisionSizes_(n, nd, cfg.targets);
+    problems = problems.concat(sz.problems);
+    sizes = sz.sizes.length ? sz.sizes : [n];
+    if (!sz.sizes.length) nd = 1;
+    var start = 0;
+    sizes.forEach(function (size, i) {
+      for (var p = start; p < start + size; p++) auto[ladder[p].key] = i + 1;
+      bands.push({ index: i + 1, from: start + 1, to: start + size });
+      if (i > 0) {
+        var a = ladder[start - 1];
+        var c = ladder[start];
+        if (a && c && a.tie === c.tie && !a.joined) {
+          var row = rowOf[c.key];
+          var role = r.roles[c.key];
+          problems.push(divisions[role.division - 1].name + ' の ' + row.rank + '位の同順位が、次期の ' + seasonDivisionName_(i, nd) + ' と ' + seasonDivisionName_(i + 1, nd) + ' の境目にかかります。この期の大会の「組み合わせ」タブで順位を手動で決めてください。');
+        }
       }
-    }
-    start += size;
-  });
+      start += size;
+    });
+  }
 
   // 行（理由つき）
   var rows = [];
@@ -356,6 +472,13 @@ function planSeasonPlacement_(input) {
   var reasonOfChange = function (key, autoDiv, baseDiv) {
     if (nd > d) return 'ディビジョン増設（次期 ' + n + ' 人 → ' + nd + ' 部制）により ' + seasonDivisionName_(autoDiv, nd);
     if (nd < d) return 'ディビジョン統合（次期 ' + n + ' 人 → ' + nd + ' 部制）により ' + seasonDivisionName_(autoDiv, nd);
+    if (fill) {
+      // 人数を合わせた部（繰り上げなら移った先、繰り下げなら元の部）
+      var k = autoDiv < baseDiv ? autoDiv : baseDiv;
+      var how = fill.source[k - 1] === 'target' ? '目標人数 ' + fill.sizes[k - 1] + ' 人' : '前期と同じ ' + fill.sizes[k - 1] + ' 人';
+      if (autoDiv < baseDiv) return '欠員の補充（' + seasonDivisionName_(k, nd) + ' は' + how + '）のため ' + seasonDivisionName_(autoDiv, nd) + ' へ繰り上げ';
+      return '人数調整（' + seasonDivisionName_(k, nd) + ' は' + how + '）のため ' + seasonDivisionName_(autoDiv, nd) + ' へ繰り下げ';
+    }
     if (autoDiv < baseDiv) return '人数調整（目標人数・欠員）のため ' + seasonDivisionName_(autoDiv, nd) + ' へ繰り上げ';
     return '人数調整（目標人数・欠員）のため ' + seasonDivisionName_(autoDiv, nd) + ' へ繰り下げ';
   };
@@ -407,10 +530,9 @@ function planSeasonPlacement_(input) {
         else if (nd !== d) out.reasons.push((nd > d ? 'ディビジョン増設' : 'ディビジョン統合') + '（次期 ' + n + ' 人 → ' + nd + ' 部制）・' + seasonDivisionName_(auto[key], nd) + 'のまま');
       }
       if (row.withdrawn) warnings.push(row.name + ' は' + label + 'を' + (row.withdrawn.kind === 'disqualified' ? '失格' : '棄権') + 'しています。次期に参加するか確かめてください（参加しないなら「不参加」）。');
-    } else if (kinds[key] === 'new') {
-      out.reasons.push('新規参加のため最下位の ' + seasonDivisionName_(auto[key], nd) + '（変える場合は手動で）');
-    } else if (kinds[key] === 'return') {
-      out.reasons.push('復帰（前期は不参加）のため最下位の ' + seasonDivisionName_(auto[key], nd) + '（変える場合は手動で）');
+    } else if (kinds[key]) {
+      out.reasons.push((kinds[key] === 'new' ? '新規参加' : '復帰（前期は不参加）') + 'のため最下位の ' + seasonDivisionName_(nd, nd) + '（変える場合は手動で）');
+      if (auto[key] !== nd) out.reasons.push(reasonOfChange(key, auto[key], nd));
     }
     var mv = moves[key];
     if (mv) {
