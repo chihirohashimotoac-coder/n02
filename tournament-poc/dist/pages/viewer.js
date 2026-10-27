@@ -273,7 +273,22 @@
     return legs === null || legs === undefined ? '–' : String(legs);
   }
 
-  var STAGE_TYPE_LABEL = { round_robin: '総当たり', league: 'リーグ', single_elimination: 'トーナメント', double_elimination: 'ダブルエリミネーション', swiss: 'スイス式', series: 'ポイントシリーズ' };
+  var STAGE_TYPE_LABEL = { round_robin: '総当たり', league: 'リーグ', single_elimination: 'トーナメント', double_elimination: 'ダブルエリミネーション', swiss: 'スイス式', series: 'ポイントシリーズ', promotion: '入替戦' };
+  // v1.0: 期制リーグの昇降格（順位表の帯と、次期を確定した後の結果）
+  var ZONE_LABEL = { promote: '昇格圏', playoff: '入替戦', relegate: '降格圏' };
+  var MOVE_LABEL = {
+    rank: '',
+    stay: '残留',
+    auto_promote: '自動昇格',
+    auto_relegate: '自動降格',
+    playoff_win_promote: '入替戦で昇格',
+    playoff_win_stay: '入替戦で残留',
+    playoff_lose_relegate: '入替戦で降格',
+    playoff_lose_stay: '入替戦で残留',
+    leave: '次期は不参加',
+  };
+  /** 描画中の大会の期制リーグの情報（renderEvent が設定する） */
+  var seasonInfo = null;
   var TIEBREAKER_LABEL = { wins: '勝数', leg_diff: 'Leg 差', legs_for: '得 Leg', set_diff: 'セット差', sets_for: '得セット', head_to_head: '直接対決', points: '勝ち点', buchholz: 'Buchholz（対戦相手の勝ち点の合計。不戦は 0）', night_wins: '節優勝回数' };
 
   /** 予定の 1 行（日付・時刻・ボード・延期） */
@@ -392,6 +407,17 @@
     if (buchholz) heads.push(el('th', { scope: 'col', text: 'Buchholz' }));
     if (sets) heads.push(el('th', { scope: 'col', text: 'セット 得-失' }));
     heads.push(el('th', { scope: 'col', text: 'Leg 得-失' }));
+    // v1.0: 期制リーグの昇降格（次期を確定した後は結果、確定前は規則で決まる帯）
+    var outcome = {};
+    if (seasonInfo && seasonInfo.next && seasonInfo.next.outcome) {
+      seasonInfo.next.outcome.forEach(function (o) {
+        outcome[o.playerId] = o;
+      });
+    }
+    var zoneCol = standings.some(function (s) {
+      return s.zone || outcome[s.playerId];
+    });
+    if (zoneCol) heads.push(el('th', { scope: 'col', text: Object.keys(outcome).length ? '次期' : '昇降格' }));
     var rows = standings.map(function (s) {
       var cells = [];
       // 確定試合がないうちは全員同順位になるので、順位は出さない
@@ -402,7 +428,12 @@
       if (buchholz) cells.push(el('td', { text: String(s.buchholz) }));
       if (sets) cells.push(el('td', { text: (s.setsFor || 0) + '-' + (s.setsAgainst || 0) }));
       cells.push(el('td', { text: s.legsFor + '-' + s.legsAgainst }));
-      return el('tr', null, cells);
+      if (zoneCol) {
+        var o = outcome[s.playerId];
+        if (o) cells.push(el('td', { className: 'zone zone--' + o.kind, text: [MOVE_LABEL[o.kind] || '', o.to ? '→ ' + o.to : ''].filter(Boolean).join(' ') }));
+        else cells.push(el('td', { className: s.zone ? 'zone zone--' + s.zone : 'zone', text: s.zone ? ZONE_LABEL[s.zone] || '' : '' }));
+      }
+      return el('tr', { className: s.zone ? 'is-zone-' + s.zone : null }, cells);
     });
     var p = g.progress;
     return el('section', { className: 'group', id: 'group-' + g.id, 'aria-labelledby': 'group-title-' + g.id }, [
@@ -652,7 +683,8 @@
       return e.startRound > 1;
     });
     if (late.length) notes.push('シード ' + late.map(function (e) { return e.name + '（' + e.startRound + ' 回戦から）'; }).join('、') + ' は途中の回戦から出場します。');
-    var body = stage.type === 'series' ? renderSeries(stage) : stage.type === 'double_elimination' ? renderDoubleElimination(stage) : stage.groups ? renderGroupStage(stage, groupFilter) : renderBracket(stage);
+    if (stage.type === 'promotion') notes.push('上位の部の下から 2 位と下位の部の 2 位の入替戦です。上位の部の選手が勝てば両者とも残留、下位の部の選手が勝てば入れ替わります。');
+    var body = stage.type === 'series' ? renderSeries(stage) : stage.type === 'double_elimination' ? renderDoubleElimination(stage) : stage.type === 'promotion' ? renderPromotion(stage) : stage.groups ? renderGroupStage(stage, groupFilter) : renderBracket(stage);
     return el('section', { className: 'stage stage--' + stage.type, id: 'stage-' + stage.id, 'aria-labelledby': 'stage-title-' + stage.id }, [
       stage.name
         ? el('header', { className: 'stage__head' }, [
@@ -864,6 +896,58 @@
     });
   }
 
+  /** v1.0: 期制リーグの入替戦（隣接するディビジョンの組ごとに 1 試合） */
+  function renderPromotion(stage) {
+    var pairs = stage.pairs || [];
+    if (!pairs.length) return el('p', { className: 'empty', text: '入替戦はまだ組まれていません。' });
+    return el(
+      'div',
+      { className: 'promotion' },
+      pairs.map(function (pair) {
+        return el('section', { className: 'group promotion__pair', id: 'group-' + pair.id }, [
+          el('header', { className: 'group__head' }, [
+            el('h3', { className: 'group__title', text: pair.name }),
+            el('span', { className: 'group__progress', text: pair.players.map(function (x) { return x.source; }).filter(Boolean).join(' vs ') }),
+          ]),
+          pair.match ? el('ol', { className: 'matches', 'aria-label': pair.name }, [renderMatch(pair.match)]) : el('p', { className: 'empty', text: 'まだ組まれていません。' }),
+        ]);
+      })
+    );
+  }
+
+  /** v1.0: 期制リーグの期の一覧（公開中の期だけリンク）と、次期を確定した後の案内 */
+  function renderSeasonNav(box, data, loc) {
+    if (!box) return;
+    box.textContent = '';
+    var s = data && data.event && data.event.season;
+    box.hidden = !s;
+    if (!s) return;
+    var href = function (id) {
+      var base = loc && /^https?:$/.test(loc.protocol) ? loc.pathname : '';
+      return base + '?event=' + encodeURIComponent(id);
+    };
+    box.appendChild(el('p', { className: 'season-nav__title', text: '期制リーグ「' + s.league + '」 第' + s.no + '期' }));
+    box.appendChild(
+      el(
+        'ol',
+        { className: 'season-nav__list' },
+        s.seasons.map(function (x) {
+          if (x.current) return el('li', { className: 'is-current', 'aria-current': 'page', text: '第' + x.no + '期' });
+          if (x.eventId) return el('li', null, [el('a', { href: href(x.eventId), text: '第' + x.no + '期' })]);
+          return el('li', { className: 'is-private', text: '第' + x.no + '期（非公開）' });
+        })
+      )
+    );
+    if (s.next) {
+      box.appendChild(
+        el('p', { className: 'season-nav__next' }, [
+          '第' + s.next.no + '期の所属が確定しました（順位表の「次期」の列）。',
+          s.next.eventId ? el('a', { href: href(s.next.eventId), text: '第' + s.next.no + '期を見る' }) : null,
+        ])
+      );
+    }
+  }
+
   function legacyStage(data) {
     return { id: 'main', name: '', type: 'round_robin', groups: data.groups || [], progress: data.progress, rule: data.rule };
   }
@@ -875,6 +959,7 @@
   function renderEvent(root, data, filter) {
     var f = typeof filter === 'string' ? { stage: 'all', group: filter } : filter || {};
     var stages = eventStages(data);
+    seasonInfo = data.event && data.event.season ? data.event.season : null;
     // 自動更新で描き直しても、トーナメント表の横スクロールの位置を保つ
     var scrolled = {};
     Array.prototype.forEach.call(root.querySelectorAll ? root.querySelectorAll('.bracket__scroll') : [], function (sc) {
@@ -1054,6 +1139,7 @@
       ui.rule.textContent = ruleText(rule);
       ui.updated.textContent = formatTime(d.dataUpdatedAt);
       renderNotice(d);
+      renderSeasonNav($('season-nav'), d, win.location);
       renderQr(d);
       renderFilter();
       renderEvent(ui.groups, d, view.filter);
@@ -1340,6 +1426,7 @@
     withParts: withParts,
     createPoller: createPoller,
     renderEvent: renderEvent,
+    renderSeasonNav: renderSeasonNav,
     bracketLayout: bracketLayout,
     refreshPlan: refreshPlan,
     allMatchesFinal: allMatchesFinal,

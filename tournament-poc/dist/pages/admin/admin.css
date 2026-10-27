@@ -271,6 +271,14 @@ h4 { margin: 8px 0 4px; font-size: 15px; }
 .schedule-table td { white-space: nowrap; }
 .schedule-table td:nth-child(4) { white-space: normal; min-width: 12em; }
 
+/* v1.0: 期制リーグ（期・昇降格タブ） */
+.season-list li { margin: 2px 0; }
+.season-plan td, .season-plan th { vertical-align: top; }
+.season-plan td.small { min-width: 14em; }
+.season-plan__name { margin-top: 4px; max-width: 12em; }
+.table tr.is-muted th, .table tr.is-muted td { color: var(--ink-2); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
 /* v0.8: 印刷（F03）。印刷するのは #print-root だけ。ボタン・メニューは出さない */
 .print-root { display: none; }
 @page { size: A4 portrait; margin: 12mm; }

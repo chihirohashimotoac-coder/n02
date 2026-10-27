@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setupPair, ROOT } from './gas-mock.mjs';
 
@@ -13,7 +13,6 @@ vm.runInContext(readFileSync(join(ROOT, 'viewer/src/client/viewer.js'), 'utf8'),
 const { hydrateParts } = viewerCtx.TPViewer;
 
 const people = (n) => Array.from({ length: n }, (_, i) => ({ name: 'リーグ選手' + String(i + 1).padStart(3, '0') }));
-const results = [];
 
 function ms(t0) {
   return Date.now() - t0;
@@ -113,7 +112,6 @@ function run(cycles) {
   assert.equal(p.viewer.run('getPublicSnapshot', { eventId: id, knownVersion: after.version }).notModified, true);
   const cells = p.store.get().sheets.reduce((sum, s) => sum + s.getLastRow() * s.getLastColumn(), 0);
   m.sheetCells = cells;
-  results.push(m);
   return m;
 }
 
@@ -127,11 +125,4 @@ test('50 人・2 回総当たり（2,450 試合）: 生成・結果・順位・�
   const m = run(2);
   assert.equal(m.created, 2450);
   console.log('# 50 人・2 回総当たり: ' + JSON.stringify(m));
-  // 計測値をファイルに残す（docs の報告の元。リポジトリには入れない）
-  try {
-    mkdirSync(join(ROOT, 'test-results'), { recursive: true });
-    writeFileSync(join(ROOT, 'test-results', 'v10-scale.json'), JSON.stringify(results, null, 2));
-  } catch (e) {
-    /* 書けない環境では残さない */
-  }
 });

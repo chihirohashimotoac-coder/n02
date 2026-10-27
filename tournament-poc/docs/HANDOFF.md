@@ -4,6 +4,10 @@
 
 次のセッションは、まずこのファイルと [README.md](../README.md)・[test-plan.md](test-plan.md)・[deploy.md](deploy.md) を読んでから作業してください。
 
+**v1.0.0**（ブランチ `claude/bold-brahmagupta-81np6z`。PR 作成時点で**未マージ・本番未反映**）: 期制リーグ（昇降格・入替戦・次期の作成と訂正の照合）・スキーマ v4（追加のみ）・公開データの分割。
+設計・移行・ロールバック・本番での確認手順・50 人の計測は [v1.0-season-league.md](v1.0-season-league.md)、作業記録は [v1.0-work.md](v1.0-work.md)。
+コードの地図: 配置計算 `04g_season.js`（純関数）、操作 `06c_season.js`、分割 `05_publish.js`、閲覧者用 `00_viewer.js` の part、閲覧ページ `viewer.js` の `hydrateParts`・`withParts`・`roundPicker`、運営画面 `admin.js` の `renderSeason`。
+
 **v0.9.0**（PR [chihirohashimotoac-coder/n02#34](https://github.com/chihirohashimotoac-coder/n02/pull/34)。ユーザーの確認・指示を受けてマージ）: 主催者・共同主催者を Google の `sub` で識別し、スキーマ v3 へ移行、
 ログアウトの成否の表示。設計・移行表・ロールバックの境界・本番での確認手順は [v0.9-identity.md](v0.9-identity.md)。
 マージで自動反映（移行・Google でログイン中の全員の再ログインを含む）。反映の結果と戻すための版番号は Actions「Tournament deploy」の Summary を見ること。

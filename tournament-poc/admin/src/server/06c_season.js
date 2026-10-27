@@ -1143,7 +1143,11 @@ function seasonDetail_(ctx, bundle, view, role) {
   // 入替戦（今の順位から決まる対戦と、組んだ入替戦）
   try {
     var inputs = seasonInputs_(bundle, view);
-    var roles = seasonRoles_(inputs.divisions);
+    // 入替戦の対戦者・同順位の問題は、リーグの全試合が確定してから示す（途中の順位で示すと誤解を招くため）
+    var ready = inputs.divisions.every(function (d) {
+      return d.complete;
+    });
+    var roles = ready ? seasonRoles_(inputs.divisions) : { roles: {}, problems: [], playoffs: [] };
     out.divisions = inputs.divisions.map(function (d) {
       return { index: d.index, name: d.name, size: d.rows.length, complete: d.complete, progress: d.progress };
     });
@@ -1164,9 +1168,7 @@ function seasonDetail_(ctx, bundle, view, role) {
         return { upper: pf.upper, lower: pf.lower, upperName: nameOf(pf.upperKey), lowerName: nameOf(pf.lowerKey), generated: !!got, matches: got ? got.upperKey === pf.upperKey && got.lowerKey === pf.lowerKey : false, state: got ? got.state : 'none', winnerName: got && got.winnerKey ? nameOf(got.winnerKey) : '' };
       }),
       problems: roles.problems,
-      ready: inputs.divisions.every(function (d) {
-        return d.complete;
-      }),
+      ready: ready,
       generated: inputs.playoffs.length,
     };
     var memberOf = memberOfPlayers_(bundle);

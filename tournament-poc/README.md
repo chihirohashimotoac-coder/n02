@@ -9,6 +9,8 @@ n02 から外部リンクで使う「トーナメント・ロビン・リーグ�
 
 > 作業を引き継ぐ場合は、まず [docs/HANDOFF.md](docs/HANDOFF.md) を読んでください。
 
+> v1.0.0（このブランチ。**本番未反映**）: 期制リーグ（1 期目の全員総当たり → 人数に応じたディビジョン → 自動昇降格・入替戦 → 次期の配置のプレビュー・修正・確定 → 前期の訂正の照合）と、試合の多い大会の公開データの分割（50 人の 1 回・2 回総当たりを公開できる）。設計・移行・ロールバック・計測は [docs/v1.0-season-league.md](docs/v1.0-season-league.md)。
+>
 > v0.8.0（2026-10-26 本番反映済み）: 大会形式 10 種・運営機能 F01〜F21・PR プレビュー・main へのマージで本番に反映する仕組み。要点は下の「v0.8.0 で増えたこと」。
 >
 > これまでの確認（v0.6.0 まで）: ローカルの模擬環境（Apps Script のサービスを Node.js で模したもの）の自動テストに加え、
@@ -179,6 +181,19 @@ CSV 取込（F11。確認してから登録）、設定の複製（F12）、毎�
 保存: 操作ごとにまとめて書き込み（検証は書き込み前）、書き込みが途中で止まったことの検出、公開データの大きさは保存前に確認、
 スキーマ v2（列・シートの追加。管理者の鍵で移行。バックアップのシートを作る。何度実行しても安全。閲覧からは起動しない）。
 
+### v1.0.0 で増えたこと（期制リーグ・公開データの分割）
+
+| 項目 | 内容 |
+| --- | --- |
+| 期制リーグ | ホームの「期制リーグ（昇降格・入替戦）を作成」。期ごとに 1 つの大会（結果・順位・閲覧ページの URL を期ごとに持つ）。1 期目は全員の総当たり（1 回・2 回） |
+| ディビジョン数の境目・目標人数・定員 | 主催者が設定（アプリの既定の境目はない。空欄なら 1 ディビジョン）。人数の増減で次期のディビジョン数・配置を計算し、増設・統合・繰り上げの理由を表示 |
+| 昇降格・入替戦 | 下位の部の 1 位は自動昇格・上位の部の最下位は自動降格・上位の下から 2 位 vs 下位の 2 位が入替戦（段階の種類「入替戦」）。人数不足・同順位で規則が成り立たない配置は確定しない |
+| 次期の作成 | 「期・昇降格」タブ: プレビュー → 修正（所属・不参加・復帰・新規参加・表示名。理由必須）→ 確定。二重送信・再試行・古いプレビューでは作らない。主催者・管理者だけ（共同主催者・管理パスワードは引き継がない） |
+| 期をまたぐ ID | 会員 ID（`LeagueMembers`）。名前では対応付けない（表示名の変更・同姓同名・脱退・復帰） |
+| 前期の訂正 | 次期の所属は書き換えず、違いを表示。対戦カードのないディビジョンは反映、試合が始まっていれば記録として承認 |
+| 閲覧ページ | 期の一覧（公開中の期だけリンク）・順位表の昇降格の帯 / 次期の結果・入替戦。試合の多いグループは節を選んで表示 |
+| 公開データの分割 | 40 万文字を超える大会だけ、グループの試合一覧を圧縮して分割行（`EVT-….P01`…）へ。閲覧ページが取り直して元の形に戻す。上限内の大会は今までと同じ出力 |
+
 ### 組める大会形式（v0.4.0）
 
 | 項目 | 設定できる内容 |
@@ -224,7 +239,10 @@ CSV 取込（F11。確認してから登録）、設定の複製（F12）、毎�
 | Entries | entry_id, event_id, stage_id, group_id, player_id, seed, manual_order, source_label | 段階への出場枠。seed はトーナメントのシード、manual_order は手動の順位、source_label は「グループA 1位」などの進出元 |
 | Matches | match_id, event_id, stage_id, group_id, round, order, label, player1/2_id, player1/2_legs, player1/2_sets, status, winner_id, rule_id, next_match_id/slot, loser_next_match_id/slot, external_ref, confirmed_at | next_match_* で勝者、loser_next_match_*（3 位決定戦）で敗者の行き先。external_ref で n02 の試合と対応 |
 | History | history_id, at, actor, action, entity, entity_id, event_id, before_json, after_json | 監査・訂正の追跡 |
-| PublicSnapshots | event_id, is_default, version, published_at, chunk_count, chunk_01〜10 | 閲覧者向けの公開データ（最大 40 万文字） |
+| PublicSnapshots | event_id, is_default, version, published_at, chunk_count, chunk_01〜10 | 閲覧者向けの公開データ（1 行最大 40 万文字）。v1.0 から、上限を超える大会の試合一覧は `EVT-….P01` などの分割行（パート）に入る |
+| Leagues（v1.0） | league_id, name, config_json | 期制リーグ（境目・目標人数・定員・回数・勝ち点・ルール） |
+| LeagueSeasons（v1.0） | season_key, league_id, season_no, event_id, prev_event_id, plan_json, confirmed_at, confirmed_by | 期と大会の対応・次期の確定の記録（根拠・理由・照合） |
+| LeagueMembers（v1.0） | member_id, league_id, display_name, status, meta_json | 期をまたぐ会員 ID（Players.member_id から参照） |
 
 全行に `rev`（版番号）と `created_at` / `updated_at`（ISO 8601、UTC）があります。文字列の列は「書式なしテキスト」にして、`1/2` のような名前が日付に自動変換されないようにしています。
 

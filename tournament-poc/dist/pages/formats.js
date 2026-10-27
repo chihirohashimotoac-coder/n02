@@ -119,6 +119,7 @@ var STAGE_KIND_LABEL = {
   double_elimination: 'ダブルエリミネーション',
   swiss: 'スイス式',
   series: 'ポイントシリーズ',
+  promotion: '入替戦',
 };
 
 /** 新しい大会の作成欄で最初に選ばれている形式 */
