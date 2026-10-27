@@ -137,6 +137,8 @@ function eventDetail_(ctx, eventId) {
         return { id: r.collab_id, email: collabEmailOf_(r), role: r.role || 'editor', addedAt: r.created_at, rev: r.rev || 0, status: active ? 'active' : claims.length ? 'pending' : 'invited', claims: claims };
       });
   }
+  // v1.0: 期制リーグ（期の一覧・入替戦・次期・前期の訂正との照合）。期制リーグでなく移行もできない大会は null
+  view.season = seasonDetail_(ctx, bundle, view, role);
   view.snapshotBudget = snapshotBudget_(bundle);
   view.publication = publicationStatus_(ctx, eventId);
   view.history = ctx
@@ -717,6 +719,8 @@ function actionUpdateEvent_(ctx, payload) {
   }
   ctx.invalidate();
   recordHistory_(ctx, 'event.update', 'Event', eventId, eventId, eventForLog_(before), eventForLog_(event));
+  // v1.0: 期制リーグの期の公開・名前が変わったら、前後の期の公開データ（期の一覧・次期の ID）も作り直す
+  if (before.is_public !== event.is_public || before.name !== event.name) others = others.concat(seasonSiblings_(ctx, eventId));
   return { eventId: eventId, alsoPublish: others };
 }
 
@@ -926,6 +930,7 @@ function actionAddStage_(ctx, payload) {
   if (bundle.stages.length >= ADMIN_CONFIG.MAX_STAGES) throw appError_('LIMIT', '段階は ' + ADMIN_CONFIG.MAX_STAGES + ' つまでです。');
   var type = payload.type;
   if (!STAGE_TYPE_LABEL[type]) throw appError_('VALIDATION', '段階の種類が不正です。');
+  if (type === STAGE_TYPE.PROMOTION) throw appError_('VALIDATION', '入替戦は、期制リーグの「期・昇降格」タブから作ります。');
   var name = cleanText_(payload.name || STAGE_TYPE_LABEL[type], '段階の名前', ADMIN_CONFIG.MAX_LABEL_LENGTH);
   var baseRule = bundle.rule ? ruleSpecOf_(bundle.rule) : { format: 'legs', bestOf: 5, setBestOf: null, provisional: true };
   // 勝ち抜き戦では引き分けありの固定 Leg 数は使えないので、その場合は Best of 5 Legs で作る（あとで変えられる）
@@ -1044,7 +1049,7 @@ function actionUpdateStage_(ctx, payload) {
     var rules = ctx.table('Rules');
     var rule = findRecord_(rules, stage.rule_id, 'ルール');
     var spec = parseRuleInput_(payload.rule);
-    if (spec.format === 'fixed' && bracket) throw appError_('VALIDATION', '固定 Leg 数（引き分けあり）は勝ち抜き戦の段階では使えません（決着がつかないため）。');
+    if (spec.format === 'fixed' && (bracket || type === STAGE_TYPE.PROMOTION)) throw appError_('VALIDATION', '固定 Leg 数（引き分けあり）は勝ち抜き戦・入替戦の段階では使えません（決着がつかないため）。');
     assertRuleChangeAllowed_(bundle, rule, spec);
     applyRule_(rule, spec, ctx.now);
     rule.rev = (rule.rev || 0) + 1;
@@ -2527,7 +2532,7 @@ function prepareMatchResult_(ctx, payload) {
     if (sets && (input.p1Legs === null) !== (input.p2Legs === null)) throw appError_('VALIDATION', '取得 Leg 数は両方入力するか、両方空欄にしてください。');
     var result = evaluateMatchInput_(status, input, spec);
     if (!result.ok) throw appError_('VALIDATION', result.problems.join(' / '));
-    if (result.draw && isBracketStage_(stage)) throw appError_('VALIDATION', '勝ち抜き戦では引き分けを確定できません。');
+    if (result.draw && (isBracketStage_(stage) || stage.type === STAGE_TYPE.PROMOTION)) throw appError_('VALIDATION', '勝ち抜き戦・入替戦では引き分けを確定できません。');
     winnerSide = result.winnerSide;
     draw = !!result.draw;
   }
@@ -2632,7 +2637,7 @@ function actionRepublish_(ctx, payload) {
 /* ---------- 大会の削除（アーカイブ） ---------- */
 
 /** 大会に属する行を持つシート（Events・PublicSnapshots 以外） */
-var EVENT_CHILD_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History', 'Collaborators'];
+var EVENT_CHILD_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History', 'Collaborators', 'LeagueSeasons'];
 /** 保存用ファイル（JSON）に入れるシート。共同主催者のメールアドレスは入れない */
 var ARCHIVE_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'History'];
 
@@ -2687,10 +2692,12 @@ function actionDeleteEvent_(ctx, payload) {
   var typed = typeof payload.confirmName === 'string' ? payload.confirmName.normalize('NFC').replace(/\s+/g, ' ').trim() : '';
   if (typed !== event.name) throw appError_('VALIDATION', '確認のため、大会名「' + event.name + '」を正しく入力してください。');
 
+  var siblings = seasonSiblings_(ctx, eventId);
   var counts = {};
   ['PublicSnapshots'].concat(EVENT_CHILD_TABLES_).forEach(function (name) {
     var table = ctx.table(name);
-    var rows = table.rows.filter(function (r) {
+    // 公開データは分割した行（パート）も消す（v1.0）
+    var rows = name === 'PublicSnapshots' ? snapshotRowsOf_(table, eventId) : table.rows.filter(function (r) {
       return r.event_id === eventId;
     });
     counts[name] = rows.length;
@@ -2710,7 +2717,8 @@ function actionDeleteEvent_(ctx, payload) {
     by: ctx.user.label,
   });
   // eventId を返すと、削除後に公開データの同期・詳細の再読み込みが走るので、別の名前で返す
-  return { deletedEventId: eventId, deletedName: event.name };
+  // v1.0: 期制リーグの期なら、残った期の公開データ（期の一覧）を作り直す
+  return { deletedEventId: eventId, deletedName: event.name, alsoPublish: siblings };
 }
 
 /* ---------- サンプル ---------- */

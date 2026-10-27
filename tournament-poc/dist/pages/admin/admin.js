@@ -22,6 +22,8 @@
     { id: 'settings', label: '大会設定' },
     { id: 'output', label: '出力・印刷' },
     { id: 'history', label: '履歴' },
+    // v1.0: 期制リーグの大会（と、期制リーグにできるリーグの大会）だけに出す
+    { id: 'season', label: '期・昇降格', when: function (d) { return !!d.season; } },
   ];
 
   /* ---------- 共通 ---------- */
@@ -461,7 +463,7 @@
         .mutate(action, payload)
         .then(function (data) {
           // 大会を作ったら、その大会の運営画面へ（通信の再送で二重に作られた場合も同じ大会を開く）
-          if (data && data.eventId && (action === 'createEvent' || action === 'createSampleEvent' || action === 'duplicateEvent' || action === 'restoreEvent')) {
+          if (data && data.eventId && (action === 'createEvent' || action === 'createSampleEvent' || action === 'duplicateEvent' || action === 'restoreEvent' || action === 'createSeasonLeague' || action === 'confirmNextSeason')) {
             if (okMessage && !data.duplicate) toast('ok', okMessage);
             warnPublication(data);
             goTo('#e=' + encodeURIComponent(data.eventId));
@@ -1210,6 +1212,7 @@
           ]),
         ])
       );
+      wrap.appendChild(seasonCreatePanel());
       wrap.appendChild(restorePanel());
       var publishSample = el('input', { type: 'checkbox', id: 'sample-publish' });
       wrap.appendChild(
@@ -1263,8 +1266,9 @@
         button.disabled = true;
         var f = file.files && file.files[0];
         if (!f) return;
-        if (f.size > 1900000) {
-          info.appendChild(el('p', { className: 'error', text: 'ファイルが大きすぎます（1.9MB まで）。' }));
+        // 送るのは各シートの行だけ（results を除く）なので、ファイル自体は大きくてもよい。送る内容の大きさは読み込んだ後に確かめる
+        if (f.size > 8000000) {
+          info.appendChild(el('p', { className: 'error', text: 'ファイルが大きすぎます（8MB まで）。' }));
           return;
         }
         var reader = new win.FileReader();
@@ -1277,6 +1281,11 @@
           }
           if (!data || data.format !== 'n02-tournament-archive' || !data.tables || !data.event) {
             info.appendChild(el('p', { className: 'error', text: 'n02 の大会データのファイル（「大会のデータを保存」で作ったもの）ではありません。' }));
+            return;
+          }
+          var sendSize = JSON.stringify({ format: data.format, formatVersion: data.formatVersion, event: data.event, tables: data.tables }).length;
+          if (sendSize > 1900000) {
+            info.appendChild(el('p', { className: 'error', text: 'この大会のデータは復元できる大きさ（約 190 万文字）を超えています（' + sendSize + ' 文字）。' }));
             return;
           }
           archive = data;
@@ -1294,7 +1303,12 @@
       });
       button.addEventListener('click', function () {
         if (!archive) return;
-        mutate('restoreEvent', { archive: archive, mode: mode.value, includePlayers: players.checked, name: nameInput.value }, function (r) {
+        // 復元に使うのは各シートの行だけ。閲覧ページと同じ形の結果（results）は送らない（大きな大会でも送れる大きさにする。v1.0）
+        var sent = {};
+        Object.keys(archive).forEach(function (k) {
+          if (k !== 'results') sent[k] = archive[k];
+        });
+        mutate('restoreEvent', { archive: sent, mode: mode.value, includePlayers: players.checked, name: nameInput.value }, function (r) {
           return '復元しました（選手 ' + r.restored.players + '・試合 ' + r.restored.matches + '）。';
         });
       });
@@ -1398,6 +1412,7 @@
       if (!d) return wrap;
       var tabs = el('nav', { className: 'tabs', 'aria-label': '大会メニュー' });
       TABS.forEach(function (t) {
+        if (t.when && !t.when(d)) return;
         tabs.appendChild(
           el('button', {
             type: 'button',
@@ -1422,6 +1437,7 @@
         settings: renderSettings,
         output: renderOutput,
         history: renderHistory,
+        season: d.season ? renderSeason : renderProgress,
       }[state.tab]();
       wrap.appendChild(body);
       return wrap;
@@ -1462,6 +1478,12 @@
 
     /** 段階の試合を、見出しごとのまとまりにする（グループ・回戦・勝者側/敗者側・節） */
     function stageSections(st) {
+      if (st.pairs) {
+        // v1.0: 入替戦（組ごとに 1 試合）
+        return st.pairs.map(function (pair) {
+          return { id: pair.id, name: pair.name + (pair.players.length ? '（' + pair.players.map(function (x) { return x.name + '・' + x.source; }).join(' vs ') + '）' : ''), matches: pair.match ? [pair.match] : [] };
+        });
+      }
       if (st.groups) {
         return st.groups.map(function (g) {
           return { id: g.id, name: g.name, matches: g.matches };
@@ -1589,7 +1611,9 @@
       pub.appendChild(el('p', { className: 'muted small', text: '閲覧画面は約 60 秒ごとに自動更新されます（閲覧側のキャッシュを含め、反映まで最大 1〜2 分程度）。' }));
       if (d.snapshotBudget) {
         var b = d.snapshotBudget;
-        pub.appendChild(el('p', { className: b.percent >= 80 ? 'error small' : 'muted small', text: '公開データの大きさ: ' + b.size.toLocaleString('ja-JP') + ' / ' + b.limit.toLocaleString('ja-JP') + ' 文字（' + b.percent + '%）。' + (b.percent >= 80 ? '上限に近づいています。上限を超える変更は保存されません（段階・グループを分けるか、非公開にしてください）。' : '上限を超える変更は保存前に止めます。') }));
+        pub.appendChild(el('p', { className: b.error || b.percent >= 80 ? 'error small' : 'muted small', text: '公開データの大きさ: ' + b.size.toLocaleString('ja-JP') + ' / ' + b.limit.toLocaleString('ja-JP') + ' 文字（' + b.percent + '%）。' + (b.error ? b.error : b.percent >= 80 ? '上限に近づいています。上限を超える変更は保存されません（段階・グループを分けるか、非公開にしてください）。' : '上限を超える変更は保存前に止めます。') }));
+        // v1.0: 試合の多い大会は、試合一覧を分けて公開する（閲覧ページが分けた部分を取得して元の形に戻す）
+        if (b.partitioned) pub.appendChild(el('p', { className: 'muted small', text: '試合が多いため、試合一覧を ' + b.parts + ' 個に分けて公開しています（分ける前 ' + b.fullSize.toLocaleString('ja-JP') + ' 文字 → 本体 ' + b.size.toLocaleString('ja-JP') + ' 文字 + 試合一覧 ' + (b.totalSize - b.size).toLocaleString('ja-JP') + ' 文字）。' }));
       }
       var viewerUrl = state.boot && state.boot.viewerUrl;
       if (viewerUrl && d.publication.published) {
@@ -1643,7 +1667,14 @@
         });
         if (!ms.length) return;
         any = true;
-        wrap.appendChild(el('section', { className: 'panel' }, [el('h3', { text: sec.name })].concat(ms.map(function (m) { return renderMatchEditor(m); }))));
+        // v1.0: 試合の多いグループ（50 人の総当たりなど）は節を選んで表示する（全試合を一度に描かない）
+        var picker = null;
+        if (sec.matches.length > ROUND_PICK_THRESHOLD) {
+          var rp = roundPicker(sec, ms);
+          picker = rp.node;
+          ms = rp.matches;
+        }
+        wrap.appendChild(el('section', { className: 'panel' }, [el('h3', { text: sec.name }), picker].concat(ms.map(function (m) { return renderMatchEditor(m); }))));
       });
       wrap.appendChild(batchBar(st));
       if (!any) {
@@ -1659,6 +1690,48 @@
         wrap.appendChild(el('p', { className: 'panel muted', text: empty }));
       }
       return wrap;
+    }
+
+    var ROUND_PICK_THRESHOLD = 60;
+
+    /** 節（回戦）の選択。既定は表示中の試合（絞り込み後）のうち最初の節。選んだ節は描き直しても保つ */
+    function roundPicker(sec, shown) {
+      var picks = state.ui.roundPick || (state.ui.roundPick = {});
+      var rounds = [];
+      var labelOf = {};
+      var countOf = {};
+      sec.matches.forEach(function (m) {
+        if (labelOf[m.round] === undefined) {
+          rounds.push(m.round);
+          labelOf[m.round] = m.label || 'R' + m.round;
+          countOf[m.round] = { all: 0, final: 0, shown: 0 };
+        }
+        countOf[m.round].all++;
+        if (m.status === 'final' || m.status === 'bye') countOf[m.round].final++;
+      });
+      shown.forEach(function (m) {
+        countOf[m.round].shown++;
+      });
+      var current = picks[sec.id];
+      if (current === undefined || !countOf[current] || !countOf[current].shown) {
+        var first = shown[0];
+        current = first ? first.round : rounds[0];
+      }
+      var id = 'round-pick-' + sec.id;
+      var select = el('select', { className: 'input input--auto', id: id }, rounds.map(function (r) {
+        var c = countOf[r];
+        return el('option', { value: String(r), selected: r === current ? true : null, disabled: c.shown ? null : true, text: labelOf[r] + '（確定 ' + c.final + ' / ' + c.all + '）' });
+      }));
+      select.addEventListener('change', function () {
+        picks[sec.id] = Number(select.value);
+        render();
+      });
+      return {
+        node: el('div', { className: 'row row--tight' }, [el('label', { className: 'field__label', for: id, text: '節を選ぶ（全 ' + rounds.length + ' 節・' + sec.matches.length + ' 試合。絞り込みに合う節だけ選べます）' }), select]),
+        matches: shown.filter(function (m) {
+          return m.round === current;
+        }),
+      };
     }
 
     /** 下書きのうち、そのまま「確定」できる結果（Leg 制は画面側でも成立条件を確認。セット制の Leg 合計はサーバーで確認） */
@@ -2547,7 +2620,7 @@
       var d = state.detail;
       var type = st.type;
       var group = type === 'round_robin' || type === 'league' || type === 'swiss';
-      var bracket = type === 'single_elimination' || type === 'double_elimination' || type === 'series';
+      var bracket = type === 'single_elimination' || type === 'double_elimination' || type === 'series' || type === 'promotion';
       var cfg = st.config;
       var name = el('input', { className: 'input', value: st.name, maxlength: 40, 'aria-label': '段階の名前' });
       var rule = ruleInputs('stage-' + st.id, { format: st.rule.format, bestOf: st.rule.bestOf, setBestOf: st.rule.setBestOf || 5, provisional: st.ruleProvisional }, { noFixed: bracket });
@@ -2935,7 +3008,14 @@
       if (sc) wrap.appendChild(el('div', { className: 'panel panel--tight' }, [sc]));
       if (st.type === 'single_elimination' || st.type === 'double_elimination') renderEliminationPairing(st, wrap);
       else if (st.type === 'series') renderSeriesPairing(st, wrap);
-      else renderGroupPairing(st, wrap);
+      else if (st.type === 'promotion') {
+        wrap.appendChild(el('section', { className: 'panel' }, [
+          el('h3', { text: st.name }),
+          el('p', { className: 'muted', text: '入替戦は、リーグの全試合が確定した後に「期・昇降格」タブの「入替戦を組む」で作ります（上位ディビジョンの下から 2 位 vs 下位ディビジョンの 2 位）。結果は「試合結果」タブで入力します。' }),
+          el('button', { className: 'btn', type: 'button', text: '「期・昇降格」タブを開く', onClick: function () { state.tab = 'season'; render(); } }),
+        ]));
+        return wrap;
+      } else renderGroupPairing(st, wrap);
       if (st.config.advancement && st.config.advancement.length) wrap.appendChild(advancementPanel(st));
       return wrap;
     }
@@ -3923,6 +4003,510 @@
             ])
           : null,
       ]);
+    }
+
+    /* ---------- 期制リーグ（v1.0） ---------- */
+
+    /** 「12, 30」のような入力を数の配列にする。空欄の項目は null（目標人数・定員の「指定なし」） */
+    function parseNumberList(text, keepBlank) {
+      var parts = String(text || '').split(/[,、\s]+/);
+      if (!keepBlank) parts = parts.filter(Boolean);
+      else {
+        parts = String(text || '').split(/[,、]/).map(function (x) {
+          return x.trim();
+        });
+        while (parts.length && !parts[parts.length - 1]) parts.pop();
+      }
+      return parts.map(function (x) {
+        return x === '' ? null : Number(String(x).normalize('NFKC'));
+      });
+    }
+
+    function listText(arr) {
+      return (arr || [])
+        .map(function (v) {
+          return v === null || v === undefined ? '' : String(v);
+        })
+        .join(', ');
+    }
+
+    /** ディビジョン数の境目・目標人数・定員の入力欄（作成・移行・設定で共通） */
+    function seasonRuleFields(prefix, cfg) {
+      var c = cfg || {};
+      var thresholds = el('input', { className: 'input', id: prefix + '-thresholds', value: listText(c.thresholds), placeholder: '例: 12, 30（12 人以上で 2 部制、30 人以上で 3 部制）', inputmode: 'numeric' });
+      var targets = el('input', { className: 'input', id: prefix + '-targets', value: listText(c.targets), placeholder: '例: 10, 12（1 部 10 人・2 部 12 人。空欄 = 前期と同じ人数）' });
+      var capacities = el('input', { className: 'input', id: prefix + '-capacities', value: listText(c.capacities), placeholder: '例: 12, 14, 16（空欄 = 定員なし）' });
+      return {
+        nodes: [
+          field('ディビジョン数の境目（2 部制・3 部制…にする人数を、小さい順にカンマ区切り。空欄なら人数によらず 1 ディビジョン）', thresholds),
+          field('各部の目標人数（1 部・2 部…の順。最下位の部は残りの人数。空欄の部は前期と同じ人数を保ち、ディビジョン数が変わるときは均等に分けます）', targets),
+          field('各部の定員（1 部・2 部…の順。超える配置は確定できません）', capacities),
+          el('p', { className: 'muted small', text: 'アプリは境目の人数を決めません。主催者が決めた境目と目標人数・定員だけで、次期のディビジョン数と人数を計算します。中間のディビジョンは 4 人以上、最上位・最下位は 2 人以上が必要です（昇格・降格・入替戦の対象が重ならないように）。上の部に欠員が出たら、下の部に残った選手の順位の順（入替戦に負けた 2 位 → 3 位 …）で繰り上げます。自動降格・自動昇格は欠員では取り消しません。' }),
+        ],
+        value: function () {
+          return { thresholds: parseNumberList(thresholds.value), targets: parseNumberList(targets.value, true), capacities: parseNumberList(capacities.value, true) };
+        },
+      };
+    }
+
+    /** 主催者のホーム: 期制リーグ（1 期目）の作成 */
+    function seasonCreatePanel() {
+      var intro = el('p', { className: 'muted small', text: '期ごとに 1 つの大会を作ってたどる運営方式です。1 期目は全員が 1 つのリーグで総当たりを行い、その順位から 2 期目のディビジョンの配置案を作ります。2 期目以降は各期の終わりに、下位の部の 1 位が自動昇格・上位の部の最下位が自動降格し、上位の部の下から 2 位と下位の部の 2 位が入替戦を行います。次期の所属は、主催者がプレビューを確認・修正して確定するまで決まりません。「リーグ → プレーオフ」（リーグ上位の決勝トーナメント）とは別の機能です。' });
+      if (!state.ui.seasonCreateOpen) {
+        return el('section', { className: 'panel', id: 'season-create' }, [
+          el('h2', { text: '期制リーグ（昇降格・入替戦）を作成' }),
+          intro,
+          el('button', { className: 'btn', type: 'button', 'aria-expanded': 'false', text: '期制リーグの作成欄を開く', onClick: function () { state.ui.seasonCreateOpen = true; render(); } }),
+        ]);
+      }
+      var name = el('input', { className: 'input', id: 'season-name', required: true, maxlength: 60, placeholder: '例: 水曜リーグ' });
+      var date = el('input', { className: 'input', id: 'season-date', maxlength: 40, placeholder: '例: 2026年11月〜' });
+      var organizer = el('input', { className: 'input', id: 'season-organizer', maxlength: 40, placeholder: '（任意・非公開）' });
+      var rule = ruleInputs('season', { format: 'legs', bestOf: 5, setBestOf: 5, provisional: true });
+      var cycles = el('select', { className: 'input input--short', id: 'season-cycles' }, [el('option', { value: '1', text: '1 回' }), el('option', { value: '2', text: '2 回' })]);
+      var pw = el('input', { className: 'input input--short', id: 'season-p-win', type: 'number', value: '2', min: -99, max: 99 });
+      var pd = el('input', { className: 'input input--short', id: 'season-p-draw', type: 'number', value: '1', min: -99, max: 99 });
+      var pl = el('input', { className: 'input input--short', id: 'season-p-loss', type: 'number', value: '0', min: -99, max: 99 });
+      var rules = seasonRuleFields('season', {});
+      return el('section', { className: 'panel', id: 'season-create' }, [
+        el('h2', { text: '期制リーグ（昇降格・入替戦）を作成' }),
+        intro,
+        el('form', {
+          className: 'form',
+          onSubmit: function (e) {
+            e.preventDefault();
+            var r = rules.value();
+            mutate('createSeasonLeague', {
+              name: name.value,
+              dateLabel: date.value,
+              organizerName: organizer.value,
+              rule: rule.value(),
+              cycles: Number(cycles.value),
+              points: { win: Number(pw.value), draw: Number(pd.value), loss: Number(pl.value) },
+              thresholds: r.thresholds,
+              targets: r.targets,
+              capacities: r.capacities,
+            }, '期制リーグを作成しました（第1期の大会を開きます）。');
+          },
+        }, [
+          field('期制リーグの名前（各期は「名前 第n期」として作ります）', name),
+          field('第1期の開催時期（表示用）', date),
+          field('主催者の名前（任意・管理者だけが見ます）', organizer),
+          rule.node,
+          field('各期のリーグで総当たりを行う回数', cycles),
+          el('div', { className: 'field' }, [el('span', { className: 'field__label', text: '勝ち点（勝ち・引き分け・負け。アプリの既定値は 2・1・0）' }), el('div', { className: 'row row--tight' }, [el('span', { text: '勝ち' }), pw, el('span', { text: '引き分け' }), pd, el('span', { text: '負け' }), pl])]),
+        ].concat(rules.nodes, [el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '期制リーグを作成' })])),
+      ]);
+    }
+
+    var MOVE_LABEL = {
+      rank: '順位',
+      stay: '残留',
+      auto_promote: '自動昇格',
+      auto_relegate: '自動降格',
+      playoff_win_promote: '入替戦に勝って昇格',
+      playoff_win_stay: '入替戦に勝って残留',
+      playoff_lose_relegate: '入替戦に負けて降格',
+      playoff_lose_stay: '入替戦に負けて残留',
+      playoff_pending: '入替戦の結果待ち',
+      new: '新規参加',
+      return: '復帰',
+      leave: '不参加（脱退）',
+    };
+    var PLAYOFF_STATE_LABEL = { none: '未作成', scheduled: '未開始', live: '進行中', final: '確定', check: '要確認' };
+
+    function divisionLabel(k, count) {
+      return count > 1 ? k + '部' : 'リーグ';
+    }
+
+    /** 次期の配置の修正の下書き（画面を描き直しても残す）。送る形は parseSeasonEdits_ と同じ */
+    function seasonDraft(eventId) {
+      var all = state.ui.seasonDraft || (state.ui.seasonDraft = {});
+      return all[eventId] || (all[eventId] = { leave: {}, rejoin: {}, join: '', moves: {}, names: {} });
+    }
+
+    function seasonEditsOf(draft) {
+      var join = String(draft.join || '')
+        .split(/\r?\n/)
+        .map(function (x) {
+          return x.trim();
+        })
+        .filter(Boolean)
+        .map(function (n) {
+          return { name: n };
+        });
+      var moves = [];
+      Object.keys(draft.moves).forEach(function (k) {
+        var m = draft.moves[k];
+        if (m && m.division) moves.push({ key: k, division: Number(m.division), reason: m.reason || '' });
+      });
+      var names = [];
+      Object.keys(draft.names).forEach(function (k) {
+        if (draft.names[k]) names.push({ key: k, name: draft.names[k] });
+      });
+      return {
+        leave: Object.keys(draft.leave).filter(function (k) {
+          return draft.leave[k];
+        }),
+        rejoin: Object.keys(draft.rejoin).filter(function (k) {
+          return draft.rejoin[k];
+        }),
+        join: join,
+        moves: moves,
+        names: names,
+      };
+    }
+
+    function loadSeasonPreview() {
+      var d = state.detail;
+      var draft = seasonDraft(d.event.id);
+      state.ui.seasonPreviewLoading = true;
+      render();
+      return api
+        .query('previewNextSeason', { eventId: d.event.id, edits: seasonEditsOf(draft) })
+        .then(function (res) {
+          state.ui.seasonPreview = { eventId: d.event.id, data: res };
+        })
+        .catch(handleError)
+        .then(function () {
+          state.ui.seasonPreviewLoading = false;
+          render();
+        });
+    }
+
+    function renderSeason() {
+      var d = state.detail;
+      var s = d.season;
+      var wrap = el('div', { className: 'stack' });
+      var owner = s.canEdit;
+      if (!s.linked) {
+        wrap.appendChild(renderSeasonConvert(d, s));
+        return wrap;
+      }
+      // 期の一覧
+      wrap.appendChild(
+        el('section', { className: 'panel' }, [
+          el('h3', { text: '期制リーグ「' + s.league.name + '」 第' + s.seasonNo + '期' }),
+          el('ol', { className: 'plain-list season-list' }, s.seasons.map(function (x) {
+            return el('li', null, [
+              x.current ? el('strong', { text: '第' + x.no + '期（この大会）' }) : x.canOpen ? el('a', { href: '#e=' + encodeURIComponent(x.eventId), text: '第' + x.no + '期: ' + x.name }) : el('span', { text: '第' + x.no + '期: ' + x.name + (x.exists ? '（運営の権限なし）' : '') }),
+              ' ',
+              x.exists ? el('span', { className: 'badge ' + (x.isPublic ? 'badge--on' : ''), text: x.isPublic ? '公開中' : '非公開' }) : null,
+            ]);
+          })),
+          el('p', { className: 'muted small', text: '各期は独立した大会です（結果・順位・閲覧ページの URL を期ごとに持ちます）。選手は期をまたぐ会員 ID で対応付け、名前では対応付けません。次期の大会の主催者は今期の主催者で、共同主催者・管理パスワードは引き継ぎません（必要なら次期の「大会設定」で改めて追加してください）。' }),
+        ])
+      );
+      if (s.error) wrap.appendChild(el('p', { className: 'panel error', text: s.error }));
+      // 前期の訂正との照合（この期が前期から作った期のとき）
+      if (s.drift && s.drift.changed) wrap.appendChild(renderSeasonDrift(d, s, s.drift, true));
+      if (s.next && s.next.drift && s.next.drift.changed && !s.next.drift.acknowledged) {
+        wrap.appendChild(el('section', { className: 'panel notice', role: 'alert' }, [
+          el('p', { text: '第' + s.next.no + '期を作った後に、この期の結果（順位・入替戦）が変わりました。第' + s.next.no + '期の所属は自動では変えていません。第' + s.next.no + '期の「期・昇降格」タブで、反映するか記録として承認してください。' }),
+          el('a', { href: '#e=' + encodeURIComponent(s.next.eventId), text: '第' + s.next.no + '期を開く' }),
+        ]));
+      }
+      if (s.playoffs && s.divisions && s.divisions.length > 1) wrap.appendChild(renderSeasonPlayoffs(d, s));
+      wrap.appendChild(renderSeasonNext(d, s));
+      if (s.plan) wrap.appendChild(renderSeasonPlan(s));
+      if (owner) wrap.appendChild(renderSeasonSettings(d, s));
+      wrap.appendChild(renderSeasonMembers(d, s));
+      return wrap;
+    }
+
+    function renderSeasonConvert(d, s) {
+      var panel = el('section', { className: 'panel' }, [
+        el('h3', { text: '期制リーグにする' }),
+        el('p', { className: 'muted', text: 'このリーグの大会を、期制リーグの期にできます（移行）。選手ごとに新しい会員 ID を付け、他の大会の選手とは名前で結び付けません。ディビジョンが 2 つ以上なら入替戦の段階を足します。試合・結果は変えません。' }),
+      ]);
+      if (!s.canEdit) {
+        panel.appendChild(el('p', { className: 'muted small', text: '移行は大会の主催者（Google ログイン）か管理者だけが行えます。' }));
+        return panel;
+      }
+      var name = el('input', { className: 'input', id: 'convert-name', maxlength: 60, value: d.event.name });
+      var no = el('input', { className: 'input input--short', id: 'convert-no', type: 'number', min: 1, max: 99, value: '1' });
+      var rules = seasonRuleFields('convert', {});
+      panel.appendChild(el('div', { className: 'form' }, [field('期制リーグの名前', name), field('この大会を第何期にするか', no)].concat(rules.nodes, [
+        el('div', { className: 'btn-row' }, [
+          el('button', { className: 'btn btn--primary', type: 'button', 'data-mut': true, text: '期制リーグにする', onClick: function () {
+            var r = rules.value();
+            mutate('convertToSeasonLeague', { eventId: d.event.id, name: name.value, seasonNo: Number(no.value), thresholds: r.thresholds, targets: r.targets, capacities: r.capacities }, '期制リーグにしました。');
+          } }),
+        ]),
+      ])));
+      return panel;
+    }
+
+    function renderSeasonPlayoffs(d, s) {
+      var pf = s.playoffs;
+      var panel = el('section', { className: 'panel' }, [el('h3', { text: '入替戦' })]);
+      panel.appendChild(el('p', { className: 'muted small', text: '上位の部の下から 2 位（1 番目の枠）と下位の部の 2 位（2 番目の枠）が対戦し、上位の部の選手が勝てば両者とも残留、下位の部の選手が勝てば入れ替わります。上位の部の最下位は自動降格、下位の部の 1 位は自動昇格です（入替戦はありません）。結果は「試合結果」タブで入力します（不戦勝・棄権・延期・訂正も他の試合と同じ）。' }));
+      var rows = pf.expected.map(function (x) {
+        return el('tr', null, [
+          el('th', { scope: 'row', text: divisionLabel(x.upper, s.divisions.length) + '・' + divisionLabel(x.lower, s.divisions.length) }),
+          el('td', { text: x.upperName + ' vs ' + x.lowerName }),
+          el('td', { text: !x.generated ? '未作成' : !x.matches ? '順位と不一致（組み直しが必要）' : PLAYOFF_STATE_LABEL[x.state] || x.state }),
+          el('td', { text: x.winnerName ? '勝者: ' + x.winnerName : '' }),
+        ]);
+      });
+      if (rows.length) {
+        panel.appendChild(el('div', { className: 'table-wrap' }, [el('table', { className: 'table' }, [
+          el('thead', null, [el('tr', null, ['組', '対戦（今の順位で決まる対戦者）', '状態', '結果'].map(function (h) { return el('th', { scope: 'col', text: h }); }))]),
+          el('tbody', null, rows),
+        ])]));
+      }
+      pf.problems.forEach(function (msg) {
+        panel.appendChild(el('p', { className: 'error small', text: msg }));
+      });
+      if (!pf.ready) panel.appendChild(el('p', { className: 'muted small', text: 'リーグの全試合が確定すると、入替戦を組めます。' }));
+      var mismatch = pf.expected.some(function (x) {
+        return x.generated && !x.matches;
+      });
+      var buttons = [];
+      if (!pf.generated) buttons.push(el('button', { className: 'btn btn--primary', type: 'button', 'data-mut': true, 'data-locked': pf.ready && !pf.problems.length ? null : '1', text: '入替戦を組む', onClick: function () { mutate('generatePlayoffs', { eventId: d.event.id }, function (r) { return '入替戦を ' + r.created + ' 試合組みました。'; }); } }));
+      else {
+        buttons.push(el('button', { className: mismatch ? 'btn btn--primary' : 'btn', type: 'button', 'data-mut': true, text: '入替戦を組み直す（結果の入っていないときだけ）', onClick: function () { mutate('generatePlayoffs', { eventId: d.event.id, redo: true }, '入替戦を組み直しました。'); } }));
+        buttons.push(confirmButton('入替戦を消す', '本当に消す（結果の入っていないときだけ）', function () { mutate('clearPlayoffs', { eventId: d.event.id }, '入替戦を消しました。'); }));
+      }
+      panel.appendChild(el('div', { className: 'btn-row' }, buttons));
+      return panel;
+    }
+
+    function renderSeasonNext(d, s) {
+      var panel = el('section', { className: 'panel', id: 'season-next' }, [el('h3', { text: '次期（第' + (s.seasonNo + 1) + '期）の配置' })]);
+      if (s.next && s.next.exists) {
+        panel.appendChild(el('p', { text: '第' + s.next.no + '期は作成済みです（' + formatDateTime(s.next.confirmedAt) + (s.next.confirmedBy ? '・' + s.next.confirmedBy : '') + '）。' }));
+        panel.appendChild(el('a', { className: 'btn', href: '#e=' + encodeURIComponent(s.next.eventId), text: '第' + s.next.no + '期の大会を開く' }));
+        return panel;
+      }
+      panel.appendChild(el('p', { className: 'muted small', text: '「次期の配置をプレビュー」→ 必要なら修正（所属・不参加・復帰・新規参加・表示名）→「確定して次期を作成」の順に進めます。確定するまで、次期の所属はどこにも保存しません。同順位が昇格・入替戦の対象やディビジョンの境目にかかるときは、この期の「組み合わせ」タブで順位を手動で決めてください（名前順などで自動では決めません）。' }));
+      var pv = state.ui.seasonPreview && state.ui.seasonPreview.eventId === d.event.id ? state.ui.seasonPreview.data : null;
+      panel.appendChild(el('div', { className: 'btn-row' }, [
+        el('button', { className: 'btn btn--primary', type: 'button', id: 'season-preview', disabled: state.ui.seasonPreviewLoading ? true : null, text: pv ? 'プレビューを更新（修正を反映）' : '次期の配置をプレビュー', onClick: loadSeasonPreview }),
+      ]));
+      if (!pv) return panel;
+      var draft = seasonDraft(d.event.id);
+      var head = el('div', { className: 'stack stack--tight', id: 'season-preview-result' }, [
+        el('p', { text: '次期: ' + pv.total + ' 人・' + (pv.divisionCount > 1 ? pv.divisionCount + ' 部制' : '1 ディビジョン') + (pv.previousDivisionCount !== pv.divisionCount ? '（今期は ' + (pv.previousDivisionCount > 1 ? pv.previousDivisionCount + ' 部制' : '1 ディビジョン') + '。' + (pv.divisionCount > pv.previousDivisionCount ? 'ディビジョンを増設' : 'ディビジョンを統合') + '）' : '') + '。境目: ' + (pv.thresholds.length ? pv.thresholds.map(function (t, i) { return t + ' 人以上で ' + (i + 2) + ' 部制'; }).join('・') : 'なし（人数によらず 1 ディビジョン）') }),
+        el('ul', { className: 'plain-list' }, pv.divisions.map(function (x) {
+          return el('li', { text: x.name + ': ' + x.size + ' 人' + (x.target ? '（目標 ' + x.target + ' 人）' : '') + (x.capacity ? '（定員 ' + x.capacity + ' 人）' : '') });
+        })),
+      ]);
+      panel.appendChild(head);
+      if (pv.problems.length) {
+        panel.appendChild(el('div', { className: 'notice', role: 'alert' }, [el('p', { className: 'error', text: '確定できない理由（解決するまで次期は作れません）:' }), el('ul', { className: 'plain-list' }, pv.problems.map(function (x) { return el('li', { className: 'error small', text: x }); }))]));
+      }
+      if (pv.warnings.length) panel.appendChild(el('ul', { className: 'plain-list' }, pv.warnings.map(function (x) { return el('li', { className: 'muted small', text: '確認: ' + x }); })));
+      var options = [];
+      for (var k = 1; k <= Math.max(pv.divisionCount, 1); k++) options.push(k);
+      var table = el('table', { className: 'table season-plan' }, [
+        el('thead', null, [el('tr', null, ['選手', '今期の所属・順位', '昇降格', '次期（自動）', '次期の所属（手動で変える場合）', '理由', '不参加'].map(function (h) { return el('th', { scope: 'col', text: h }); }))]),
+        el('tbody', null, pv.rows.map(function (r) {
+          var mv = draft.moves[r.key] || {};
+          var sel = el('select', { className: 'input input--auto', 'aria-label': r.name + ' の次期の所属', disabled: r.movement === 'leave' ? true : null }, [el('option', { value: '', text: '自動のまま' })].concat(options.map(function (k) {
+            return el('option', { value: String(k), selected: String(mv.division || '') === String(k) ? true : null, text: divisionLabel(k, pv.divisionCount) });
+          })));
+          var reason = el('input', { className: 'input', maxlength: 200, value: mv.reason || '', placeholder: '理由（必須・運営画面だけ）', 'aria-label': r.name + ' の手動の所属の理由', hidden: !mv.division });
+          sel.addEventListener('change', function () {
+            if (sel.value) draft.moves[r.key] = { division: Number(sel.value), reason: reason.value };
+            else delete draft.moves[r.key];
+            reason.hidden = !sel.value;
+          });
+          reason.addEventListener('input', function () {
+            if (draft.moves[r.key]) draft.moves[r.key].reason = reason.value;
+          });
+          var leave = el('input', { type: 'checkbox', checked: !!draft.leave[r.key], 'aria-label': r.name + ' を次期は不参加にする', disabled: !r.from ? true : null });
+          leave.addEventListener('change', function () {
+            if (leave.checked) draft.leave[r.key] = true;
+            else delete draft.leave[r.key];
+          });
+          var nameIn = el('input', { className: 'input input--auto season-plan__name', maxlength: 40, value: draft.names[r.key] || '', placeholder: r.name, 'aria-label': r.name + ' の次期の表示名（変える場合）' });
+          nameIn.addEventListener('input', function () {
+            if (nameIn.value.trim()) draft.names[r.key] = nameIn.value.trim();
+            else delete draft.names[r.key];
+          });
+          return el('tr', { className: r.movement === 'leave' ? 'is-muted' : null }, [
+            el('th', { scope: 'row' }, [el('span', { text: r.name }), el('br'), nameIn]),
+            el('td', { text: r.from ? r.from.divisionName + ' ' + r.from.rank + '位' + (r.from.tied ? '（同）' : '') + (r.from.withdrawn ? '・' + (r.from.withdrawn.kind === 'disqualified' ? '失格' : '棄権') : '') : '—' }),
+            el('td', { text: r.movementLabel }),
+            el('td', { text: r.autoDivision ? divisionLabel(r.autoDivision, pv.divisionCount) : '—' }),
+            el('td', null, [sel, reason]),
+            el('td', { className: 'small', text: r.reasons.join(' / ') }),
+            el('td', null, [leave]),
+          ]);
+        })),
+      ]);
+      panel.appendChild(el('div', { className: 'table-wrap' }, [table]));
+      // 復帰（今期にいない会員）と新規参加
+      if (pv.candidates.length) {
+        panel.appendChild(el('div', { className: 'stack stack--tight' }, [
+          el('p', { className: 'field__label', text: '復帰させる人（以前の期に出ていて、今期にいない会員。同じ会員 ID のまま次期に入ります）' }),
+          el('div', { className: 'chips' }, pv.candidates.map(function (c) {
+            var cb = el('input', { type: 'checkbox', checked: !!draft.rejoin[c.key] });
+            cb.addEventListener('change', function () {
+              if (cb.checked) draft.rejoin[c.key] = true;
+              else delete draft.rejoin[c.key];
+            });
+            return el('label', { className: 'check' }, [cb, ' ' + c.name + (c.status === 'left' ? '（脱退）' : '')]);
+          })),
+        ]));
+      }
+      var join = el('textarea', { className: 'input', id: 'season-join', rows: 3, placeholder: '新しく参加する人（1 行に 1 名）。新しい会員 ID を作ります（同じ名前の人がいても別人として扱います）' });
+      join.value = draft.join || '';
+      join.addEventListener('input', function () {
+        draft.join = join.value;
+      });
+      panel.appendChild(field('新規参加', join));
+      panel.appendChild(el('p', { className: 'muted small', text: '修正したら「プレビューを更新」を押してください。確定は最後に表示したプレビューの内容で行います（その後に結果や設定が変わった場合は、確定せずにプレビューし直してもらいます）。' }));
+      var buttons = [el('button', { className: 'btn', type: 'button', text: 'プレビューを更新（修正を反映）', onClick: loadSeasonPreview })];
+      if (pv.canConfirm) {
+        buttons.push(el('button', {
+          className: 'btn btn--primary',
+          type: 'button',
+          'data-mut': true,
+          id: 'season-confirm',
+          'data-locked': pv.ok ? null : '1',
+          disabled: pv.ok ? null : true,
+          text: '確定して第' + pv.nextSeasonNo + '期を作成',
+          onClick: function () {
+            if (!win.confirm('この内容で第' + pv.nextSeasonNo + '期の大会を作成します（' + pv.total + ' 人・' + (pv.divisionCount > 1 ? pv.divisionCount + ' 部制' : '1 ディビジョン') + '）。よろしいですか？')) return;
+            mutate('confirmNextSeason', { eventId: d.event.id, edits: seasonEditsOf(draft), planVersion: pv.planVersion }, function (r) {
+              return r.existing ? '第' + pv.nextSeasonNo + '期はすでに作成されています。その大会を開きます。' : '第' + pv.nextSeasonNo + '期を作成しました。';
+            }).then(function (data) {
+              if (data && data.eventId) {
+                delete state.ui.seasonPreview;
+                delete (state.ui.seasonDraft || {})[d.event.id];
+              }
+            });
+          },
+        }));
+      } else {
+        buttons.push(el('span', { className: 'muted small', text: '確定（次期の作成）は、大会の主催者（Google ログイン）か管理者だけが行えます。' }));
+      }
+      panel.appendChild(el('div', { className: 'btn-row' }, buttons));
+      return panel;
+    }
+
+    /** 前期の結果が次期の作成後に変わったときの照合（次期の大会の画面） */
+    function renderSeasonDrift(d, s, drift) {
+      var panel = el('section', { className: 'panel notice', role: 'alert', id: 'season-drift' }, [
+        el('h3', { text: '前期の結果が、この期を作った後に変わりました' }),
+        el('p', { text: 'この期の所属は自動では変えていません。違いを確認し、反映するか、記録として承認してください（試合が始まったディビジョンの所属は変えられません）。' }),
+      ]);
+      if (drift.acknowledged) {
+        panel.className = 'panel';
+        panel.appendChild(el('p', { className: 'muted small', text: '承認済み（' + formatDateTime(drift.acknowledged.at) + '・' + drift.acknowledged.by + '）: ' + drift.acknowledged.reason }));
+      }
+      drift.problems.forEach(function (x) {
+        panel.appendChild(el('p', { className: 'error small', text: '前期の今の結果: ' + x }));
+      });
+      var picks = state.ui.driftPick || (state.ui.driftPick = {});
+      if (drift.diffs.length) {
+        panel.appendChild(el('div', { className: 'table-wrap' }, [el('table', { className: 'table' }, [
+          el('thead', null, [el('tr', null, ['反映', '選手', 'この期の所属（確定時）', '今の結果で計算した所属', '理由', '反映できない理由'].map(function (h) { return el('th', { scope: 'col', text: h }); }))]),
+          el('tbody', null, drift.diffs.map(function (x) {
+            var cb = el('input', { type: 'checkbox', checked: !!picks[x.key], disabled: x.canApply ? null : true, 'aria-label': x.name + ' を反映する' });
+            cb.addEventListener('change', function () {
+              picks[x.key] = cb.checked;
+            });
+            return el('tr', null, [el('td', null, [cb]), el('th', { scope: 'row', text: x.name }), el('td', { text: x.confirmedName }), el('td', { text: x.nowName }), el('td', { className: 'small', text: (x.reasons || []).join(' / ') }), el('td', { className: 'small', text: x.lock || '' })]);
+          })),
+        ])]));
+      } else {
+        panel.appendChild(el('p', { className: 'muted small', text: '所属の違いはありません（順位・入替戦の結果だけが変わりました）。記録として承認してください。' }));
+      }
+      if (!s.canEdit) return panel;
+      var reason = el('input', { className: 'input', id: 'drift-reason', maxlength: 200, placeholder: '理由（必須）' });
+      panel.appendChild(field('理由（記録に残ります。運営画面だけ）', reason));
+      panel.appendChild(el('div', { className: 'btn-row' }, [
+        el('button', { className: 'btn btn--primary', type: 'button', 'data-mut': true, text: 'チェックした選手の所属を反映', onClick: function () {
+          var apply = drift.diffs.filter(function (x) { return picks[x.key] && x.canApply; }).map(function (x) { return x.key; });
+          mutate('reconcileNextSeason', { eventId: d.event.id, rev: s.seasonRev, apply: apply, reason: reason.value }, function (r) { return r.applied + ' 人の所属を反映しました。'; });
+        } }),
+        el('button', { className: 'btn', type: 'button', 'data-mut': true, text: '残りは記録として承認（所属は変えない）', onClick: function () {
+          var apply = drift.diffs.filter(function (x) { return picks[x.key] && x.canApply; }).map(function (x) { return x.key; });
+          mutate('reconcileNextSeason', { eventId: d.event.id, rev: s.seasonRev, apply: apply, acknowledge: true, reason: reason.value }, '承認を記録しました。');
+        } }),
+      ]));
+      return panel;
+    }
+
+    /** この期を作ったときの確定の記録（前期の所属・順位・昇降格・新しい所属・理由） */
+    function renderSeasonPlan(s) {
+      var plan = s.plan;
+      var panel = el('section', { className: 'panel' }, [
+        el('h3', { text: 'この期の配置の根拠（第' + (s.seasonNo - 1) + '期から確定）' }),
+        el('p', { className: 'muted small', text: '確定: ' + formatDateTime(plan.confirmedAt) + (plan.confirmedBy ? '・' + plan.confirmedBy : '') + '。' + (s.prevEventId ? '' : '') }),
+      ]);
+      if (plan.playoffs && plan.playoffs.length) {
+        panel.appendChild(el('ul', { className: 'plain-list' }, plan.playoffs.map(function (x) {
+          return el('li', { className: 'small', text: divisionLabel(x.upper, 2) + '・' + divisionLabel(x.lower, 2) + 'の入替戦: ' + (PLAYOFF_STATE_LABEL[x.state] || x.state) + (x.resultType ? '（' + (RESULT_TYPE_LABEL[x.resultType] || x.resultType) + '）' : '') + (x.confirmedAt ? '・確定 ' + formatDateTime(x.confirmedAt) : '') });
+        })));
+      }
+      panel.appendChild(el('div', { className: 'table-wrap' }, [el('table', { className: 'table' }, [
+        el('thead', null, [el('tr', null, ['選手', '前期の所属・順位', '昇降格', 'この期の所属', '理由'].map(function (h) { return el('th', { scope: 'col', text: h }); }))]),
+        el('tbody', null, plan.rows.map(function (r) {
+          return el('tr', null, [
+            el('th', { scope: 'row', text: r.name }),
+            el('td', { text: r.from ? r.from.divisionName + ' ' + r.from.rank + '位' : '—' }),
+            el('td', { text: MOVE_LABEL[r.movement] || r.movement }),
+            el('td', { text: r.newDivision ? divisionLabel(r.newDivision, plan.divisionCount) : '—' }),
+            el('td', { className: 'small', text: (r.reasons || []).join(' / ') }),
+          ]);
+        })),
+      ])]));
+      (plan.log || []).forEach(function (l) {
+        panel.appendChild(el('p', { className: 'muted small', text: '照合 ' + formatDateTime(l.at) + '・' + l.by + ': ' + (l.applied.length ? l.applied.map(function (a) { return a.name + ' ' + divisionLabel(a.from, plan.divisionCount) + '→' + divisionLabel(a.to, plan.divisionCount); }).join('、') + ' を反映' : '') + (l.acknowledged ? (l.applied.length ? '・' : '') + '記録として承認' : '') + '（' + l.reason + '）' }));
+      });
+      return panel;
+    }
+
+    function renderSeasonSettings(d, s) {
+      var c = s.league.config;
+      var name = el('input', { className: 'input', id: 'league-name', maxlength: 60, value: s.league.name });
+      var cycles = el('select', { className: 'input input--short', id: 'league-cycles' }, [1, 2].map(function (n) {
+        return el('option', { value: String(n), text: n + ' 回', selected: c.cycles === n ? true : null });
+      }));
+      var rules = seasonRuleFields('league', c);
+      return el('section', { className: 'panel' }, [
+        el('h3', { text: '期制リーグの設定（主催者・管理者）' }),
+        el('p', { className: 'muted small', text: '次期の配置の計算と、これから作る期に使います。作成済みの期の試合・段階は変えません（今期の総当たりの回数・勝ち点は「形式」タブ）。' }),
+        el('div', { className: 'form' }, [field('期制リーグの名前', name), field('次期からの総当たりの回数', cycles)].concat(rules.nodes, [
+          el('div', { className: 'btn-row' }, [
+            el('button', { className: 'btn btn--primary', type: 'button', 'data-mut': true, text: '設定を保存', onClick: function () {
+              var r = rules.value();
+              mutate('updateLeagueSettings', { eventId: d.event.id, rev: s.league.rev, name: name.value, cycles: Number(cycles.value), thresholds: r.thresholds, targets: r.targets, capacities: r.capacities }, '期制リーグの設定を保存しました。').then(function (data) {
+                if (data) delete state.ui.seasonPreview;
+              });
+            } }),
+          ]),
+        ])),
+      ]);
+    }
+
+    function renderSeasonMembers(d, s) {
+      var panel = el('section', { className: 'panel' }, [
+        el('h3', { text: '会員 ID（期をまたぐ選手の対応）' }),
+        el('p', { className: 'muted small', text: '選手を追加すると新しい会員 ID を付けます（名前が同じでも別の会員）。以前の期の会員と同じ人なら、主催者が「付け替え」で以前の会員 ID に結び付けてください。' }),
+      ]);
+      var others = s.otherMembers || [];
+      panel.appendChild(el('div', { className: 'table-wrap' }, [el('table', { className: 'table' }, [
+        el('thead', null, [el('tr', null, ['選手', '会員 ID（末尾）', s.canEdit && others.length ? '以前の会員に付け替え' : ''].map(function (h) { return el('th', { scope: 'col', text: h }); }))]),
+        el('tbody', null, (s.members || []).map(function (m) {
+          var cells = [el('th', { scope: 'row', text: m.name }), el('td', { className: 'mono', text: m.memberId ? '…' + m.memberId.slice(-6) : '（未付与）' })];
+          if (s.canEdit && others.length) {
+            var sel = el('select', { className: 'input input--auto', 'aria-label': m.name + ' を以前の会員に付け替える' }, [el('option', { value: '', text: '—' })].concat(others.map(function (o) {
+              return el('option', { value: o.memberId, text: o.name + '（…' + o.memberId.slice(-6) + (o.status === 'left' ? '・脱退' : '') + '）' });
+            })));
+            cells.push(el('td', null, [sel, el('button', { className: 'btn btn--small', type: 'button', 'data-mut': true, text: '付け替え', onClick: function () {
+              if (!sel.value) return;
+              mutate('setPlayerMember', { eventId: d.event.id, playerId: m.playerId, rev: m.rev, memberId: sel.value }, '付け替えました。');
+            } })]));
+          } else cells.push(el('td', { text: '' }));
+          return el('tr', null, cells);
+        })),
+      ])]));
+      return panel;
     }
 
     function renderHistory() {

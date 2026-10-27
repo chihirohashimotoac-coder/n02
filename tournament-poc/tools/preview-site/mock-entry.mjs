@@ -321,6 +321,7 @@ function seed(w, at) {
   // 大会の作成は主催者 1 人あたり 1 時間に 5 件まで（本番と同じ制限）。模擬の時計を進めてから作る
   const jump = () => (t += 61 * 60 * 1000);
   seedV08(a, b, c, setEvent, jump);
+  seedV10(a, b, c, setEvent, jump);
   jump();
   return t;
 }
@@ -453,6 +454,49 @@ function seedV08(a, b, c, setEvent, jump) {
   setEvent(b, lp, { isPublic: true, status: 'running' });
 }
 
+/* ---------- v1.0 の期制リーグのサンプル ---------- */
+
+function seedV10(a, b, c, setEvent, jump) {
+  jump();
+  const detail = (auth, id) => c('eventDetail', { eventId: id }, auth);
+  // 未確定の試合をまとめて確定する（名前の小さい方の勝ち。1 回 64 試合まで）
+  const playAll = (auth, id, stageIndex, limit = 99999) => {
+    let n = 0;
+    for (let guard = 0; guard < 100 && n < limit; guard++) {
+      const st = detail(auth, id).stages[stageIndex];
+      const open = (st.groups ? st.groups.flatMap((g) => g.matches) : []).filter((m) => m.status === 'scheduled' && m.p1.id && m.p2.id).slice(0, Math.min(64, limit - n));
+      if (!open.length) return;
+      c('saveMatchResults', { eventId: id, results: open.map((m) => (m.p1.name < m.p2.name ? { matchId: m.id, rev: m.rev, p1Legs: 2, p2Legs: 1 } : { matchId: m.id, rev: m.rev, p1Legs: 1, p2Legs: 2 })) }, auth);
+      n += open.length;
+    }
+  };
+  // 9. 主催者 A: 期制リーグ。第 1 期（10 人の総当たり）が終わり、第 2 期（2 部制 5・5 人）のリーグも終わって入替戦の結果待ち
+  const s1 = c('createSeasonLeague', { name: 'サンプル期制リーグ', thresholds: [8], cycles: 1, rule: { format: 'legs', bestOf: 3 } }, a).eventId;
+  c('addPlayers', { eventId: s1, names: ['期 01', '期 02', '期 03', '期 04', '期 05', '期 06', '期 07', '期 08', '期 09', '期 10'] }, a);
+  let d = detail(a, s1);
+  c('autoAssign', { eventId: s1, stageId: d.stages[0].id }, a);
+  c('generateMatches', { eventId: s1, stageId: d.stages[0].id }, a);
+  playAll(a, s1, 0);
+  jump();
+  const pv = c('previewNextSeason', { eventId: s1 }, a);
+  const s2 = c('confirmNextSeason', { eventId: s1, planVersion: pv.planVersion, dateLabel: '2027/01〜' }, a).eventId;
+  d = detail(a, s2);
+  c('generateMatches', { eventId: s2, stageId: d.stages[0].id }, a);
+  playAll(a, s2, 0);
+  c('generatePlayoffs', { eventId: s2 }, a);
+  setEvent(a, s1, { isPublic: true, status: 'finished', dateLabel: '2026/10〜2026/12' });
+  setEvent(a, s2, { isPublic: true, status: 'running' });
+  jump();
+  // 10. 主催者 B: 50 人の期制リーグ第 1 期（1 回総当たり 1,225 試合。公開データは試合一覧を分けて公開）。第 3 節まで確定
+  const big = c('createSeasonLeague', { name: 'サンプル 50 人リーグ', thresholds: [12, 30], cycles: 1, rule: { format: 'legs', bestOf: 3 } }, b).eventId;
+  c('addPlayers', { eventId: big, names: Array.from({ length: 50 }, (_, i) => '会員' + String(i + 1).padStart(2, '0')) }, b);
+  d = detail(b, big);
+  c('autoAssign', { eventId: big, stageId: d.stages[0].id }, b);
+  c('generateMatches', { eventId: big, stageId: d.stages[0].id }, b);
+  setEvent(b, big, { isPublic: true, status: 'running' });
+  playAll(b, big, 0, 75);
+}
+
 function readLog() {
   try {
     const v = JSON.parse(load(LOG_KEY) || '[]');
@@ -465,8 +509,9 @@ function readLog() {
 function boot() {
   let seededAt = Number(load(SEED_KEY));
   if (!seededAt) {
-    // サンプルは数時間前に作ったことにする（作成数の制限の 1 時間に、サンプルの分を数えないように）
-    seededAt = Date.now() - 5 * 60 * 60 * 1000;
+    // サンプルは数時間前に作ったことにする（作成数の制限の 1 時間に、サンプルの分を数えないように）。
+    // サンプルの作成は制限を避けるために模擬の時計を 1 時間ずつ進めるので、その合計（v1.0 で約 9 時間）より前から始める
+    seededAt = Date.now() - 12 * 60 * 60 * 1000;
     save(SEED_KEY, String(seededAt));
     save(LOG_KEY, '[]');
   }

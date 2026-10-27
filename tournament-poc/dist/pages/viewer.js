@@ -273,7 +273,22 @@
     return legs === null || legs === undefined ? '–' : String(legs);
   }
 
-  var STAGE_TYPE_LABEL = { round_robin: '総当たり', league: 'リーグ', single_elimination: 'トーナメント', double_elimination: 'ダブルエリミネーション', swiss: 'スイス式', series: 'ポイントシリーズ' };
+  var STAGE_TYPE_LABEL = { round_robin: '総当たり', league: 'リーグ', single_elimination: 'トーナメント', double_elimination: 'ダブルエリミネーション', swiss: 'スイス式', series: 'ポイントシリーズ', promotion: '入替戦' };
+  // v1.0: 期制リーグの昇降格（順位表の帯と、次期を確定した後の結果）
+  var ZONE_LABEL = { promote: '昇格圏', playoff: '入替戦', relegate: '降格圏' };
+  var MOVE_LABEL = {
+    rank: '',
+    stay: '残留',
+    auto_promote: '自動昇格',
+    auto_relegate: '自動降格',
+    playoff_win_promote: '入替戦で昇格',
+    playoff_win_stay: '入替戦で残留',
+    playoff_lose_relegate: '入替戦で降格',
+    playoff_lose_stay: '入替戦で残留',
+    leave: '次期は不参加',
+  };
+  /** 描画中の大会の期制リーグの情報（renderEvent が設定する） */
+  var seasonInfo = null;
   var TIEBREAKER_LABEL = { wins: '勝数', leg_diff: 'Leg 差', legs_for: '得 Leg', set_diff: 'セット差', sets_for: '得セット', head_to_head: '直接対決', points: '勝ち点', buchholz: 'Buchholz（対戦相手の勝ち点の合計。不戦は 0）', night_wins: '節優勝回数' };
 
   /** 予定の 1 行（日付・時刻・ボード・延期） */
@@ -392,6 +407,17 @@
     if (buchholz) heads.push(el('th', { scope: 'col', text: 'Buchholz' }));
     if (sets) heads.push(el('th', { scope: 'col', text: 'セット 得-失' }));
     heads.push(el('th', { scope: 'col', text: 'Leg 得-失' }));
+    // v1.0: 期制リーグの昇降格（次期を確定した後は結果、確定前は規則で決まる帯）
+    var outcome = {};
+    if (seasonInfo && seasonInfo.next && seasonInfo.next.outcome) {
+      seasonInfo.next.outcome.forEach(function (o) {
+        outcome[o.playerId] = o;
+      });
+    }
+    var zoneCol = standings.some(function (s) {
+      return s.zone || outcome[s.playerId];
+    });
+    if (zoneCol) heads.push(el('th', { scope: 'col', text: Object.keys(outcome).length ? '次期' : '昇降格' }));
     var rows = standings.map(function (s) {
       var cells = [];
       // 確定試合がないうちは全員同順位になるので、順位は出さない
@@ -402,7 +428,12 @@
       if (buchholz) cells.push(el('td', { text: String(s.buchholz) }));
       if (sets) cells.push(el('td', { text: (s.setsFor || 0) + '-' + (s.setsAgainst || 0) }));
       cells.push(el('td', { text: s.legsFor + '-' + s.legsAgainst }));
-      return el('tr', null, cells);
+      if (zoneCol) {
+        var o = outcome[s.playerId];
+        if (o) cells.push(el('td', { className: 'zone zone--' + o.kind, text: [MOVE_LABEL[o.kind] || '', o.to ? '→ ' + o.to : ''].filter(Boolean).join(' ') }));
+        else cells.push(el('td', { className: s.zone ? 'zone zone--' + s.zone : 'zone', text: s.zone ? ZONE_LABEL[s.zone] || '' : '' }));
+      }
+      return el('tr', { className: s.zone ? 'is-zone-' + s.zone : null }, cells);
     });
     var p = g.progress;
     return el('section', { className: 'group', id: 'group-' + g.id, 'aria-labelledby': 'group-title-' + g.id }, [
@@ -415,7 +446,62 @@
         el('thead', null, [el('tr', null, heads)]),
         el('tbody', null, rows),
       ]),
-      el('ol', { className: 'matches', 'aria-label': g.name + ' の対戦' }, g.matches.map(renderMatch)),
+      g.matches.length > ROUND_PICK_THRESHOLD ? roundPicker(g) : el('ol', { className: 'matches', 'aria-label': g.name + ' の対戦' }, g.matches.map(renderMatch)),
+    ]);
+  }
+
+  /**
+   * v1.0: 試合の多いグループ（50 人の総当たりなど）は、節（回戦）を選んでその節の試合だけを表示する。
+   * 既定は未確定の試合がある最初の節（なければ最後の節）。選んだ節は描き直しても保つ
+   */
+  var ROUND_PICK_THRESHOLD = 60;
+  var roundPick = {};
+  function defaultRound(matches) {
+    var open = matches.filter(function (m) {
+      return m.status !== 'final' && m.status !== 'bye' && m.status !== 'void';
+    })[0];
+    return open ? open.round : matches[matches.length - 1].round;
+  }
+  function roundPicker(g) {
+    var rounds = [];
+    var labelOf = {};
+    var countOf = {};
+    g.matches.forEach(function (m) {
+      if (labelOf[m.round] === undefined) {
+        rounds.push(m.round);
+        labelOf[m.round] = m.label || 'R' + m.round;
+        countOf[m.round] = { all: 0, final: 0 };
+      }
+      countOf[m.round].all++;
+      if (m.status === 'final' || m.status === 'bye') countOf[m.round].final++;
+    });
+    var current = roundPick[g.id];
+    if (current === undefined || labelOf[current] === undefined) current = defaultRound(g.matches);
+    var id = 'round-pick-' + g.id;
+    var select = el(
+      'select',
+      { className: 'round-pick__select', id: id },
+      rounds.map(function (r) {
+        var c = countOf[r];
+        return el('option', { value: String(r), selected: r === current ? true : null, text: labelOf[r] + '（確定 ' + c.final + ' / ' + c.all + '）' });
+      })
+    );
+    var list = el('ol', { className: 'matches', 'aria-label': g.name + ' の対戦' });
+    var fill = function (r) {
+      list.textContent = '';
+      g.matches.forEach(function (m) {
+        if (m.round === r) list.appendChild(renderMatch(m));
+      });
+    };
+    fill(current);
+    select.addEventListener('change', function () {
+      roundPick[g.id] = Number(select.value);
+      fill(Number(select.value));
+    });
+    return el('div', { className: 'round-pick' }, [
+      el('label', { className: 'round-pick__label', for: id, text: '節を選ぶ（全 ' + rounds.length + ' 節・' + g.matches.length + ' 試合）' }),
+      select,
+      list,
     ]);
   }
 
@@ -597,7 +683,8 @@
       return e.startRound > 1;
     });
     if (late.length) notes.push('シード ' + late.map(function (e) { return e.name + '（' + e.startRound + ' 回戦から）'; }).join('、') + ' は途中の回戦から出場します。');
-    var body = stage.type === 'series' ? renderSeries(stage) : stage.type === 'double_elimination' ? renderDoubleElimination(stage) : stage.groups ? renderGroupStage(stage, groupFilter) : renderBracket(stage);
+    if (stage.type === 'promotion') notes.push('上位の部の下から 2 位と下位の部の 2 位の入替戦です。上位の部の選手が勝てば両者とも残留、下位の部の選手が勝てば入れ替わります。');
+    var body = stage.type === 'series' ? renderSeries(stage) : stage.type === 'double_elimination' ? renderDoubleElimination(stage) : stage.type === 'promotion' ? renderPromotion(stage) : stage.groups ? renderGroupStage(stage, groupFilter) : renderBracket(stage);
     return el('section', { className: 'stage stage--' + stage.type, id: 'stage-' + stage.id, 'aria-labelledby': 'stage-title-' + stage.id }, [
       stage.name
         ? el('header', { className: 'stage__head' }, [
@@ -689,6 +776,178 @@
     return el('div', { className: 'series' }, parts);
   }
 
+  /* ---------- 分割した公開データ（v1.0） ---------- */
+
+  var PART_STATUS = { s: 'scheduled', l: 'live', f: 'final', c: 'check', p: 'pending', v: 'void', b: 'bye' };
+
+  /**
+   * 試合数の多い大会（公開データが上限を超える大会）は、グループの試合一覧がパート（分割行）に入っている。
+   * 本体（main）と、取得したパート（{ パートID: パートの内容 }）から、従来と同じ形の公開データを作る（DOM に依存しない）。
+   * パートが 1 つでも足りなければ null（呼び出し側で取得し直す）。本体は書き換えない。
+   */
+  function hydrateParts(main, parts) {
+    if (!main || !Array.isArray(main.parts) || !main.parts.length) return main;
+    var byGroup = {};
+    for (var i = 0; i < main.parts.length; i++) {
+      var info = main.parts[i];
+      var body = parts[info.id];
+      if (!body || body.version !== info.version || !body.data || body.data.groupId !== info.groupId) return null;
+      (byGroup[info.groupId] = byGroup[info.groupId] || []).push(body.data);
+    }
+    var out = JSON.parse(JSON.stringify(main));
+    (out.stages || []).forEach(function (st) {
+      (st.groups || []).forEach(function (g) {
+        if (!g.matchesInParts) return;
+        var players = g.players || [];
+        var ref = function (x) {
+          if (x === -1 || x === null || x === undefined) return { id: '', name: '' };
+          if (Array.isArray(x)) return { id: x[0], name: x[1] };
+          var p = players[x];
+          return p ? { id: p.id, name: p.name } : { id: '', name: '' };
+        };
+        var list = [];
+        (byGroup[g.id] || []).forEach(function (body) {
+          body.rows.forEach(function (r) {
+            var p1 = ref(r[3]);
+            var p2 = ref(r[4]);
+            var m = {
+              id: r[0],
+              round: r[1],
+              order: r[2],
+              label: body.labels[String(r[1])],
+              bestOf: r[11],
+              p1: { id: p1.id, name: p1.name, legs: r[5], sets: r[7] },
+              p2: { id: p2.id, name: p2.name, legs: r[6], sets: r[8] },
+              status: PART_STATUS[r[9]] || r[9],
+              winnerId: r[10] === 1 ? p1.id : r[10] === 2 ? p2.id : Array.isArray(r[10]) ? r[10][0] : null,
+            };
+            var extra = r[12];
+            if (extra) {
+              Object.keys(extra).forEach(function (k) {
+                m[k] = extra[k];
+              });
+            }
+            list.push(m);
+          });
+        });
+        g.matches = list;
+        delete g.matchesInParts;
+        delete g.matchCount;
+      });
+    });
+    // 互換用の最上位の groups（旧閲覧ページは最初のロビンの groups を読む）も、復元したグループにそろえる
+    if (Array.isArray(out.groups) && out.groups.length) {
+      var byId = {};
+      (out.stages || []).forEach(function (st) {
+        (st.groups || []).forEach(function (g) {
+          byId[g.id] = g;
+        });
+      });
+      out.groups = out.groups.map(function (g) {
+        return byId[g.id] || g;
+      });
+    }
+    delete out.parts;
+    return out;
+  }
+
+  /**
+   * 本体を取得したあと、パートのうち手元にない・版が変わったものだけを取得してから ok を呼ぶ。
+   * 失敗したら fail（自動更新が再試行する）。手元のパートは大会ごとに持つ（cache = { パートID: { version, data } }）
+   */
+  function withParts(fetchOne, cache, eventId, res, ok, fail) {
+    if (!res || !res.ok || !res.data || !Array.isArray(res.data.parts) || !res.data.parts.length) return ok(res);
+    var need = res.data.parts.filter(function (p) {
+      return !cache[p.id] || cache[p.id].version !== p.version;
+    });
+    var left = need.length;
+    var failed = false;
+    var finish = function () {
+      var merged = hydrateParts(res.data, cache);
+      if (!merged) return fail({ message: '公開データの一部を取得できませんでした（更新の途中の可能性があります）' });
+      var keep = {};
+      res.data.parts.forEach(function (p) {
+        keep[p.id] = true;
+      });
+      Object.keys(cache).forEach(function (k) {
+        if (!keep[k]) delete cache[k];
+      });
+      ok(Object.assign({}, res, { data: merged, partsFetched: need.length }));
+    };
+    if (!left) return finish();
+    need.forEach(function (p) {
+      fetchOne(
+        { eventId: eventId || res.data.event.id, part: p.id, knownVersion: cache[p.id] ? cache[p.id].version : '' },
+        function (r) {
+          if (failed) return;
+          if (r && r.ok && r.data && r.version === p.version) cache[p.id] = { version: r.version, data: r.data };
+          else if (!(r && r.ok && r.notModified && cache[p.id] && cache[p.id].version === p.version)) {
+            failed = true;
+            return fail({ message: (r && r.error && r.error.message) || '公開データの一部の版が一致しません' });
+          }
+          if (--left === 0) finish();
+        },
+        function (err) {
+          if (failed) return;
+          failed = true;
+          fail(err);
+        }
+      );
+    });
+  }
+
+  /** v1.0: 期制リーグの入替戦（隣接するディビジョンの組ごとに 1 試合） */
+  function renderPromotion(stage) {
+    var pairs = stage.pairs || [];
+    if (!pairs.length) return el('p', { className: 'empty', text: '入替戦はまだ組まれていません。' });
+    return el(
+      'div',
+      { className: 'promotion' },
+      pairs.map(function (pair) {
+        return el('section', { className: 'group promotion__pair', id: 'group-' + pair.id }, [
+          el('header', { className: 'group__head' }, [
+            el('h3', { className: 'group__title', text: pair.name }),
+            el('span', { className: 'group__progress', text: pair.players.map(function (x) { return x.source; }).filter(Boolean).join(' vs ') }),
+          ]),
+          pair.match ? el('ol', { className: 'matches', 'aria-label': pair.name }, [renderMatch(pair.match)]) : el('p', { className: 'empty', text: 'まだ組まれていません。' }),
+        ]);
+      })
+    );
+  }
+
+  /** v1.0: 期制リーグの期の一覧（公開中の期だけリンク）と、次期を確定した後の案内 */
+  function renderSeasonNav(box, data, loc) {
+    if (!box) return;
+    box.textContent = '';
+    var s = data && data.event && data.event.season;
+    box.hidden = !s;
+    if (!s) return;
+    var href = function (id) {
+      var base = loc && /^https?:$/.test(loc.protocol) ? loc.pathname : '';
+      return base + '?event=' + encodeURIComponent(id);
+    };
+    box.appendChild(el('p', { className: 'season-nav__title', text: '期制リーグ「' + s.league + '」 第' + s.no + '期' }));
+    box.appendChild(
+      el(
+        'ol',
+        { className: 'season-nav__list' },
+        s.seasons.map(function (x) {
+          if (x.current) return el('li', { className: 'is-current', 'aria-current': 'page', text: '第' + x.no + '期' });
+          if (x.eventId) return el('li', null, [el('a', { href: href(x.eventId), text: '第' + x.no + '期' })]);
+          return el('li', { className: 'is-private', text: '第' + x.no + '期（非公開）' });
+        })
+      )
+    );
+    if (s.next) {
+      box.appendChild(
+        el('p', { className: 'season-nav__next' }, [
+          '第' + s.next.no + '期の所属が確定しました（順位表の「次期」の列）。',
+          s.next.eventId ? el('a', { href: href(s.next.eventId), text: '第' + s.next.no + '期を見る' }) : null,
+        ])
+      );
+    }
+  }
+
   function legacyStage(data) {
     return { id: 'main', name: '', type: 'round_robin', groups: data.groups || [], progress: data.progress, rule: data.rule };
   }
@@ -700,6 +959,7 @@
   function renderEvent(root, data, filter) {
     var f = typeof filter === 'string' ? { stage: 'all', group: filter } : filter || {};
     var stages = eventStages(data);
+    seasonInfo = data.event && data.event.season ? data.event.season : null;
     // 自動更新で描き直しても、トーナメント表の横スクロールの位置を保つ
     var scrolled = {};
     Array.prototype.forEach.call(root.querySelectorAll ? root.querySelectorAll('.bracket__scroll') : [], function (sc) {
@@ -879,6 +1139,7 @@
       ui.rule.textContent = ruleText(rule);
       ui.updated.textContent = formatTime(d.dataUpdatedAt);
       renderNotice(d);
+      renderSeasonNav($('season-nav'), d, win.location);
       renderQr(d);
       renderFilter();
       renderEvent(ui.groups, d, view.filter);
@@ -936,10 +1197,17 @@
     var config = win.TPOC_CONFIG || null;
     var fetchJson = config ? createFetchTransport(win, config.endpoint) : null;
 
-    function fetchSnapshot(req, ok, fail) {
-      req.eventId = view.eventId || undefined;
+    function fetchOne(req, ok, fail) {
       if (fetchJson) fetchJson(req, ok, fail);
       else win.google.script.run.withSuccessHandler(ok).withFailureHandler(fail).getPublicSnapshot(req);
+    }
+    // v1.0: 分割した公開データ（パート）の手元の写し。大会の本体が変わったときだけ、変わったパートを取り直す
+    var partCache = {};
+    function fetchSnapshot(req, ok, fail) {
+      req.eventId = view.eventId || undefined;
+      fetchOne(req, function (res) {
+        withParts(fetchOne, partCache, view.eventId, res, ok, fail);
+      }, fail);
     }
 
     var params = {};
@@ -1134,6 +1402,7 @@
     return function (req, ok, fail) {
       var q = ['format=json'];
       if (req.eventId) q.push('event=' + encodeURIComponent(req.eventId));
+      if (req.part) q.push('part=' + encodeURIComponent(req.part));
       if (req.knownVersion) q.push('known=' + encodeURIComponent(req.knownVersion));
       win
         .fetch(endpoint + '?' + q.join('&'), { method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'follow' })
@@ -1153,8 +1422,11 @@
   global.TPViewer = {
     readSearchParams: readSearchParams,
     createFetchTransport: createFetchTransport,
+    hydrateParts: hydrateParts,
+    withParts: withParts,
     createPoller: createPoller,
     renderEvent: renderEvent,
+    renderSeasonNav: renderSeasonNav,
     bracketLayout: bracketLayout,
     refreshPlan: refreshPlan,
     allMatchesFinal: allMatchesFinal,

@@ -1345,3 +1345,97 @@ body.qr-forced .qr-panel {
   .group, .stage, .night { break-inside: avoid-page; }
   .bracket__scroll, .round-columns, .table-scroll { overflow: visible; }
 }
+
+/* v1.0: 試合の多いグループの節の選択 */
+.round-pick {
+  display: grid;
+  gap: 6px;
+}
+
+.round-pick__label {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.round-pick__select {
+  font: inherit;
+  max-width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* v1.0: 期制リーグ（期の一覧・昇降格の帯・入替戦） */
+.season-nav {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.season-nav__title {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.season-nav__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 14px;
+}
+
+.season-nav__list .is-current {
+  font-weight: 700;
+}
+
+.season-nav__list .is-private {
+  color: var(--ink-2);
+}
+
+.season-nav__next {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+
+.season-nav__next a {
+  margin-left: 6px;
+}
+
+.summary td.zone {
+  width: auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.zone--promote,
+.zone--auto_promote,
+.zone--playoff_win_promote {
+  color: var(--final);
+  font-weight: 600;
+}
+
+.zone--relegate,
+.zone--auto_relegate,
+.zone--playoff_lose_relegate {
+  color: var(--check);
+  font-weight: 600;
+}
+
+.zone--playoff,
+.zone--playoff_win_stay,
+.zone--playoff_lose_stay {
+  color: var(--live);
+  font-weight: 600;
+}
+
+.promotion {
+  display: grid;
+  gap: 12px;
+}

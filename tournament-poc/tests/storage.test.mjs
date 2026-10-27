@@ -93,9 +93,9 @@ test('移行: v0.7.1 で作った保存先を新しい版で開くと、閲覧�
   const migrated = w.ok(next, 'migrateStorage');
   assert.equal(migrated.migrateResult.migrated, true);
   assert.equal(migrated.migrateResult.from, 1);
-  assert.equal(migrated.migrateResult.to, 3);
+  assert.equal(migrated.migrateResult.to, 4);
   assert.equal(migrated.storage.migrationRequired, false);
-  assert.equal(next.properties.getProperty('SCHEMA_VERSION'), '3');
+  assert.equal(next.properties.getProperty('SCHEMA_VERSION'), '4');
   // バックアップ（同じスプレッドシート内の複製）が全シート分あり、元のシートは残っている
   const names = w.store.get().sheets.map((s) => s.name);
   sheetsBefore.filter((n) => n !== 'シート1').forEach((n) => {
@@ -206,19 +206,25 @@ test('まとめて書き込み: 途中で検証に失敗した操作は何も書
 });
 
 test('まとめて書き込み: 公開データが上限を超える変更は保存しない（保存してから気づかない）', () => {
+  // v1.0: ロビン・リーグの試合一覧は分割して公開できるようになったので、分割しない段階（ダブルエリミ）を積み増して上限を超えさせる
   const p = setupPair();
   p.ok('initializeStorage');
-  const id = p.ok('createEvent', { name: '大きな大会', template: 'league', rule: { format: 'legs', bestOf: 5 } }).eventId;
+  const id = p.ok('createEvent', { name: '大きな大会', template: 'double_elimination', rule: { format: 'legs', bestOf: 5 } }).eventId;
   const names = Array.from({ length: 64 }, (_, i) => '長い名前の選手' + String(i).padStart(3, '0') + 'ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰ');
   p.ok('addPlayers', { eventId: id, names });
   p.ok('addPlayers', { eventId: id, names: names.map((n) => n + '二') });
+  for (let i = 0; i < 7; i++) p.ok('addStage', { eventId: id, type: 'double_elimination', name: 'ダブルエリミ' + (i + 2) });
   let d = p.ok('eventDetail', { eventId: id });
-  p.ok('autoAssign', { eventId: id, stageId: d.stages[0].id });
-  d = p.ok('eventDetail', { eventId: id });
   p.ok('updateEvent', { eventId: id, rev: d.event.rev, name: d.event.name, dateLabel: '', status: 'running', isPublic: true, isFeatured: false, notes: '' });
-  const dump = p.store.dump();
-  const res = p.call('generateMatches', { eventId: id, stageId: d.stages[0].id });
-  assert.equal(res.ok, false);
+  let res = null;
+  let dump = '';
+  for (const st of d.stages) {
+    p.ok('setEntrants', { eventId: id, stageId: st.id, playerIds: d.players.map((x) => x.id) });
+    dump = p.store.dump();
+    res = p.call('generateBracket', { eventId: id, stageId: st.id });
+    if (!res.ok) break;
+  }
+  assert.equal(res.ok, false, '8 段階 × 128 名のダブルエリミの表のどこかで上限を超える');
   assert.equal(res.error.code, 'TOO_LARGE');
   assert.match(res.error.message, /保存していません/);
   assert.equal(p.store.dump(), dump);

@@ -16,6 +16,7 @@ var SUMMARY_STAGE_LABEL_ = Object.freeze({
   double_elimination: 'ダブルエリミネーション',
   swiss: 'スイス式',
   series: 'ポイントシリーズ',
+  promotion: '入替戦',
 });
 
 /** 段階の種類 → 一覧の大分類（shared/formats.js の FORMAT_CATEGORY_LABEL） */
@@ -26,6 +27,7 @@ var SUMMARY_STAGE_KIND_ = Object.freeze({
   double_elimination: 'tournament',
   swiss: 'swiss',
   series: 'series',
+  promotion: 'league',
 });
 
 /** 対戦カードを作る前の段階の試合数の見積もり。見積もれないときは null */
@@ -43,6 +45,11 @@ function estimateStageMatches_(stage) {
     var sw = (stage.groups && stage.groups[0] ? stage.groups[0].players : []).length;
     var rounds = stage.swiss ? stage.swiss.rounds : 0;
     return sw >= 2 && rounds ? rounds * Math.floor(sw / 2) : null;
+  }
+  if (stage.type === 'promotion') {
+    // v1.0: 期制リーグの入替戦（隣接するディビジョンの組ごとに 1 試合）
+    var pairs = (stage.pairs || []).length;
+    return pairs ? pairs : null;
   }
   if (stage.type === 'series') {
     var roster = (stage.roster || []).length;

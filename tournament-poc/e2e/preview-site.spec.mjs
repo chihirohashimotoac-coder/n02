@@ -48,17 +48,25 @@ test('プレビューサイト: 説明ページ → サンプル → 主催者�
   await page.goto(`${base}/index.html`);
   await expect(page.locator('.banner')).toHaveText('プレビュー・模擬データ・本番には保存されません');
   await expect(page.locator('#build-sha')).toHaveText('0123456789abcdef0123456789abcdef01234567');
-  await expect(page.getByRole('row')).toHaveCount(12);
+  await expect(page.getByRole('row')).toHaveCount(14);
 
-  // ポータル: 公開中のサンプル 11 件。左下の目印にコミット
+  // ポータル: 公開中のサンプル 14 件（v1.0 の期制リーグ 3 件を含む）。左下の目印にコミット
   await page.getByRole('link', { name: /ポータル/ }).click();
-  await expect(page.getByText('公開中の大会 11 件')).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText('公開中の大会 14 件')).toBeVisible({ timeout: 60000 });
+  await expect(page.getByText('サンプル期制リーグ 第2期').first()).toBeVisible();
+  await expect(page.getByText('サンプル 50 人リーグ 第1期').first()).toBeVisible();
   await expect(page.locator('.preview-badge')).toHaveText('プレビュー・模擬データ・本番には保存されません（0123456）');
 
-  // 主催者 A でログインし、ダブルエリミのサンプルに結果を 1 試合入れる
+  // 主催者 A でログインし、期制リーグの第 2 期（入替戦の結果待ち）を開く
   await page.goto(`${base}/site/admin/index.html`);
   await page.locator('.fake-gsi').first().click();
   await page.locator('.fake-gsi-account', { hasText: 'organizer@example.org' }).click();
+  await page.locator('.event-card').filter({ hasText: 'サンプル期制リーグ 第2期' }).last().getByRole('button', { name: '開く' }).click();
+  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await expect(page.getByText('期制リーグ「サンプル期制リーグ」 第2期')).toBeVisible();
+  await expect(page.locator('table', { hasText: '1部・2部' }).first()).toContainText('未開始');
+  await page.getByRole('button', { name: '← あなたの大会' }).click();
+  // ダブルエリミのサンプルに結果を 1 試合入れる
   await page.locator('.event-card').filter({ hasText: 'サンプル: ダブルエリミネーション 5 名' }).last().getByRole('button', { name: '開く' }).click();
   await expect(page.getByRole('heading', { name: 'サンプル: ダブルエリミネーション 5 名' })).toBeVisible();
   await page.getByRole('button', { name: '試合結果', exact: true }).click();
