@@ -6,6 +6,7 @@ import {
   openSingleGame,
   startCountUp,
 } from './helpers';
+import { NORMAL_NAMES, pentathlonAtCricket } from './engineStates';
 import { reach } from './reach';
 
 /**
@@ -207,6 +208,99 @@ test.describe('smartphone landscape: n01 型の配置', () => {
       await enterGameScore(page, 60);
       await expect(page.locator('.n01-left-table strong').first()).toHaveText('441');
       await expectN01StyleLandscape(page);
+    });
+  }
+});
+
+/** Whether a single-line text element shows its whole text (no ellipsis, nothing cut off). */
+async function expectWholeText(page: Page, selector: string, texts: readonly string[]) {
+  const shown = await page.locator(selector).evaluateAll((elements) =>
+    elements.map((el) => ({ text: el.textContent, cut: el.scrollWidth > el.clientWidth + 0.5 })),
+  );
+  expect(shown.map((item) => item.text)).toEqual(texts);
+  for (const item of shown) expect(item.cut, `「${item.text}」が省略されている`).toBe(false);
+}
+
+/** `inner` lies inside `outer` and does not overlap any of `others`. */
+async function expectPlaced(page: Page, inner: string, outer: string, others: string[]) {
+  const a = await box(page, inner);
+  const b = await box(page, outer);
+  expect(a.x).toBeGreaterThanOrEqual(b.x - 0.5);
+  expect(a.y).toBeGreaterThanOrEqual(b.y - 0.5);
+  expect(a.x + a.width).toBeLessThanOrEqual(b.x + b.width + 0.5);
+  expect(a.y + a.height).toBeLessThanOrEqual(b.y + b.height + 0.5);
+  for (const other of others) {
+    const c = await box(page, other);
+    const overlapX = Math.min(a.x + a.width, c.x + c.width) - Math.max(a.x, c.x);
+    const overlapY = Math.min(a.y + a.height, c.y + c.height) - Math.max(a.y, c.y);
+    expect(overlapX <= 0.5 || overlapY <= 0.5, `${inner} overlaps ${other}`).toBe(true);
+  }
+}
+
+test.describe('smartphone landscape: n01 型のヘッダー', () => {
+  // n01 gives the header to the names and the leg score. n02 also shows 先攻/後攻 and THROW there;
+  // on the narrower landscape header they must not cost the names their text.
+  for (const mode of ['通常01', 'Pentathlon 501'] as const) {
+    test(`${mode}: 名前を省略せず、先攻/後攻と THROW も名前に重ならずに見える`, async ({ page }) => {
+      await openFreshApp(page);
+      if (mode === '通常01') {
+        await page.getByRole('button', { name: /ゲームを開始/ }).click();
+        await expect(page.locator('.n01-game-shell')).toBeVisible();
+      } else {
+        await openSingleGame(page, 'JDA 501');
+        await page.getByRole('button', { name: /を開始/ }).click();
+        await expect(page.locator('.pent-x01-shell')).toBeVisible();
+      }
+      for (const turn of [0, 1]) {
+        await expectWholeText(page, '.n01-player-name strong', NORMAL_NAMES);
+        for (const side of ['.n01-player-name:not(.right)', '.n01-player-name.right']) {
+          await expectPlaced(page, `${side} span`, side, [`${side} strong`]);
+        }
+        const thrower = `.n01-player-name.active`;
+        await expectPlaced(page, `${thrower} em`, thrower, [`${thrower} strong`, `${thrower} span`]);
+        await expectN01StyleLandscape(page);
+        if (turn === 0) await enterGameScore(page, 60);
+      }
+    });
+  }
+});
+
+test.describe('smartphone landscape: CRICKET（n01 型の向き）', () => {
+  for (const playerCount of [1, 2] as const) {
+    test(`${playerCount}人: 入力する盤面が右の全高、見出し・進行欄・戻すが左。名前を省略しない`, async ({ page }, testInfo) => {
+      await page.goto('/');
+      await page.evaluate((session) => {
+        localStorage.clear();
+        localStorage.setItem('n02-pentathlon-v1', JSON.stringify(session));
+      }, pentathlonAtCricket(playerCount));
+      await page.reload();
+      await page.locator('.mode-card[data-mode="pentathlon"]').click();
+      await page.getByRole('button', { name: /中断したペンタスロンを再開/ }).click();
+      await expect(page.locator('.pent-cricket-board')).toBeVisible();
+      await expectNoOverflow(page);
+
+      const viewport = page.viewportSize()!;
+      const board = await box(page, '.pent-cricket-board');
+      // As n01's keypad: the input runs (nearly) the full height on the right.
+      expect(board.x + board.width).toBeGreaterThanOrEqual(viewport.width - 24);
+      expect(board.y).toBeLessThanOrEqual(12);
+      expect(board.y + board.height).toBeGreaterThanOrEqual(viewport.height - 12);
+      for (const part of ['.pent-play-head', '.pent-progress', '.pent-play-pad']) {
+        const rail = await box(page, part);
+        expect(rail.x + rail.width, `${part} is not left of the board`).toBeLessThanOrEqual(board.x + 0.5);
+      }
+
+      const names = NORMAL_NAMES.slice(0, playerCount);
+      await expectWholeText(page, '.pent-cricket-name b', names);
+      const thrower = '.pent-cricket-name.active';
+      await expectPlaced(page, `${thrower} em`, thrower, [`${thrower} b`]);
+
+      for (const button of await page.locator('.pent-cricket-board button:not(:disabled), .pent-play-shell .pent-menu-button').all()) {
+        expect((await reach(page, button, testInfo)).gestures).toBe(0);
+      }
+      // A dart still lands: S20 is staged on the thrower's 20.
+      await page.getByRole('button', { name: 'シングル20' }).click();
+      await expect(page.locator('.pent-cricket-status')).toContainText('1 / 3');
     });
   }
 });

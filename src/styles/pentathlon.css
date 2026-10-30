@@ -1795,21 +1795,22 @@
    (a tap on one key could land on the next row's), and the board's overflow:hidden cut off 15,
    BULL and 確定. 個別練習 had the same overlap with no progress panel at all.
 
-   The screen is short but wide, so - as 01's landscape rail does - everything that is not the
-   board moves into a column beside it: heading and ☰, the progress panel (closed or open; it
-   scrolls on its own if it is ever taller than its slot), the undo button and the turn status.
-   The board takes the full height, POINTS row included. Only placement changes: the same elements
+   The screen is short but wide, so - as in 01's landscape layout, which follows n01: the input
+   down the right, everything else on the left - the board, which is where CRICKET is entered,
+   takes the full height on the right, POINTS row included, and everything else moves into a
+   column on its left: heading and ☰, the progress panel (closed or open; it scrolls on its own if
+   it is ever taller than its slot), the undo button and the turn status. Only placement changes: the same elements
    in the same DOM, no font size changes, and the keys keep at least the 38px they have on a phone held upright (they
    grow into whatever height the row has, ~40px at 390px tall and ~46px at 430px). */
 @media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
   .pent-play-shell.pent-cricket-shell > .pent-play {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) clamp(200px, 28vw, 280px);
+    grid-template-columns: clamp(200px, 28vw, 280px) minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-areas:
-      'board head'
-      'board progress'
-      'board pad';
+      'head board'
+      'progress board'
+      'pad board';
     gap: 8px 12px;
     width: 100%;
     padding: 8px max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
@@ -1847,6 +1848,21 @@
   .pent-cricket-shell .pent-cricket-status {
     text-align: left;
     white-space: normal;
+  }
+  /* The board is narrower than in portrait: THROW goes on a small line above the name, as on the
+     01 header, rather than beside it, where it left too little width for even 「プレイヤー1」. */
+  .pent-cricket-shell .pent-cricket-name {
+    flex-direction: column;
+    gap: 1px;
+    padding-block: 2px;
+  }
+  .pent-cricket-shell .pent-cricket-name em {
+    order: -1;
+    padding-block: 1px;
+    line-height: 1.2;
+  }
+  .pent-cricket-shell .pent-cricket-name b {
+    max-width: 100%;
   }
 
   .pent-cricket-shell .pent-cricket-board {

@@ -2811,19 +2811,52 @@ select:focus-visible {
     height: 46px;
     padding-inline: var(--safe-l) 0;
   }
+  /* As in n01, the header belongs to the names and the leg score. Beside a name the 先攻/後攻 and
+     THROW badges left it so little of this narrower header that even 「プレイヤー1」 was elided, so
+     they move to a small line above it - as LEG sits above the score in the middle - and the name
+     gets the cell's whole width. Same badges, same font sizes; only their vertical padding is
+     trimmed so both lines fit the 46px header. */
   .n01-player-name {
-    gap: 8px;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-content: center;
+    justify-items: start;
+    gap: 2px 6px;
     padding: 0 12px;
   }
-  .n01-player-name strong {
-    font-size: clamp(17px, 2.1vw, 24px);
+  .n01-player-name.right {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    justify-items: end;
+  }
+  .n01-player-name span,
+  .n01-player-name em {
+    grid-row: 1;
+    line-height: 1.2;
   }
   .n01-player-name span {
-    padding: 3px 8px;
+    grid-column: 1;
+  }
+  .n01-player-name em {
+    grid-column: 2;
+  }
+  .n01-player-name.right span {
+    grid-column: 3;
+  }
+  .n01-player-name strong {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    min-width: 0;
+    max-width: 100%;
+    font-size: clamp(17px, 2.1vw, 24px);
+    line-height: 1.15;
+  }
+  .n01-player-name span {
+    padding: 1px 8px;
     font-size: 10px;
   }
   .n01-player-name em {
-    padding: 4px 7px;
+    padding: 2px 7px;
     font-size: 8px;
   }
   .n01-game-header {
