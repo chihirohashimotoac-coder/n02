@@ -36,6 +36,33 @@ const VIEWPORTS = {
   iphoneMaxLandscape: { width: 932, height: 430 },
 } as const;
 
+/**
+ * Where display-reach.spec.ts checks that every result card, menu and Cricket control can really be
+ * reached and pressed: three desktop sizes (mouse), three tablets and four phones upright, two on
+ * their side (touch, coarse pointer, no hover).
+ */
+const REACH_VIEWPORTS = [
+  ['pc-1920x1080', { width: 1920, height: 1080 }, false],
+  ['pc-1366x768', { width: 1366, height: 768 }, false],
+  ['pc-1280x720', { width: 1280, height: 720 }, false],
+  ['tablet-768x1024', { width: 768, height: 1024 }, true],
+  ['tablet-1024x768', { width: 1024, height: 768 }, true],
+  ['tablet-1180x820', { width: 1180, height: 820 }, true],
+  ['phone-320x568', { width: 320, height: 568 }, true],
+  ['phone-390x844', { width: 390, height: 844 }, true],
+  ['phone-402x874', { width: 402, height: 874 }, true],
+  ['phone-430x932', { width: 430, height: 932 }, true],
+  ['phone-844x390', { width: 844, height: 390 }, true],
+  ['phone-932x430', { width: 932, height: 430 }, true],
+] as const;
+
+/**
+ * CI runs the reach-* projects as a job of their own beside the main suite, so neither outgrows
+ * its time limit: N02_E2E=main leaves them out, N02_E2E=reach runs only them. Unset - a local
+ * `npm run test:e2e` - runs everything.
+ */
+const suite = process.env.N02_E2E;
+
 const chromium = executablePath ? { launchOptions: { executablePath } } : {};
 
 export default defineConfig({
@@ -55,12 +82,12 @@ export default defineConfig({
     // asserts the layout that only exists on a short landscape viewport, and has its own projects.
     {
       name: 'desktop-chromium',
-      testIgnore: /landscape\.spec\.ts/,
+      testIgnore: /(landscape|display-reach)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], viewport: VIEWPORTS.desktop, ...chromium },
     },
     {
       name: 'mobile-chromium',
-      testIgnore: /landscape\.spec\.ts/,
+      testIgnore: /(landscape|display-reach)\.spec\.ts/,
       use: { ...devices['Pixel 5'], ...chromium },
     },
 
@@ -134,6 +161,19 @@ export default defineConfig({
     })),
 
     /*
+     * Reachability of every result-card, menu and Cricket control (display-reach.spec.ts). Phones
+     * and tablets are Pixel 5 based - touch, coarse pointer, no hover - at the listed size; the
+     * desktop sizes are a mouse-and-keyboard Chrome.
+     */
+    ...REACH_VIEWPORTS.map(([name, viewport, touch]) => ({
+      name: `reach-${name}`,
+      testMatch: /display-reach\.spec\.ts/,
+      use: touch
+        ? { ...devices['Pixel 5'], viewport, ...chromium }
+        : { ...devices['Desktop Chrome'], viewport, ...chromium },
+    })),
+
+    /*
      * Real WebKit on an iPhone device profile - the closest this suite gets to Mobile Safari.
      *
      * Scoped to what actually needs a second rendering engine: layout and viewport geometry, the
@@ -158,7 +198,7 @@ export default defineConfig({
           },
         ]
       : []),
-  ],
+  ].filter(({ name }) => (name.startsWith('reach-') ? suite !== 'main' : suite !== 'reach')),
   webServer: {
     command: `npm run preview -- --host ${HOST} --port ${PORT} --strictPort`,
     url: `http://${HOST}:${PORT}/`,
