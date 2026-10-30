@@ -6,6 +6,7 @@ import {
   openSingleGame,
   startCountUp,
 } from './helpers';
+import { reach } from './reach';
 
 /**
  * Smartphone landscape (844×390, 852×393, 932×430 - see the layout-landscape-* projects in
@@ -126,6 +127,73 @@ test.describe('smartphone landscape: Pentathlon X01', () => {
     await expect(page.locator('.n01-left-table strong').first()).toBeInViewport();
     await expectFitsWithBottomClearance(page, '.n01-key-table', '.n01-key-table button.enter');
   });
+});
+
+/**
+ * n01's own landscape layout: the keypad the full height of the right-hand side, the header, the
+ * sheet, the remaining scores and the menu bar stacked on the left. Every part is checked against
+ * every other for overlap - measuring each part's own size is not enough, a part can be laid out
+ * over another one (the Pentathlon footer once covered the whole screen with the sizes all right).
+ */
+async function expectN01StyleLandscape(page: Page) {
+  const viewport = page.viewportSize()!;
+  const parts = ['.n01-game-header', '.n01-score-area', '.n01-left-table', '.n01-menu-table', '.n01-key-table'];
+  const boxes = Object.fromEntries(await Promise.all(parts.map(async (part) => [part, await box(page, part)] as const)));
+  for (const [i, a] of parts.entries()) {
+    const boxA = boxes[a];
+    expect(boxA.x).toBeGreaterThanOrEqual(-0.5);
+    expect(boxA.x + boxA.width).toBeLessThanOrEqual(viewport.width + 0.5);
+    expect(boxA.y + boxA.height).toBeLessThanOrEqual(viewport.height + 0.5);
+    for (const b of parts.slice(i + 1)) {
+      const boxB = boxes[b];
+      const overlapX = Math.min(boxA.x + boxA.width, boxB.x + boxB.width) - Math.max(boxA.x, boxB.x);
+      const overlapY = Math.min(boxA.y + boxA.height, boxB.y + boxB.height) - Math.max(boxA.y, boxB.y);
+      expect(overlapX <= 0.5 || overlapY <= 0.5, `${a} overlaps ${b}`).toBe(true);
+    }
+  }
+  // The keypad runs from the top edge to the bottom; everything else sits to its left.
+  const keys = boxes['.n01-key-table'];
+  expect(keys.y).toBeLessThanOrEqual(0.5);
+  expect(keys.y + keys.height).toBeGreaterThanOrEqual(viewport.height - 0.5);
+  for (const part of parts.slice(0, -1)) expect(boxes[part].x + boxes[part].width).toBeLessThanOrEqual(keys.x + 0.5);
+  // The sheet, then the remaining scores, then the menu bar, top to bottom.
+  expect(boxes['.n01-score-area'].y + boxes['.n01-score-area'].height).toBeLessThanOrEqual(boxes['.n01-left-table'].y + 0.5);
+  expect(boxes['.n01-left-table'].y + boxes['.n01-left-table'].height).toBeLessThanOrEqual(boxes['.n01-menu-table'].y + 0.5);
+}
+
+test.describe('smartphone landscape: n01 型の配置', () => {
+  for (const mode of ['通常01', 'Pentathlon 501'] as const) {
+    test(`${mode}: テンキーが右の全高、シート・残り点数・メニューが左。重なりなく、全キーが押せる`, async ({ page }, testInfo) => {
+      await openFreshApp(page);
+      if (mode === '通常01') {
+        await page.getByRole('button', { name: /ゲームを開始/ }).click();
+        await expect(page.locator('.n01-game-shell')).toBeVisible();
+      } else {
+        await openSingleGame(page, 'JDA 501');
+        await page.getByRole('button', { name: /を開始/ }).click();
+        await expect(page.locator('.pent-x01-shell')).toBeVisible();
+      }
+      await expectNoOverflow(page);
+      await expectN01StyleLandscape(page);
+
+      // Every key and menu button whole, uncovered and pressable where it is tapped, with no scrolling.
+      for (const button of await page.locator('.n01-key-table button, .n01-menu-table button').all()) {
+        expect((await reach(page, button, testInfo)).gestures).toBe(0);
+      }
+      // A tap on the sheet's free area still reaches the sheet through the footer's empty cell.
+      const sheet = await box(page, '.n01-score-area');
+      const hit = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.closest('.n01-score-area') !== null,
+        [sheet.x + sheet.width / 2, sheet.y + sheet.height - 4] as const,
+      );
+      expect(hit).toBe(true);
+
+      // And a visit entered on the keypad still lands.
+      await enterGameScore(page, 60);
+      await expect(page.locator('.n01-left-table strong').first()).toHaveText('441');
+      await expectN01StyleLandscape(page);
+    });
+  }
 });
 
 test.describe('smartphone landscape: COUNT-UP', () => {
