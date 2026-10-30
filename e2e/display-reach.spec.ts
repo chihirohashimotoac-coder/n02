@@ -137,7 +137,10 @@ for (const mode of ['01', 'checkout'] as const) {
         await reachAll(page, legRows, testInfo);
 
         // Share: a real tap, then the image it produced must hold the whole card, not a blank
-        // or cut-off one.
+        // or cut-off one. Tapped once the card's 0.32s entrance animation has finished, as a person
+        // would: the snapshot copies the card's opacity, so a tap while it is still fading in (well
+        // under half a second after it appears) yields a transparent image - not this PR's change.
+        await card.evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
         const fullHeight = await card.evaluate((el) => el.getBoundingClientRect().height + el.scrollHeight - el.clientHeight);
         const downloadPromise = page.waitForEvent('download');
         await reachAndTap(page, card.getByRole('button', { name: 'リザルトカードを共有' }), testInfo);
