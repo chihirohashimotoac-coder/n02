@@ -2786,38 +2786,77 @@ select:focus-visible {
    - no history, no live entry cell, no remaining score visible - and the keypad ran off the bottom
    edge while the footer painted over the header.
 
-   The screen is short but very wide, so the controls move BESIDE the sheet instead of under it.
-   Purely a CSS re-placement of the same elements in the same DOM order: nothing here changes what
-   any control does, only where it sits. Scoped to a short landscape viewport with a coarse pointer,
-   so desktop, tablet and portrait phone layouts are untouched.
+   The screen is short but very wide, so - as n01 lays out a phone on its side - the keypad takes the
+   whole height of the right-hand side, and the names / legs, the score sheet, the remaining scores
+   and the menu bar are stacked on the left. Purely a CSS re-placement of the same elements in the
+   same DOM order: nothing here changes what any control does, only where it sits. Scoped to a short
+   landscape viewport with a coarse pointer, so desktop, tablet and portrait phone layouts are
+   untouched.
 
    Pentathlon X01 (301/501) renders the same .n01-* shell, so it is covered by the same rules. */
 @media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
   .n01-game-shell {
-    /* Width of the control rail on the right. The keypad needs three comfortable columns. */
-    --rail: clamp(268px, 33vw, 340px);
+    /* Width of the keypad column on the right, which runs the full height of the screen. */
+    --rail: clamp(300px, 42vw, 420px);
+    /* The remaining-score row and the menu bar, under the sheet on the left. */
+    --left-h: clamp(72px, 22vh, 96px);
+    --menu-h: 40px;
     --safe-l: env(safe-area-inset-left, 0px);
     --safe-r: env(safe-area-inset-right, 0px);
     --safe-b: env(safe-area-inset-bottom, 0px);
   }
 
   .n01-game-header {
+    right: calc(var(--rail) + var(--safe-r));
     height: 46px;
-    padding-inline: var(--safe-l) var(--safe-r);
+    padding-inline: var(--safe-l) 0;
   }
+  /* As in n01, the header belongs to the names and the leg score. Beside a name the 先攻/後攻 and
+     THROW badges left it so little of this narrower header that even 「プレイヤー1」 was elided, so
+     they move to a small line above it - as LEG sits above the score in the middle - and the name
+     gets the cell's whole width. Same badges, same font sizes; only their vertical padding is
+     trimmed so both lines fit the 46px header. */
   .n01-player-name {
-    gap: 8px;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-content: center;
+    justify-items: start;
+    gap: 2px 6px;
     padding: 0 12px;
   }
-  .n01-player-name strong {
-    font-size: clamp(17px, 2.1vw, 24px);
+  .n01-player-name.right {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    justify-items: end;
+  }
+  .n01-player-name span,
+  .n01-player-name em {
+    grid-row: 1;
+    line-height: 1.2;
   }
   .n01-player-name span {
-    padding: 3px 8px;
+    grid-column: 1;
+  }
+  .n01-player-name em {
+    grid-column: 2;
+  }
+  .n01-player-name.right span {
+    grid-column: 3;
+  }
+  .n01-player-name strong {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    min-width: 0;
+    max-width: 100%;
+    font-size: clamp(17px, 2.1vw, 24px);
+    line-height: 1.15;
+  }
+  .n01-player-name span {
+    padding: 1px 8px;
     font-size: 10px;
   }
   .n01-player-name em {
-    padding: 4px 7px;
+    padding: 2px 7px;
     font-size: 8px;
   }
   .n01-game-header {
@@ -2830,9 +2869,10 @@ select:focus-visible {
     font-size: 21px;
   }
 
-  /* The sheet takes the whole height it is given, with the rail carved off the right. */
+  /* The sheet: under the header, above the remaining scores and the menu bar, left of the keypad. */
   .n01-score-area {
-    inset: 46px calc(var(--rail) + var(--safe-r)) 0 var(--safe-l);
+    inset: 46px calc(var(--rail) + var(--safe-r)) calc(var(--left-h) + var(--menu-h) + var(--safe-b))
+      var(--safe-l);
   }
   .n01-game-meta {
     min-height: 30px;
@@ -2847,9 +2887,9 @@ select:focus-visible {
     padding: 4px 10px;
     font-size: 10px;
   }
-  /* Rows sized so three or four rounds read at once in the height that is left. */
+  /* Rows sized so three rounds read at once in the height that is left. */
   .n01-score-table td {
-    height: clamp(56px, 20vh, 92px);
+    height: clamp(48px, 13.5vh, 92px);
   }
   .n01-score-table th {
     height: 30px;
@@ -2867,24 +2907,39 @@ select:focus-visible {
   .n01-score-table td.darts {
     font-size: clamp(18px, 2.4vw, 28px);
   }
-  /* The rail: remaining scores, the menu bar and the keypad, stacked down the right-hand side. */
+  /* The footer (remaining scores, menu bar, keypad) becomes a transparent full-screen grid: the
+     keypad down the right, the other two along the bottom left. Its empty top-left cell passes taps
+     through to the sheet underneath. */
   .n01-game-footer {
-    inset: 46px 0 0 auto;
-    width: calc(var(--rail) + var(--safe-r));
+    inset: 0;
+    width: auto;
     height: auto;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--rail);
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      '. keys'
+      'left keys'
+      'menu keys';
+    padding: 0 var(--safe-r) 0 var(--safe-l);
     border-top: 0;
-    border-left: 2px solid var(--green-dark);
-    padding-right: var(--safe-r);
-    /* A minimum even where the browser reports no inset, so repeated taps on the bottom key row
-       never land on the home indicator / gesture area. */
-    padding-bottom: max(12px, var(--safe-b));
-    box-shadow: -8px 0 30px #19241e14;
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
+  .n01-game-footer > * {
+    pointer-events: auto;
+  }
+  /* A theme can give the footer a solid fill ([data-theme='neon'] .n01-game-footer, which outranks
+     the rule above); across the whole screen that would paint over the header and the sheet. The
+     grid stays see-through in every theme - its three parts keep their own backgrounds. */
+  [data-theme] .n01-game-shell > .n01-game-footer {
+    background: transparent;
   }
   .n01-left-table {
-    flex: none;
-    height: clamp(72px, 22vh, 96px);
+    grid-area: left;
+    height: var(--left-h);
+    border-top: var(--border-strong);
   }
   .n01-left-table strong {
     font-size: clamp(38px, 11vh, 56px);
@@ -2898,8 +2953,9 @@ select:focus-visible {
     font-size: clamp(12px, 1.6vw, 17px);
   }
   .n01-menu-table {
-    flex: none;
-    height: 40px;
+    grid-area: menu;
+    height: calc(var(--menu-h) + var(--safe-b));
+    padding-bottom: var(--safe-b);
   }
   .n01-menu-table button {
     font-size: 12px;
@@ -2907,13 +2963,16 @@ select:focus-visible {
   .n01-menu-table button:last-child {
     font-size: 16px;
   }
-  /* Fills whatever is left, so the bottom key row always ends above the gesture area. */
+  /* The full height on the right; the bottom key row always ends above the gesture area - a minimum
+     even where the browser reports no inset, so repeated taps never land on the home indicator. */
   .n01-key-table {
+    grid-area: keys;
     display: grid;
-    flex: 1 1 auto;
     min-height: 0;
     height: auto;
-    padding-bottom: 0;
+    padding-bottom: max(12px, var(--safe-b));
+    border-left: 2px solid var(--green-dark);
+    box-shadow: -8px 0 30px #19241e14;
     background: #354239;
     grid-template-rows: repeat(4, minmax(0, 1fr));
     grid-template-columns: repeat(3, 1fr);

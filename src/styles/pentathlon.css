@@ -1756,32 +1756,34 @@
 
 /* ================================================================ smartphone landscape (Pentathlon X01)
 
-   Pentathlon X01 renders the same .n01-game-shell as 通常01, so app.css's landscape rail applies to
-   its header, sheet and keys already. Only the two heights this file pins for the fullscreen
-   variant (--pent-footer-h drives .n01-game-footer and .n01-score-area) have to follow it across,
-   otherwise the sheet keeps the 0px it had and the footer runs 50px past the bottom edge.
+   Pentathlon X01 renders the same .n01-game-shell as 通常01, so app.css's landscape layout (keypad
+   the full height on the right, sheet / remaining scores / menu bar on the left) applies to its
+   header and keys already. What this file pins for the fullscreen variant has to follow it across:
+   the footer's height and its flex column (--pent-footer-h, display:flex - app.css makes the footer
+   a full-screen grid) and the sheet's bottom edge, otherwise the footer covers the whole screen.
 
-   --rail / --safe-* are set on .n01-game-shell in app.css, which is this same element. */
+   --rail / --left-h / --menu-h / --safe-* are set on .n01-game-shell in app.css, which is this same
+   element. */
 @media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
   .pent-x01-shell .n01-score-area {
-    inset: 46px calc(var(--rail) + var(--safe-r)) 0 var(--safe-l);
+    inset: 46px calc(var(--rail) + var(--safe-r)) calc(var(--left-h) + var(--menu-h) + var(--safe-b))
+      var(--safe-l);
   }
   .pent-x01-shell .n01-game-footer {
-    inset: 46px 0 0 auto;
-    width: calc(var(--rail) + var(--safe-r));
+    inset: 0;
+    width: auto;
     height: auto;
+    display: grid;
   }
   .pent-x01-shell .n01-left-table {
-    height: clamp(72px, 22vh, 96px);
+    height: var(--left-h);
   }
   .pent-x01-shell .n01-menu-table {
-    height: 40px;
+    height: calc(var(--menu-h) + var(--safe-b));
   }
   .pent-x01-shell .n01-key-table {
     height: auto;
-    /* The shared rail already reserves the safe-area inset; the extra 20px this variant adds in
-       portrait would eat a whole key row out of a 390px-tall screen. */
-    padding-bottom: 0;
+    padding-bottom: max(12px, var(--safe-b));
   }
 }
 
@@ -1793,21 +1795,22 @@
    (a tap on one key could land on the next row's), and the board's overflow:hidden cut off 15,
    BULL and 確定. 個別練習 had the same overlap with no progress panel at all.
 
-   The screen is short but wide, so - as 01's landscape rail does - everything that is not the
-   board moves into a column beside it: heading and ☰, the progress panel (closed or open; it
-   scrolls on its own if it is ever taller than its slot), the undo button and the turn status.
-   The board takes the full height, POINTS row included. Only placement changes: the same elements
+   The screen is short but wide, so - as in 01's landscape layout, which follows n01: the input
+   down the right, everything else on the left - the board, which is where CRICKET is entered,
+   takes the full height on the right, POINTS row included, and everything else moves into a
+   column on its left: heading and ☰, the progress panel (closed or open; it scrolls on its own if
+   it is ever taller than its slot), the undo button and the turn status. Only placement changes: the same elements
    in the same DOM, no font size changes, and the keys keep at least the 38px they have on a phone held upright (they
    grow into whatever height the row has, ~40px at 390px tall and ~46px at 430px). */
 @media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
   .pent-play-shell.pent-cricket-shell > .pent-play {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) clamp(200px, 28vw, 280px);
+    grid-template-columns: clamp(200px, 28vw, 280px) minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-areas:
-      'board head'
-      'board progress'
-      'board pad';
+      'head board'
+      'progress board'
+      'pad board';
     gap: 8px 12px;
     width: 100%;
     padding: 8px max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
@@ -1845,6 +1848,24 @@
   .pent-cricket-shell .pent-cricket-status {
     text-align: left;
     white-space: normal;
+  }
+  /* The board is narrower than in portrait: THROW goes on a small line above the name, as on the
+     01 header, rather than beside it, where it left too little width for even 「プレイヤー1」. The
+     two lines are set tight - same font sizes - so the heading row is no taller than the one line
+     was: at 844×390 the board has only ~4px to spare, and a taller heading pushed POINTS off it. */
+  .pent-cricket-shell .pent-cricket-name {
+    flex-direction: column;
+    gap: 1px;
+    padding-block: 1px;
+  }
+  .pent-cricket-shell .pent-cricket-name em {
+    order: -1;
+    padding-block: 0;
+    line-height: 1.1;
+  }
+  .pent-cricket-shell .pent-cricket-name b {
+    max-width: 100%;
+    line-height: 1.05;
   }
 
   .pent-cricket-shell .pent-cricket-board {

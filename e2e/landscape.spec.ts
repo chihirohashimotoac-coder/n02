@@ -6,6 +6,8 @@ import {
   openSingleGame,
   startCountUp,
 } from './helpers';
+import { NORMAL_NAMES, pentathlonAtCricket } from './engineStates';
+import { reach } from './reach';
 
 /**
  * Smartphone landscape (844×390, 852×393, 932×430 - see the layout-landscape-* projects in
@@ -126,6 +128,185 @@ test.describe('smartphone landscape: Pentathlon X01', () => {
     await expect(page.locator('.n01-left-table strong').first()).toBeInViewport();
     await expectFitsWithBottomClearance(page, '.n01-key-table', '.n01-key-table button.enter');
   });
+});
+
+/**
+ * n01's own landscape layout: the keypad the full height of the right-hand side, the header, the
+ * sheet, the remaining scores and the menu bar stacked on the left. Every part is checked against
+ * every other for overlap - measuring each part's own size is not enough, a part can be laid out
+ * over another one (the Pentathlon footer once covered the whole screen with the sizes all right).
+ */
+async function expectN01StyleLandscape(page: Page) {
+  const viewport = page.viewportSize()!;
+  const parts = ['.n01-game-header', '.n01-score-area', '.n01-left-table', '.n01-menu-table', '.n01-key-table'];
+  const boxes = Object.fromEntries(await Promise.all(parts.map(async (part) => [part, await box(page, part)] as const)));
+  for (const [i, a] of parts.entries()) {
+    const boxA = boxes[a];
+    expect(boxA.x).toBeGreaterThanOrEqual(-0.5);
+    expect(boxA.x + boxA.width).toBeLessThanOrEqual(viewport.width + 0.5);
+    expect(boxA.y + boxA.height).toBeLessThanOrEqual(viewport.height + 0.5);
+    for (const b of parts.slice(i + 1)) {
+      const boxB = boxes[b];
+      const overlapX = Math.min(boxA.x + boxA.width, boxB.x + boxB.width) - Math.max(boxA.x, boxB.x);
+      const overlapY = Math.min(boxA.y + boxA.height, boxB.y + boxB.height) - Math.max(boxA.y, boxB.y);
+      expect(overlapX <= 0.5 || overlapY <= 0.5, `${a} overlaps ${b}`).toBe(true);
+    }
+  }
+  // The keypad runs from the top edge to the bottom; everything else sits to its left.
+  const keys = boxes['.n01-key-table'];
+  expect(keys.y).toBeLessThanOrEqual(0.5);
+  expect(keys.y + keys.height).toBeGreaterThanOrEqual(viewport.height - 0.5);
+  for (const part of parts.slice(0, -1)) expect(boxes[part].x + boxes[part].width).toBeLessThanOrEqual(keys.x + 0.5);
+  // The sheet, then the remaining scores, then the menu bar, top to bottom.
+  expect(boxes['.n01-score-area'].y + boxes['.n01-score-area'].height).toBeLessThanOrEqual(boxes['.n01-left-table'].y + 0.5);
+  expect(boxes['.n01-left-table'].y + boxes['.n01-left-table'].height).toBeLessThanOrEqual(boxes['.n01-menu-table'].y + 0.5);
+}
+
+test.describe('smartphone landscape: n01 型の配置', () => {
+  for (const [mode, theme] of [
+    ['通常01', 'clean'],
+    ['通常01', 'neon'],
+    ['通常01', 'navy'],
+    ['Pentathlon 501', 'clean'],
+    ['Pentathlon 501', 'neon'],
+    ['Pentathlon 501', 'navy'],
+  ] as const) {
+    test(`${mode}（${theme}）: テンキーが右の全高、シート・残り点数・メニューが左。重なりなく、全キーが押せる`, async ({ page }, testInfo) => {
+      await openFreshApp(page);
+      await page.evaluate((name) => localStorage.setItem('n02-theme-v1', name), theme);
+      await page.reload();
+      await page.waitForSelector('.mode-card');
+      if (mode === '通常01') {
+        await page.getByRole('button', { name: /ゲームを開始/ }).click();
+        await expect(page.locator('.n01-game-shell')).toBeVisible();
+      } else {
+        await openSingleGame(page, 'JDA 501');
+        await page.getByRole('button', { name: /を開始/ }).click();
+        await expect(page.locator('.pent-x01-shell')).toBeVisible();
+      }
+      await expectNoOverflow(page);
+      await expectN01StyleLandscape(page);
+
+      // Every key and menu button whole, uncovered and pressable where it is tapped, with no scrolling.
+      for (const button of await page.locator('.n01-key-table button, .n01-menu-table button').all()) {
+        expect((await reach(page, button, testInfo)).gestures).toBe(0);
+      }
+      // The footer spans the whole screen, so its empty cell must be see-through in every theme:
+      // a tap passing through is not enough, the header and the sheet have to be visible under it.
+      expect(await page.locator('.n01-game-footer').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(
+        'rgba(0, 0, 0, 0)',
+      );
+      // A tap on the sheet's free area still reaches the sheet through the footer's empty cell.
+      const sheet = await box(page, '.n01-score-area');
+      const hit = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.closest('.n01-score-area') !== null,
+        [sheet.x + sheet.width / 2, sheet.y + sheet.height - 4] as const,
+      );
+      expect(hit).toBe(true);
+
+      // And a visit entered on the keypad still lands.
+      await enterGameScore(page, 60);
+      await expect(page.locator('.n01-left-table strong').first()).toHaveText('441');
+      await expectN01StyleLandscape(page);
+    });
+  }
+});
+
+/** Whether a single-line text element shows its whole text (no ellipsis, nothing cut off). */
+async function expectWholeText(page: Page, selector: string, texts: readonly string[]) {
+  const shown = await page.locator(selector).evaluateAll((elements) =>
+    elements.map((el) => ({ text: el.textContent, cut: el.scrollWidth > el.clientWidth + 0.5 })),
+  );
+  expect(shown.map((item) => item.text)).toEqual(texts);
+  for (const item of shown) expect(item.cut, `「${item.text}」が省略されている`).toBe(false);
+}
+
+/** `inner` lies inside `outer` and does not overlap any of `others`. */
+async function expectPlaced(page: Page, inner: string, outer: string, others: string[]) {
+  const a = await box(page, inner);
+  const b = await box(page, outer);
+  expect(a.x).toBeGreaterThanOrEqual(b.x - 0.5);
+  expect(a.y).toBeGreaterThanOrEqual(b.y - 0.5);
+  expect(a.x + a.width).toBeLessThanOrEqual(b.x + b.width + 0.5);
+  expect(a.y + a.height).toBeLessThanOrEqual(b.y + b.height + 0.5);
+  for (const other of others) {
+    const c = await box(page, other);
+    const overlapX = Math.min(a.x + a.width, c.x + c.width) - Math.max(a.x, c.x);
+    const overlapY = Math.min(a.y + a.height, c.y + c.height) - Math.max(a.y, c.y);
+    expect(overlapX <= 0.5 || overlapY <= 0.5, `${inner} overlaps ${other}`).toBe(true);
+  }
+}
+
+test.describe('smartphone landscape: n01 型のヘッダー', () => {
+  // n01 gives the header to the names and the leg score. n02 also shows 先攻/後攻 and THROW there;
+  // on the narrower landscape header they must not cost the names their text.
+  for (const mode of ['通常01', 'Pentathlon 501'] as const) {
+    test(`${mode}: 名前を省略せず、先攻/後攻と THROW も名前に重ならずに見える`, async ({ page }) => {
+      await openFreshApp(page);
+      if (mode === '通常01') {
+        await page.getByRole('button', { name: /ゲームを開始/ }).click();
+        await expect(page.locator('.n01-game-shell')).toBeVisible();
+      } else {
+        await openSingleGame(page, 'JDA 501');
+        await page.getByRole('button', { name: /を開始/ }).click();
+        await expect(page.locator('.pent-x01-shell')).toBeVisible();
+      }
+      for (const turn of [0, 1]) {
+        await expectWholeText(page, '.n01-player-name strong', NORMAL_NAMES);
+        for (const side of ['.n01-player-name:not(.right)', '.n01-player-name.right']) {
+          await expectPlaced(page, `${side} span`, side, [`${side} strong`]);
+        }
+        const thrower = `.n01-player-name.active`;
+        await expectPlaced(page, `${thrower} em`, thrower, [`${thrower} strong`, `${thrower} span`]);
+        await expectN01StyleLandscape(page);
+        if (turn === 0) await enterGameScore(page, 60);
+      }
+    });
+  }
+});
+
+test.describe('smartphone landscape: CRICKET（n01 型の向き）', () => {
+  for (const playerCount of [1, 2] as const) {
+    test(`${playerCount}人: 入力する盤面が右の全高、見出し・進行欄・戻すが左。名前を省略しない`, async ({ page }, testInfo) => {
+      await page.goto('/');
+      await page.evaluate((session) => {
+        localStorage.clear();
+        localStorage.setItem('n02-pentathlon-v1', JSON.stringify(session));
+      }, pentathlonAtCricket(playerCount));
+      await page.reload();
+      await page.locator('.mode-card[data-mode="pentathlon"]').click();
+      await page.getByRole('button', { name: /中断したペンタスロンを再開/ }).click();
+      await expect(page.locator('.pent-cricket-board')).toBeVisible();
+      await expectNoOverflow(page);
+
+      const viewport = page.viewportSize()!;
+      const board = await box(page, '.pent-cricket-board');
+      // As n01's keypad: the input runs (nearly) the full height on the right.
+      expect(board.x + board.width).toBeGreaterThanOrEqual(viewport.width - 24);
+      expect(board.y).toBeLessThanOrEqual(12);
+      expect(board.y + board.height).toBeGreaterThanOrEqual(viewport.height - 12);
+      for (const part of ['.pent-play-head', '.pent-progress', '.pent-play-pad']) {
+        const rail = await box(page, part);
+        expect(rail.x + rail.width, `${part} is not left of the board`).toBeLessThanOrEqual(board.x + 0.5);
+      }
+
+      const names = NORMAL_NAMES.slice(0, playerCount);
+      await expectWholeText(page, '.pent-cricket-name b', names);
+      const thrower = '.pent-cricket-name.active';
+      await expectPlaced(page, `${thrower} em`, thrower, [`${thrower} b`]);
+
+      // Every key, ☰, and the heading and POINTS rows at the board's two ends, with no scrolling.
+      const whole = page.locator(
+        '.pent-cricket-board button:not(:disabled), .pent-play-shell .pent-menu-button, .pent-cricket-row.head, .pent-cricket-row.total',
+      );
+      for (const target of await whole.all()) {
+        expect((await reach(page, target, testInfo)).gestures).toBe(0);
+      }
+      // A dart still lands: S20 is staged on the thrower's 20.
+      await page.getByRole('button', { name: 'シングル20' }).click();
+      await expect(page.locator('.pent-cricket-status')).toContainText('1 / 3');
+    });
+  }
 });
 
 test.describe('smartphone landscape: COUNT-UP', () => {
