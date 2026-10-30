@@ -38,6 +38,9 @@ async function nodeToPngBlob(node: HTMLElement): Promise<Blob | null> {
 
   const clone = node.cloneNode(true) as HTMLElement;
   inlineComputedStyles(node, clone);
+  // The image is of the card, not of the moment of its entrance fade the tap happened to land in:
+  // shared within ~0.3s of the card appearing, the copied opacity made the whole image see-through.
+  clone.style.setProperty('opacity', '1');
   if (hiddenHeight > 0) {
     clone.style.setProperty('height', `${height}px`);
     clone.style.setProperty('overflow', 'hidden');

@@ -73,7 +73,7 @@ async function reachAll(page: Page, targets: Locator, testInfo: TestInfo) {
   for (const target of all) await reach(page, target, testInfo);
 }
 
-/** Decodes a PNG in the page and returns its size plus how much of its lowest tenth is painted. */
+/** Decodes a PNG in the page and returns its size plus how much of its lowest tenth is fully opaque. */
 async function inspectPng(page: Page, base64: string) {
   return page.evaluate(async (data) => {
     const image = new Image();
@@ -86,16 +86,17 @@ async function inspectPng(page: Page, base64: string) {
     context.drawImage(image, 0, 0);
     const band = Math.max(1, Math.floor(canvas.height / 10));
     const pixels = context.getImageData(0, canvas.height - band, canvas.width, band).data;
-    let painted = 0;
+    let opaque = 0;
     const colours = new Set<number>();
     for (let i = 0; i < pixels.length; i += 4) {
-      if (pixels[i + 3] > 0) painted += 1;
+      if (pixels[i + 3] === 255) opaque += 1;
       colours.add((pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2]);
     }
     return {
       width: image.naturalWidth,
       height: image.naturalHeight,
-      bottomPainted: painted / (pixels.length / 4),
+      // Fully opaque, not merely painted: a half-faded card must not count as a good image.
+      bottomOpaque: opaque / (pixels.length / 4),
       bottomColours: colours.size,
     };
   }, base64);
@@ -137,10 +138,7 @@ for (const mode of ['01', 'checkout'] as const) {
         await reachAll(page, legRows, testInfo);
 
         // Share: a real tap, then the image it produced must hold the whole card, not a blank
-        // or cut-off one. Tapped once the card's 0.32s entrance animation has finished, as a person
-        // would: the snapshot copies the card's opacity, so a tap while it is still fading in (well
-        // under half a second after it appears) yields a transparent image - not this PR's change.
-        await card.evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
+        // or cut-off one.
         const fullHeight = await card.evaluate((el) => el.getBoundingClientRect().height + el.scrollHeight - el.clientHeight);
         const downloadPromise = page.waitForEvent('download');
         await reachAndTap(page, card.getByRole('button', { name: 'リザルトカードを共有' }), testInfo);
@@ -149,7 +147,7 @@ for (const mode of ['01', 'checkout'] as const) {
         const png = await inspectPng(page, (await readFile(await download.path())).toString('base64'));
         const scale = png.width / Math.ceil(await card.evaluate((el) => el.getBoundingClientRect().width));
         expect(png.height / scale).toBeGreaterThanOrEqual(Math.ceil(fullHeight) - 2);
-        expect(png.bottomPainted).toBeGreaterThan(0.5);
+        expect(png.bottomOpaque).toBeGreaterThan(0.5);
         expect(png.bottomColours).toBeGreaterThan(2);
 
         await reach(page, card.getByRole('button', { name: /新しい対戦を始める/ }), testInfo);
@@ -163,6 +161,32 @@ for (const mode of ['01', 'checkout'] as const) {
         await expect(page.locator('.resume-button')).toHaveCount(0);
       });
     }
+
+    test('D01 共有画像: 結果カードが現れる演出の途中で押しても、透けていない画像になる', async ({ page }, testInfo) => {
+      const state = x01MatchBeforeFinalLeg({ mode, targetLegs: 2, loserLegs: 0 });
+      await resumeX01(page, state);
+      await throwWinningLeg(page, mode, state.players[state.active].remaining, testInfo);
+
+      const card = page.locator('.result-card.match-summary');
+      await expect(card).toBeVisible();
+      // The card fades in over 0.32s. Its entrance animation is held 60ms in (Web Animations API -
+      // no CSS is touched), so the real tap below lands while the card is still see-through.
+      await card.evaluate((el) =>
+        el.getAnimations().forEach((animation) => {
+          animation.pause();
+          animation.currentTime = 60;
+        }),
+      );
+      const share = card.getByRole('button', { name: 'リザルトカードを共有' });
+      await reach(page, share, testInfo);
+      expect(Number(await card.evaluate((el) => getComputedStyle(el).opacity))).toBeLessThan(0.9);
+      const downloadPromise = page.waitForEvent('download');
+      await reachAndTap(page, share, testInfo);
+      const download = await downloadPromise;
+      const png = await inspectPng(page, (await readFile(await download.path())).toString('base64'));
+      expect(png.bottomOpaque).toBeGreaterThan(0.5);
+      expect(png.bottomColours).toBeGreaterThan(2);
+    });
 
     test('D03 途中Leg結果: 「次のLegへ」と「戻る（本数を選び直す）」に到達でき、どちらも働く', async ({ page }, testInfo) => {
       for (const names of [NORMAL_NAMES, LONG_NAMES]) {
