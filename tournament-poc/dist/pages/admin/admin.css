@@ -169,7 +169,8 @@ textarea.input { min-height: 110px; }
 .history { list-style: none; margin: 0; padding: 0; }
 .history li { display: grid; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
 
-.toast-box { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: grid; gap: 8px; width: min(560px, calc(100% - 32px)); z-index: 10; }
+/* 通知は文字だけ。重なった入力欄・ボタンへのタップは下へ通す（ポータル・ux-kit の通知と同じ） */
+.toast-box { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: grid; gap: 8px; width: min(560px, calc(100% - 32px)); z-index: 10; pointer-events: none; }
 .toast { padding: 10px 14px; border-radius: 10px; background: var(--ink); color: var(--bg); font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
 .toast--error { background: var(--danger); color: #fff; }
 .busy-indicator { position: fixed; top: 10px; right: 10px; padding: 4px 10px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 13px; display: none; z-index: 11; }
