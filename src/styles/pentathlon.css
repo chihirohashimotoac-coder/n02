@@ -1850,19 +1850,22 @@
     white-space: normal;
   }
   /* The board is narrower than in portrait: THROW goes on a small line above the name, as on the
-     01 header, rather than beside it, where it left too little width for even 「プレイヤー1」. */
+     01 header, rather than beside it, where it left too little width for even 「プレイヤー1」. The
+     two lines are set tight - same font sizes - so the heading row is no taller than the one line
+     was: at 844×390 the board has only ~4px to spare, and a taller heading pushed POINTS off it. */
   .pent-cricket-shell .pent-cricket-name {
     flex-direction: column;
     gap: 1px;
-    padding-block: 2px;
+    padding-block: 1px;
   }
   .pent-cricket-shell .pent-cricket-name em {
     order: -1;
-    padding-block: 1px;
-    line-height: 1.2;
+    padding-block: 0;
+    line-height: 1.1;
   }
   .pent-cricket-shell .pent-cricket-name b {
     max-width: 100%;
+    line-height: 1.05;
   }
 
   .pent-cricket-shell .pent-cricket-board {

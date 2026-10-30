@@ -295,8 +295,12 @@ test.describe('smartphone landscape: CRICKET（n01 型の向き）', () => {
       const thrower = '.pent-cricket-name.active';
       await expectPlaced(page, `${thrower} em`, thrower, [`${thrower} b`]);
 
-      for (const button of await page.locator('.pent-cricket-board button:not(:disabled), .pent-play-shell .pent-menu-button').all()) {
-        expect((await reach(page, button, testInfo)).gestures).toBe(0);
+      // Every key, ☰, and the heading and POINTS rows at the board's two ends, with no scrolling.
+      const whole = page.locator(
+        '.pent-cricket-board button:not(:disabled), .pent-play-shell .pent-menu-button, .pent-cricket-row.head, .pent-cricket-row.total',
+      );
+      for (const target of await whole.all()) {
+        expect((await reach(page, target, testInfo)).gestures).toBe(0);
       }
       // A dart still lands: S20 is staged on the thrower's 20.
       await page.getByRole('button', { name: 'シングル20' }).click();
