@@ -162,9 +162,19 @@ async function expectN01StyleLandscape(page: Page) {
 }
 
 test.describe('smartphone landscape: n01 型の配置', () => {
-  for (const mode of ['通常01', 'Pentathlon 501'] as const) {
-    test(`${mode}: テンキーが右の全高、シート・残り点数・メニューが左。重なりなく、全キーが押せる`, async ({ page }, testInfo) => {
+  for (const [mode, theme] of [
+    ['通常01', 'clean'],
+    ['通常01', 'neon'],
+    ['通常01', 'navy'],
+    ['Pentathlon 501', 'clean'],
+    ['Pentathlon 501', 'neon'],
+    ['Pentathlon 501', 'navy'],
+  ] as const) {
+    test(`${mode}（${theme}）: テンキーが右の全高、シート・残り点数・メニューが左。重なりなく、全キーが押せる`, async ({ page }, testInfo) => {
       await openFreshApp(page);
+      await page.evaluate((name) => localStorage.setItem('n02-theme-v1', name), theme);
+      await page.reload();
+      await page.waitForSelector('.mode-card');
       if (mode === '通常01') {
         await page.getByRole('button', { name: /ゲームを開始/ }).click();
         await expect(page.locator('.n01-game-shell')).toBeVisible();
@@ -180,6 +190,11 @@ test.describe('smartphone landscape: n01 型の配置', () => {
       for (const button of await page.locator('.n01-key-table button, .n01-menu-table button').all()) {
         expect((await reach(page, button, testInfo)).gestures).toBe(0);
       }
+      // The footer spans the whole screen, so its empty cell must be see-through in every theme:
+      // a tap passing through is not enough, the header and the sheet have to be visible under it.
+      expect(await page.locator('.n01-game-footer').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(
+        'rgba(0, 0, 0, 0)',
+      );
       // A tap on the sheet's free area still reaches the sheet through the footer's empty cell.
       const sheet = await box(page, '.n01-score-area');
       const hit = await page.evaluate(

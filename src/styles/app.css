@@ -2897,6 +2897,12 @@ select:focus-visible {
   .n01-game-footer > * {
     pointer-events: auto;
   }
+  /* A theme can give the footer a solid fill ([data-theme='neon'] .n01-game-footer, which outranks
+     the rule above); across the whole screen that would paint over the header and the sheet. The
+     grid stays see-through in every theme - its three parts keep their own backgrounds. */
+  [data-theme] .n01-game-shell > .n01-game-footer {
+    background: transparent;
+  }
   .n01-left-table {
     grid-area: left;
     height: var(--left-h);
