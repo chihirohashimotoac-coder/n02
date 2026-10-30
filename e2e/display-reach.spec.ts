@@ -301,9 +301,12 @@ test.describe('総合ペンタスロン CRICKET', () => {
         const progress = page.locator('details.pent-progress-collapsible');
         await expect(progress).not.toHaveAttribute('open', '');
 
-        // 7 targets x 3 keys + the undo button: every one in view at once, no scrolling.
+        // 7 targets x 3 keys + the undo button: every one in view at once, no scrolling - and so are
+        // the names above the board and the POINTS read-out under it.
         await expect(padButtons(page)).toHaveCount(22);
         for (const button of await padButtons(page).all()) await checkPadKey(page, testInfo)(button);
+        await checkPadKey(page, testInfo)(page.locator('.pent-cricket-row.head'));
+        await checkPadKey(page, testInfo)(page.locator('.pent-cricket-row.total'));
 
         // An outer bull, confirmed - from the bottom row of the board.
         await reachAndTap(page, page.getByRole('button', { name: 'アウターブル', exact: true }), testInfo);
@@ -317,6 +320,7 @@ test.describe('総合ペンタスロン CRICKET', () => {
         await reachAll(page, progress.locator('.pent-progress-item'), testInfo);
         await expect(progress.locator('.pent-progress-item.done')).toHaveCount(4);
         for (const button of await padButtons(page).all()) await checkPadKey(page, testInfo)(button);
+        await checkPadKey(page, testInfo)(page.locator('.pent-cricket-row.total'));
         await reachAndTap(page, page.getByRole('button', { name: 'トリプル15', exact: true }), testInfo);
         await reachAndTap(page, page.getByRole('button', { name: '確定', exact: true }), testInfo);
         const row15 = page.locator('.pent-cricket-row').filter({ has: page.getByRole('button', { name: 'トリプル15' }) });
@@ -348,6 +352,8 @@ test.describe('個別練習 CRICKET', () => {
     const padButtons = page.locator('.pent-cricket-keys button, .pent-cricket-actions button');
     await expect(padButtons).toHaveCount(22);
     for (const button of await padButtons.all()) await checkPadKey(page, testInfo)(button);
+    await checkPadKey(page, testInfo)(page.locator('.pent-cricket-row.head'));
+    await checkPadKey(page, testInfo)(page.locator('.pent-cricket-row.total'));
 
     await reachAndTap(page, page.getByRole('button', { name: 'ダブルブル', exact: true }), testInfo);
     await reachAndTap(page, page.getByRole('button', { name: '確定', exact: true }), testInfo);
