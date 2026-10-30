@@ -1551,6 +1551,15 @@
 .pent-cricket-shell .pent-cricket-row {
   flex: 1 1 auto;
 }
+/* A phone too short for the whole board (320×568 with 総合's progress panel) must not squeeze the
+   rows under their 44px keys and marks - that made them overlap, so a tap could land on the next
+   row. The board keeps its own height and .pent-play-main, the band that is allowed to scroll on
+   a genuinely short screen, scrolls instead. Taller phones have room to spare and are unchanged. */
+@media (width <= 720px) {
+  .pent-cricket-shell .pent-cricket-board {
+    flex-shrink: 0;
+  }
+}
 .pent-target.compact {
   margin: 0 0 8px;
   padding: 6px 12px;
@@ -1773,5 +1782,90 @@
     /* The shared rail already reserves the safe-area inset; the extra 20px this variant adds in
        portrait would eat a whole key row out of a 390px-tall screen. */
     padding-bottom: 0;
+  }
+}
+
+/* ================================================================ smartphone landscape (Cricket)
+
+   On its side a phone is ~390-430px tall. Stacked as in portrait - heading, 総合's progress panel,
+   board, undo row - the board was left 207px (progress closed) or 83px (open) for content that
+   needs ~360px: its rows shrank to their 30px min-height under 44-46px keys, so the rows overlapped
+   (a tap on one key could land on the next row's), and the board's overflow:hidden cut off 15,
+   BULL and 確定. 個別練習 had the same overlap with no progress panel at all.
+
+   The screen is short but wide, so - as 01's landscape rail does - everything that is not the
+   board moves into a column beside it: heading and ☰, the progress panel (closed or open; it
+   scrolls on its own if it is ever taller than its slot), the undo button and the turn status.
+   The board takes the full height. Only placement changes: the same elements in the same DOM, no
+   font size changes, and the keys keep at least the 38px they have on a phone held upright (they
+   grow into whatever height the row has, ~40px at 390px tall and ~46px at 430px). */
+@media (orientation: landscape) and (height <= 500px) and (hover: none) and (pointer: coarse) {
+  .pent-play-shell.pent-cricket-shell > .pent-play {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(200px, 28vw, 280px);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'board head'
+      'board progress'
+      'board pad';
+    gap: 8px 12px;
+    width: 100%;
+    padding: 8px max(12px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px))
+      max(12px, env(safe-area-inset-left, 0px));
+  }
+  /* Its two children - the progress panel and the board - go to their own grid areas. */
+  .pent-cricket-shell .pent-play-main {
+    display: contents;
+  }
+  .pent-cricket-shell .pent-play-head {
+    grid-area: head;
+    align-items: flex-start;
+  }
+  /* The rail is narrower than the portrait heading: wrap the instruction instead of eliding it. */
+  .pent-cricket-shell .pent-play-title h2 {
+    white-space: normal;
+  }
+  .pent-cricket-shell .pent-progress {
+    grid-area: progress;
+    align-self: start;
+    max-height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .pent-cricket-shell .pent-play-pad {
+    grid-area: pad;
+  }
+  .pent-cricket-shell .pent-cricket-actions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .pent-cricket-shell .pent-cricket-status {
+    text-align: left;
+    white-space: normal;
+  }
+
+  .pent-cricket-shell .pent-cricket-board {
+    grid-area: board;
+    min-height: 0;
+    /* Never clips a key: on a screen too short even for this (none of the required sizes), the
+       board scrolls instead. */
+    overflow-y: auto;
+  }
+  /* Rows are never shorter than what they hold, so no row can paint over the next one. */
+  .pent-cricket-shell .pent-cricket-row,
+  .pent-cricket-shell .pent-cricket-row.head,
+  .pent-cricket-shell .pent-cricket-row.total {
+    min-height: auto;
+  }
+  .pent-cricket-shell .pent-cricket-keys {
+    align-items: stretch;
+    padding-block: 1px;
+  }
+  .pent-cricket-shell .pent-cricket-ring,
+  .pent-cricket-shell .pent-cricket-key,
+  .pent-cricket-shell .pent-cricket-commit,
+  .pent-cricket-shell .pent-cricket-mark {
+    min-height: 38px;
   }
 }
