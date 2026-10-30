@@ -29,12 +29,22 @@ export async function shareNodeAsImage(node: HTMLElement, fileName: string): Pro
 
 async function nodeToPngBlob(node: HTMLElement): Promise<Blob | null> {
   const rect = node.getBoundingClientRect();
+  // A card taller than the screen scrolls inside itself; the image is of the whole card, not of
+  // the part that happens to be scrolled into view.
+  const hiddenHeight = Math.max(0, node.scrollHeight - node.clientHeight);
   const width = Math.ceil(rect.width) || 420;
-  const height = Math.ceil(rect.height) || 640;
+  const height = Math.ceil(rect.height + hiddenHeight) || 640;
   const scale = Math.min(3, window.devicePixelRatio || 2);
 
   const clone = node.cloneNode(true) as HTMLElement;
   inlineComputedStyles(node, clone);
+  // The image is of the card, not of the moment of its entrance fade the tap happened to land in:
+  // shared within ~0.3s of the card appearing, the copied opacity made the whole image see-through.
+  clone.style.setProperty('opacity', '1');
+  if (hiddenHeight > 0) {
+    clone.style.setProperty('height', `${height}px`);
+    clone.style.setProperty('overflow', 'hidden');
+  }
 
   const serialized = new XMLSerializer().serializeToString(clone);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">

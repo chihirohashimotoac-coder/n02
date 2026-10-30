@@ -698,7 +698,10 @@ body {
 .result-card:not(.pent-share-card),
 [data-theme='neon'] .result-card:not(.pent-share-card) {
   position: relative;
-  overflow: hidden;
+  /* The card is the one scroll area of these dialogs (app.css caps it at the viewport): a result
+     taller than the screen scrolls inside it. Still clips - the plate below stays inside the
+     rounded corners - but no longer cuts off the stats, the leg list or the buttons under it. */
+  overflow: hidden auto;
   isolation: isolate;
   background: var(--chalk);
   border: 0;

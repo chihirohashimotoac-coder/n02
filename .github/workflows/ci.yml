@@ -66,6 +66,8 @@ jobs:
       - name: End-to-end tests
         run: npm run test:e2e
         env:
+          # The reach-* projects run in the display-reach job below.
+          N02_E2E: main
           # WebKit's accelerated compositing is a known source of browser-process crashes on
           # headless Linux CI. Disabling it changes only how WebKit paints on this runner, not what
           # the tests exercise.
@@ -76,5 +78,45 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # Every result card, menu and Cricket control reached and pressed at 12 screen sizes
+  # (e2e/display-reach.spec.ts, the reach-* projects). Its own job, in parallel with the one above,
+  # so that job keeps its time limit. Chromium only: phones and tablets are emulated touch devices.
+  display-reach:
+    name: e2e display reach (12 viewports)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The tests are served the same build the main job checks, without touching the tracked root
+      # artifacts (see the preview-build step above).
+      - name: Build
+        run: npm run build:preview
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Display reach tests
+        run: npx playwright test --workers=2
+        env:
+          N02_E2E: reach
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-display-reach
           path: playwright-report/
           retention-days: 7

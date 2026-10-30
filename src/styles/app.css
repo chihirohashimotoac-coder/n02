@@ -1823,7 +1823,9 @@ select:focus-visible {
 }
 .n01-modal-card.menu-list {
   padding: 20px 0 0;
-  overflow: hidden;
+  /* Keeps the full-width rows inside the rounded corners, and keeps the vertical scroll every
+     .n01-modal-card has: a menu taller than a landscape phone must still reach its 戻る row. */
+  overflow: hidden auto;
 }
 .n01-modal-card.menu-list h2 {
   padding: 0 20px;
