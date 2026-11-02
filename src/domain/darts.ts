@@ -1,3 +1,5 @@
+import { STANDARD_CHECKOUT_ROUTES } from './standardCheckoutRoutes.generated';
+
 /** A single thrown dart, identified by the board segment it landed in. */
 export type DartHit =
   | { kind: 'miss' }
@@ -118,41 +120,39 @@ export function isCheckoutPossible(remaining: number, maxDarts: 1 | 2 | 3 = 3): 
 }
 
 /**
- * A greedy suggested finishing route for `remaining` (double-out), preferring the fewest darts and
- * higher-value darts first. This is a computed suggestion (mirroring the spirit of commonly published
- * checkout charts), not a verbatim reproduction of any specific chart.
+ * Parses a segment id as written in the standard-route table (`S20`, `D16`, `T19`, `SB`, `BULL`).
+ * Throws on anything else so a malformed table entry fails loudly in tests instead of being shown.
  */
-export function suggestCheckoutRoute(remaining: number, maxDarts: 1 | 2 | 3 = 3): DartHit[] | null {
-  if (remaining <= 1 || remaining > 170) return null;
-  const candidates: DartHit[] = [];
-  for (let n = 20; n >= 1; n--) candidates.push({ kind: 'number', value: n, ring: 'triple' });
-  candidates.push({ kind: 'bull', ring: 'inner' });
-  for (let n = 20; n >= 1; n--) candidates.push({ kind: 'number', value: n, ring: 'double' });
-  candidates.push({ kind: 'bull', ring: 'outer' });
-  for (let n = 20; n >= 1; n--) candidates.push({ kind: 'number', value: n, ring: 'single' });
+export function parseDartId(id: string): DartHit {
+  if (id === 'BULL') return { kind: 'bull', ring: 'inner' };
+  if (id === 'SB') return { kind: 'bull', ring: 'outer' };
+  const match = /^([SDT])([1-9]|1[0-9]|20)$/.exec(id);
+  if (!match) throw new Error(`Unknown dart id: ${id}`);
+  const ring = match[1] === 'T' ? 'triple' : match[1] === 'D' ? 'double' : 'single';
+  return { kind: 'number', value: Number(match[2]), ring };
+}
 
-  const finishCandidates = candidates.filter((hit) => isDouble(hit));
+const STANDARD_ROUTE_HITS: ReadonlyMap<number, readonly DartHit[]> = new Map(
+  Object.entries(STANDARD_CHECKOUT_ROUTES).map(([left, ids]) => [Number(left), ids.map(parseDartId)]),
+);
 
-  if (maxDarts >= 1) {
-    const finish = finishCandidates.find((hit) => dartScore(hit) === remaining);
-    if (finish) return [finish];
-  }
-  if (maxDarts >= 2) {
-    for (const first of candidates) {
-      const rest = remaining - dartScore(first);
-      const finish = finishCandidates.find((hit) => dartScore(hit) === rest);
-      if (finish) return [first, finish];
-    }
-  }
-  if (maxDarts >= 3) {
-    for (const first of candidates) {
-      const afterFirst = remaining - dartScore(first);
-      for (const second of candidates) {
-        const rest = afterFirst - dartScore(second);
-        const finish = finishCandidates.find((hit) => dartScore(hit) === rest);
-        if (finish) return [first, second, finish];
-      }
-    }
-  }
-  return null;
+/**
+ * The suggested finishing route for `remaining` (double-out, a fresh 3-dart visit): the standard
+ * route of 01 Arrangement Support, looked up from `standardCheckoutRoutes.generated.ts` (2-40: its
+ * approved derivation rule; 41-170: the first candidate of its checkout table). Nothing is computed
+ * here, so the route shown always matches that app. Returns null when there is no 3-dart checkout
+ * (1, above 170, and the bogey numbers 159/162/163/165/166/168/169).
+ */
+export function suggestCheckoutRoute(remaining: number): DartHit[] | null {
+  const route = STANDARD_ROUTE_HITS.get(remaining);
+  return route ? [...route] : null;
+}
+
+/**
+ * The text of a suggested route as shown under a remaining score (`T20 - S11 - BULL`). The outer bull
+ * is written `SB`, as 01 Arrangement Support writes it, rather than dartLabel's `OUTER BULL`: the
+ * longer form does not fit the remaining cell on a phone (e.g. `OUTER BULL - T19 - BULL` for 132).
+ */
+export function checkoutRouteLabel(route: readonly DartHit[]): string {
+  return route.map((hit) => (hit.kind === 'bull' && hit.ring === 'outer' ? 'SB' : dartLabel(hit))).join(' - ');
 }
