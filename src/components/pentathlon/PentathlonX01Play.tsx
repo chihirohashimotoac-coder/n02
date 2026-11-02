@@ -12,7 +12,7 @@ import { classifyAward } from '../../domain/awards';
 import type { AwardPresentation } from '../common/AwardOverlay';
 import RemainingOdometer from '../common/RemainingOdometer';
 import { detectPentathlonX01Roll, useRemainingRolls } from '../common/remainingRoll';
-import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../../domain/darts';
+import { suggestCheckoutRoute, validFinishDartCounts, checkoutRouteLabel } from '../../domain/darts';
 import { DISCIPLINE_RULE_TEXT } from '../../domain/pentathlon/ruleText';
 import type { X01SoloState, X01SoloInput } from '../../domain/pentathlon/engines/x01Solo';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
@@ -526,7 +526,7 @@ export default function PentathlonX01Play({
                   <RemainingOdometer value={state.remaining} roll={remainingRolls[index]} />
                 </strong>
                 {route ? (
-                  <span className="checkout-route">{route.map(dartLabel).join(' - ')}</span>
+                  <span className="checkout-route">{checkoutRouteLabel(route)}</span>
                 ) : (
                   <span>3DA {threeDartAverage(state).toFixed(1)}</span>
                 )}

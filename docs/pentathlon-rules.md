@@ -305,6 +305,9 @@ compareResults：通常の終了時点では、勝利条件を満たしたプレ
   ペンタスロン設定画面（`PentathlonSetup.tsx`）でON/OFFを選べます。**デフォルトはOFF**です
   （通常01・チェックアウト練習側の同設定も既定でOFFで、これは変更していません）。ルールそのものへの
   影響はなく、あくまで入力補助のUI設定です。
+  表示するルートは、通常01・チェックアウト練習と同じく 01 Arrangement Support の基準ルート
+  （`src/domain/standardCheckoutRoutes.generated.ts`。`scripts/import-standard-routes.mjs` で
+  01ArrangementSupport から生成し、手で編集しない）です。アウターブルは表に合わせて `SB` と書きます。
 - **採用ルール・出典の表示**：本ドキュメントの要点（CRICKETがスタンダードクリケット方式であること、
   総合順位は勝利種目数で決まり同数なら総合引き分けになること、先攻の決め方）は、アプリ内の
   「採用ルール・出典」モーダル（`PentathlonRulesModal.tsx`）から読めます。ユーザー画面には

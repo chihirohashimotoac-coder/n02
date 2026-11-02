@@ -447,7 +447,9 @@ test.describe('Pentathlon rule popup and arrange-route setting', () => {
 
     await enterPentScore(page, 180);
     await enterPentScore(page, 180); // -> 141, within suggestCheckoutRoute's range
-    await expect(page.locator('.checkout-route').first()).toBeVisible();
+    // The standard route of 01 Arrangement Support for 141 (the old greedy search showed T20 - T19 - D12 too,
+    // so 141 alone could not tell the two apart - darts.test.ts and checkout-route.spec.ts cover that).
+    await expect(page.locator('.checkout-route').first()).toHaveText('T20 - T19 - D12');
   });
 
   test('shows the score being typed in the live cell of the score sheet, exactly as 通常01 does', async ({

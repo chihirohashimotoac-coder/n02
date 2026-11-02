@@ -14,7 +14,7 @@ import {
   undoLastAction,
   type X01MatchState,
 } from '../domain/x01Engine';
-import { suggestCheckoutRoute, validFinishDartCounts, dartLabel } from '../domain/darts';
+import { suggestCheckoutRoute, validFinishDartCounts, checkoutRouteLabel } from '../domain/darts';
 import { appendHistory, removeLatestHistory } from '../storage/matchStorage';
 import MatchResultCard from './MatchResultCard';
 import DialogShell from './common/DialogShell';
@@ -680,7 +680,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
                 <RemainingOdometer value={state.players[index].remaining} roll={remainingRolls[index]} />
               </strong>
               {routes[index] ? (
-                <span className="checkout-route">{routes[index]!.map(dartLabel).join(' - ')}</span>
+                <span className="checkout-route">{checkoutRouteLabel(routes[index]!)}</span>
               ) : (
                 <span>3DA {basicStats.ok ? basicStats.players[index].averageValue.toFixed(1) : '—'}</span>
               )}
