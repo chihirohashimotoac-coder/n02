@@ -134,3 +134,55 @@ test('ロールバック: v4 に移行して期制リーグを使った後に v0
   assert.equal(orphan.ok, false);
   assert.equal(orphan.error.code, 'NO_PUBLIC_EVENT');
 });
+
+// 監査 C-023: 戻すときの版の組み合わせ。閲覧者用 GAS だけを v0.9.0 に戻し、Pages を v1.0（パートを取りに行く閲覧ページ）のままにすると、
+// 分割した大会は「試合一覧のない本体」ではなく、パートの取得が失敗して大会ごと表示できない。Pages も v0.9.0 に戻せば本体（順位表）は出る。
+test('ロールバックの版の組み合わせ: 閲覧者用 GAS v0.9.0 + v1.0 の閲覧ページでは分割した大会を表示できない（分割しない大会は表示できる）', async () => {
+  const vm = await import('node:vm');
+  const { readFileSync } = await import('node:fs');
+  const ctx = vm.createContext({});
+  vm.runInContext(readFileSync(join(ROOT, 'viewer/src/client/viewer.js'), 'utf8'), ctx);
+  const { withParts } = ctx.TPViewer;
+
+  const w = world();
+  const next = loadProject('admin', { store: w.store, clock: w.clock, properties: w.old.properties.getProperties(), cache: w.old.cache });
+  w.ok(next, 'migrateStorage');
+  const auth = w.login(next);
+  const big = w.ok(next, 'createEvent', { name: '大きなリーグ', template: 'league', rule: { format: 'legs', bestOf: 3 } }, auth).eventId;
+  w.ok(next, 'importPlayers', { eventId: big, players: Array.from({ length: 50 }, (_, i) => ({ name: '大選手' + (i + 1) })) }, auth);
+  let d = w.ok(next, 'eventDetail', { eventId: big }, auth);
+  w.ok(next, 'autoAssign', { eventId: big, stageId: d.stages[0].id }, auth);
+  w.ok(next, 'generateMatches', { eventId: big, stageId: d.stages[0].id }, auth);
+  d = w.ok(next, 'eventDetail', { eventId: big }, auth);
+  assert.equal(w.ok(next, 'updateEvent', { eventId: big, rev: d.event.rev, name: d.event.name, dateLabel: '', status: 'running', isPublic: true, isFeatured: false, notes: '' }, auth).publication.partitioned, true);
+
+  // 閲覧ページ（v1.0）の通信を、指定した閲覧者用 GAS の doGet に直結する
+  const transport = (viewerProject) => (req, ok) => {
+    const parameter = { format: 'json' };
+    if (req.eventId) parameter.event = req.eventId;
+    if (req.part) parameter.part = req.part;
+    if (req.knownVersion) parameter.known = req.knownVersion;
+    ok(JSON.parse(viewerProject.fn('doGet')({ parameter }).getContent()));
+  };
+  const show = (viewerProject, eventId) => {
+    let out = null;
+    const fetchOne = transport(viewerProject);
+    fetchOne({ eventId }, (res) => withParts(fetchOne, {}, eventId, res, (r) => (out = { ok: true, res: r }), (e) => (out = { ok: false, error: e })));
+    return out;
+  };
+
+  const current = loadProject('viewer', { store: w.store, clock: w.clock, properties: { SPREADSHEET_ID } });
+  const oldViewer = loadProject('viewer', { store: w.store, clock: w.clock, properties: { SPREADSHEET_ID }, codePath: V090_VIEWER });
+
+  const a = show(current, big);
+  assert.equal(a.ok, true, 'v1.0 同士: 分割した大会を表示できる');
+  assert.equal(a.res.data.stages[0].groups[0].matches.length, 1225);
+
+  const b = show(oldViewer, big);
+  assert.equal(b.ok, false, 'GAS v0.9.0 + Pages v1.0: パートの代わりに本体が返り、版が合わず表示できない');
+  assert.match(b.error.message, /版が一致しません/);
+
+  const c = show(oldViewer, w.league);
+  assert.equal(c.ok, true, 'GAS v0.9.0 + Pages v1.0: 分割しない大会は表示できる');
+  assert.ok(c.res.data.stages[0].groups[0].matches.length > 0);
+});
