@@ -5304,7 +5304,59 @@ function eventDetail_(ctx, eventId) {
     .map(function (h) {
       return { at: h.at, actor: h.actor, action: h.action, entity: h.entity, entityId: h.entity_id, after: h.after_json };
     });
+  // 監査 PR-03: 共同主催者・店舗スタッフには、実行者の記録（google:メールアドレス）と履歴の中のメールアドレスを伏せる
+  if (!canSeeEmails_(role)) {
+    var masker = emailMasker_(ctx, bundle.event);
+    view = redactActorLabels_(view, masker);
+    view.history.forEach(function (h) {
+      if (typeof h.after === 'string') h.after = redactBareEmails_(h.after, masker);
+    });
+  }
   return view;
+}
+
+/* ---------- メールアドレスの返却範囲（監査 PR-03） ---------- */
+
+// 実行者の記録は 'google:' + メールアドレス（02_auth.js の user.label）。他の記録（admin・staff:EVT-…）はメールアドレスを含まない
+var ACTOR_EMAIL_PATTERN_ = /google:([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/g;
+var BARE_EMAIL_PATTERN_ = /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
+
+/** メールアドレスを見せてよいのは、大会を作った本人と管理者だけ（共同主催者・店舗スタッフには見せない） */
+function canSeeEmails_(role) {
+  return role === 'owner' || role === 'admin';
+}
+
+/** 伏せ方: 自分のメールアドレスはそのまま、主催者は「主催者」、それ以外は「非表示」 */
+function emailMasker_(ctx, event) {
+  var owner = String((event && event.owner_email) || '').toLowerCase();
+  var self = ctx.user && ctx.user.kind === 'google' ? String(ctx.user.email || '').toLowerCase() : '';
+  var kind = function (email) {
+    var e = String(email).toLowerCase();
+    if (self && e === self) return 'self';
+    return owner && e === owner ? 'owner' : 'other';
+  };
+  return {
+    actor: function (all, email) {
+      var k = kind(email);
+      return k === 'self' ? all : k === 'owner' ? '主催者（Google）' : 'Google アカウント（非表示）';
+    },
+    bare: function (email) {
+      var k = kind(email);
+      return k === 'self' ? email : k === 'owner' ? '（主催者）' : '（非表示）';
+    },
+  };
+}
+
+/** 応答全体（埋め込みの JSON 文字列を含む）の実行者の記録を伏せる。応答は JSON で返すので、JSON に直してから置き換える */
+function redactActorLabels_(value, masker) {
+  var text = JSON.stringify(value);
+  if (text.indexOf('@') === -1) return value;
+  return JSON.parse(text.replace(ACTOR_EMAIL_PATTERN_, masker.actor));
+}
+
+/** 履歴の中身（メールアドレスそのものが入る: 共同主催者の追加・大会の作成など）を伏せる */
+function redactBareEmails_(text, masker) {
+  return String(text).replace(BARE_EMAIL_PATTERN_, masker.bare);
 }
 
 /* ---------- セットアップ ---------- */
@@ -7813,7 +7865,7 @@ function eventArchive_(ctx, eventId) {
       })
       .map(plain_);
   });
-  return {
+  var archive = {
     format: 'n02-tournament-archive',
     // 2 = v0.8（列が増えた。共同主催者は入れない）。復元は 1 と 2 の両方を受け付ける
     formatVersion: 2,
@@ -7824,6 +7876,18 @@ function eventArchive_(ctx, eventId) {
     tables: tables,
     results: buildPublicSnapshot_(collectEvent_(ctx, eventId)),
   };
+  // 監査 PR-03: 共同主催者の保存ファイルには、主催者・他の人のメールアドレスを入れない（復元は主催者・履歴を使わないので影響しない）
+  var role = eventRole_(ctx.user, event, ctx);
+  if (!canSeeEmails_(role)) {
+    var masker = emailMasker_(ctx, event);
+    archive.event.owner_email = '';
+    archive.tables.History.forEach(function (h) {
+      if (typeof h.before_json === 'string') h.before_json = redactBareEmails_(h.before_json, masker);
+      if (typeof h.after_json === 'string') h.after_json = redactBareEmails_(h.after_json, masker);
+    });
+    archive = redactActorLabels_(archive, masker);
+  }
+  return archive;
 }
 
 function actionExportEvent_(ctx, payload) {
