@@ -872,6 +872,7 @@ function cloneEventStructure_(ctx, source, opts) {
     if (!opts.keepRuntime) STAGE_RUNTIME_KEYS_.forEach(function (k) {
       delete cfg[k];
     });
+    delete cfg.requestMark; // 監査 PR-05: 元の段階を作った要求の印は引き継がない
     if (Array.isArray(cfg.advancement)) {
       cfg.advancement = cfg.advancement
         .filter(function (a) {
@@ -908,6 +909,7 @@ function cloneEventStructure_(ctx, source, opts) {
     playerTaken[id] = true;
     playerMap[p.player_id] = id;
     var meta = opts.keepRuntime ? safeJson_(p.meta_json, {}) : {};
+    delete meta.requestMark; // 監査 PR-05: 元の選手を追加した要求の印は引き継がない
     return {
       player_id: id,
       event_id: eventId,
@@ -940,6 +942,7 @@ function cloneEventStructure_(ctx, source, opts) {
   var cfgEv = safeJson_(source.event.config_json, {});
   var owner = creatorOwner_(ctx);
   delete cfgEv.autoFinishedAt;
+  delete cfgEv.requestMark; // 監査 PR-05: 元の大会を作った要求の印は引き継がない（この操作の印は 07_api.js が付ける）
   if (!opts.keepAnnouncement) delete cfgEv.announcement;
   var event = {
     event_id: eventId,
