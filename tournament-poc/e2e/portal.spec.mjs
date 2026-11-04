@@ -322,6 +322,101 @@ test('通信エラー: 一覧が読めなければエラーと再読み込みを
   await expect(page.locator('.row')).toHaveCount(3);
 });
 
+/** 監査 PR-08: 閲覧者用 API（一覧）の応答を、指定した回だけ返さない（保留）。それ以外は通常の模擬サーバーへ。取得の回数を返す */
+async function holdListRequests(page, request, hold) {
+  const calls = { n: 0 };
+  await page.route('https://script.google.com/macros/s/PREVIEW/exec**', async (route) => {
+    calls.n++;
+    if (hold(calls.n)) return; // 応答しない（通信が止まったまま）
+    const u = new URL(route.request().url());
+    const r = await request.get(`/viewer-json${u.search}`);
+    await route.fulfill({ status: r.status(), contentType: r.headers()['content-type'], body: await r.text(), headers: { 'access-control-allow-origin': '*' } });
+  });
+  return calls;
+}
+
+/** config.js の値に一覧の取得の期限（短く）を足す */
+async function shortListTimeout(page, ms) {
+  await page.addInitScript((t) => {
+    let value;
+    Object.defineProperty(window, 'TPOC_CONFIG', { configurable: true, get: () => value, set: (v) => (value = Object.assign({}, v, { listTimeoutMs: t })) });
+  }, ms);
+}
+
+test('一覧の応答が止まった（監査 PR-08）: 期限で取得中をやめてエラーと再読み込みを出し、再取得で復帰する', async ({ page, request }) => {
+  await seed(request);
+  await routeAppsScript(page, request);
+  const calls = await holdListRequests(page, request, (n) => n === 1);
+  await shortListTimeout(page, 1500);
+  await page.goto('/pages/events/');
+  await expect(page.locator('#results .banner--error')).toContainText('大会の一覧を読み込めませんでした', { timeout: 8000 });
+  await expect(page.locator('#results')).toHaveAttribute('aria-busy', 'false');
+  await page.locator('#results .banner--error').getByRole('button', { name: '再読み込み' }).click();
+  await expect(page.locator('.row')).toHaveCount(3);
+  expect(calls.n).toBe(2);
+});
+
+test('表示中の一覧の再取得が止まった（監査 PR-08）: 一覧を残したまま知らせ、「今すぐ更新」で復帰する。取得中に重ねて取得しない', async ({ page, request }) => {
+  await seed(request);
+  await routeAppsScript(page, request);
+  const calls = await holdListRequests(page, request, (n) => n === 2);
+  await shortListTimeout(page, 1500);
+  await page.goto('/pages/events/');
+  await expect(page.locator('.row')).toHaveCount(3);
+  // 2 回目（止まる）。期限までの間に押しても、重ねて取得しない
+  await page.locator('#sync').getByRole('button', { name: '今すぐ更新' }).click();
+  await page.locator('#sync').getByRole('button', { name: '今すぐ更新' }).click();
+  await expect(page.locator('#results .banner--error')).toContainText('大会の一覧を読み込めませんでした', { timeout: 8000 });
+  expect(calls.n).toBe(2);
+  await expect(page.locator('.row'), '前の一覧は残す').toHaveCount(3);
+  await expect(page.locator('#sync')).toContainText('一覧の取得');
+  await page.locator('#sync').getByRole('button', { name: '今すぐ更新' }).click();
+  await expect(page.locator('#results .banner--error')).toHaveCount(0);
+  await expect(page.locator('.row')).toHaveCount(3);
+  expect(calls.n).toBe(3);
+});
+
+test('一覧の応答が止まった（監査 PR-08）: 既定の期限（25 秒）で取得中をやめ、自動の再取得で復帰する', async ({ page, request }) => {
+  await seed(request);
+  await routeAppsScript(page, request);
+  const calls = await holdListRequests(page, request, (n) => n === 1);
+  await page.clock.install();
+  await page.goto('/pages/events/');
+  await expect.poll(() => calls.n).toBe(1);
+  await page.clock.runFor(24 * 1000);
+  await expect(page.locator('#results .banner--error'), '期限の前はまだ待つ').toHaveCount(0);
+  await page.clock.runFor(2 * 1000);
+  await expect(page.locator('#results .banner--error')).toContainText('大会の一覧を読み込めませんでした');
+  // 一覧がないときの自動の更新（5 分）で取り直す
+  await page.clock.runFor(5 * 60 * 1000 + 1000);
+  await expect(page.locator('.row')).toHaveCount(3);
+  expect(calls.n).toBe(2);
+});
+
+test('裏のタブでは一覧を自動で取得せず、表に戻ったら 1 回だけ確かめて自動の更新を続ける（監査 PR-08 で維持）', async ({ page, request }) => {
+  await seed(request);
+  await routeAppsScript(page, request);
+  const calls = await holdListRequests(page, request, () => false);
+  await page.clock.install();
+  await page.goto('/pages/events/');
+  await expect(page.locator('.row')).toHaveCount(3);
+  expect(calls.n).toBe(1);
+  const setHidden = (hidden) =>
+    page.evaluate((h) => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (h ? 'hidden' : 'visible') });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, hidden);
+  await setHidden(true);
+  await page.clock.runFor(11 * 60 * 1000);
+  expect(calls.n, '裏のタブでは取得しない').toBe(1);
+  await setHidden(false);
+  await expect.poll(() => calls.n).toBe(2);
+  // 表に戻った取得が終わって、次の自動の更新を予約してから時計を進める
+  await page.waitForFunction(() => window.__tpocPortal && !window.__tpocPortal.state.pub.loading);
+  await page.clock.runFor(61 * 1000);
+  await expect.poll(() => calls.n, '開催中の大会があれば 1 分ごとに更新').toBe(3);
+});
+
 test('公開大会がないとき・作成した大会がないときの表示', async ({ page, request }) => {
   await reset(request, { configured: true });
   await adminCall(request, 'initializeStorage');

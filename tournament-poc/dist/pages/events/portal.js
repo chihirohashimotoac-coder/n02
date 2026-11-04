@@ -38,6 +38,8 @@
   // 一覧の自動更新: 開催中の大会があれば 60 秒、なければ 5 分。タブが非表示の間は取得しない
   var REFRESH_RUNNING_MS = 60 * 1000;
   var REFRESH_IDLE_MS = 5 * 60 * 1000;
+  // 監査 PR-08: 公開中の大会の一覧の取得の期限（閲覧ページと同じ 25 秒）。応答が止まっても「取得中」のままにしない
+  var LIST_TIMEOUT_MS = 25000;
   var SEARCH_DELAY_MS = 120;
 
   /* ---------- 画面に依存しない処理（tests/portal-client.test.mjs で確かめる） ---------- */
@@ -279,6 +281,7 @@
     };
     var viewerEndpoint = config.viewerEndpoint;
     var adminEndpoint = config.adminEndpoint;
+    var listTimeoutMs = typeof config.listTimeoutMs === 'number' && config.listTimeoutMs >= 1000 ? config.listTimeoutMs : LIST_TIMEOUT_MS;
     var googleClientId = config.googleClientId;
     // 既存の閲覧ページ・運営画面の URL は変えない（GitHub Pages はフォルダの index.html を返す）。
     // index.html を明示しないと開けない置き場所（確認用のプレビュー）だけ、設定の pageIndex で付ける
@@ -315,6 +318,8 @@
       composing: false,
     };
     var timers = { refresh: null, search: null };
+    // 一覧の取得の番号。期限切れの後に遅れて届いた応答（前の取得）では一覧を書き換えない
+    var pubSeq = 0;
 
     /* ---- 保存（運営画面と共通のキー） ---- */
     function storageGet(key) {
@@ -361,6 +366,38 @@
       });
     }
 
+    /**
+     * 期限付きの取得（読み取りだけに使う）。ms 以内に本文まで届かなければ TIMEOUT で失敗にし、取得を中止する
+     * （中止できないブラウザでも、遅れて届いた応答は呼び出し側が番号で捨てる）
+     */
+    function fetchJsonWithin(url, init, ms) {
+      var controller = typeof win.AbortController === 'function' ? new win.AbortController() : null;
+      var timer = null;
+      var timeout = new Promise(function (resolve, reject) {
+        timer = win.setTimeout(function () {
+          if (controller) {
+            try {
+              controller.abort();
+            } catch (e) {
+              /* 中止できなくても、結果は捨てる */
+            }
+          }
+          reject({ code: 'TIMEOUT', message: '応答がありません。' });
+        }, ms);
+      });
+      var request = fetchJson(url, controller ? Object.assign({}, init, { signal: controller.signal }) : init);
+      return Promise.race([request, timeout]).then(
+        function (value) {
+          win.clearTimeout(timer);
+          return value;
+        },
+        function (err) {
+          win.clearTimeout(timer);
+          throw err;
+        }
+      );
+    }
+
     function newRequestId() {
       var bytes = new Uint8Array(16);
       win.crypto.getRandomValues(bytes);
@@ -386,13 +423,16 @@
 
     /** reason: 'start' | 'auto' | 'visible' | 'manual'（ボタン・引っぱって更新）。manual のときだけ結果をトーストで伝える */
     function loadPublic(reason) {
+      // 取得中は重ねて取得しない（期限があるので、止まった取得もいずれ終わる）
       if (state.pub.loading) return Promise.resolve();
       state.pub.loading = true;
+      var seq = ++pubSeq;
       var before = state.pub.version;
       if (!state.pub.events) render();
       var url = viewerEndpoint + '?format=list' + (state.pub.version ? '&known=' + encodeURIComponent(state.pub.version) : '');
-      return fetchJson(url, { method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'follow' })
+      return fetchJsonWithin(url, { method: 'GET', credentials: 'omit', cache: 'no-store', redirect: 'follow' }, listTimeoutMs)
         .then(function (res) {
+          if (seq !== pubSeq) return;
           if (!res || !res.ok) throw (res && res.error) || { code: 'UNKNOWN', message: '不明な応答です。' };
           state.pub.loadedAt = res.servedAt || new Date().toISOString();
           state.pub.error = null;
@@ -405,10 +445,13 @@
           }
         })
         .catch(function (err) {
+          if (seq !== pubSeq) return;
+          // 前に読めた一覧（state.pub.events）は消さずに残し、取得できなかったことだけ知らせる
           state.pub.error = err && err.code === 'UNSUPPORTED' ? '大会の一覧を読み込めませんでした（サーバーの更新待ちの可能性があります）。' : '大会の一覧を読み込めませんでした。通信状態を確認して、もう一度お試しください。';
           if (reason === 'manual') toast('error', state.pub.error);
         })
         .then(function () {
+          if (seq !== pubSeq) return;
           state.pub.loading = false;
           render();
           scheduleRefresh();
@@ -1160,7 +1203,17 @@
         return;
       }
       if (list.error) {
-        box.appendChild(el(doc, 'div', { className: 'banner banner--error', role: 'alert' }, [icon(doc, ICON_ERROR, 24), el(doc, 'p', { className: 'banner__text', text: list.error })]));
+        // 前に読めた一覧は残して表示する（取得の時刻は一覧の下に出る）。ここからも読み直せる
+        box.appendChild(
+          el(doc, 'div', { className: 'banner banner--error', role: 'alert' }, [
+            icon(doc, ICON_ERROR, 24),
+            el(doc, 'p', { className: 'banner__text', text: list.error + (state.tab === 'public' ? '（前に読み込んだ一覧を表示しています）' : '') }),
+            el(doc, 'button', { type: 'button', className: 'btn btn--secondary btn--small', text: '再読み込み', onClick: function () {
+              if (state.tab === 'mine') loadMine();
+              else loadPublic('manual');
+            } }),
+          ])
+        );
       }
 
       var filter = { q: state.q, status: state.status, format: state.format };
@@ -1325,6 +1378,7 @@
         googleClientId: admin.googleClientId,
         n02Url: admin.n02Url,
         pageIndex: admin.pageIndex,
+        listTimeoutMs: viewer.listTimeoutMs,
       });
     };
     if (global.document.readyState === 'loading') global.document.addEventListener('DOMContentLoaded', go);
