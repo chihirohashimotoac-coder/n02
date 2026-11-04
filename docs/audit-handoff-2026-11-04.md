@@ -48,7 +48,7 @@
 
 ## 4. 次にやること: 監査案 06（次期作成の途中失敗からの復旧）
 
-作業ブランチ `claude/wonderful-brahmagupta-imajc6-pr06` は最新 main から切っただけ（コミットなし）。**最新 main（`f31b1f3` 以降）から切り直してよい。**
+作業ブランチ `claude/wonderful-brahmagupta-imajc6-pr06` はまだ作っていない（リモートにもない）。**最新 main（`f31b1f3` 以降）から切る。**
 
 ### 4.1 原因（コードの読み取り。試験での再現はまだ）
 
