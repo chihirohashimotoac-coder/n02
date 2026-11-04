@@ -3291,7 +3291,7 @@
               panel.appendChild(el('p', { className: 'muted small', text: n }));
             });
             panel.appendChild(el('ol', { className: 'plain-list' }, t.rows.map(function (r) {
-              return el('li', { text: (r.group ? r.group + '・' : '') + (t.type === 'single_elimination' || t.type === 'double_elimination' ? 'シード ' + r.seed + '　' : '') + r.name + '（' + r.label + '）' });
+              return el('li', { text: (r.group ? r.group + '・' : '') + (t.type === 'single_elimination' || t.type === 'double_elimination' ? 'シード ' + r.seed + '　' : '') + r.name + '（' + [r.label, r.kept ? '確定済み・変更なし' : ''].filter(Boolean).join('・') + '）' });
             })));
           });
           panel.appendChild(el('div', { className: 'btn-row' }, [
