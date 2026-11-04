@@ -3092,8 +3092,9 @@ function avoidSameGroupFirstRound_(entrants, tierOf) {
  *
  * このアプリで採用した汎用のスイス式で、特定の団体・大会の規則の再現ではない。
  * - 1 回戦: シード順で上半分と下半分を組む（1 対 n/2+1 …）。主催者が抽選を選んだときは並びを乱数で決める
- * - 2 回戦以降: 現在の順位（勝ち点 → Buchholz → Leg 差 → 得 Leg → シード）で並べ、同じ勝ち点の中で
- *   上半分と下半分を組む。組めないときは近い勝ち点の選手と組む
+ * - 2 回戦以降: 実際の勝ち点 → 順位表の順位（段階の順位の決め方。既定は勝ち点 → Buchholz → Leg 差 → 得 Leg）→ シードで並べ、
+ *   同じ勝ち点の中で上半分と下半分を組む。組めないときは近い勝ち点の選手と組む。順位の決め方から勝ち点を外しても、
+ *   組み合わせは実際の勝ち点で組む（監査 PR-12）
  * - 守る条件の優先順位: ①同じ回戦に同じ選手を 2 回出さない（絶対）②不戦（Bye）を同じ選手に 2 回与えない
  *   ③再戦を避ける ④勝ち点の近い選手どうしにする。②③は満たせないときだけ緩め、緩めた内容と理由を返す
  * - 再戦なしで組めないことを全部の組み合わせを調べて確かめた場合は「不可能」、調べきれなかった場合は「探索の打ち切り」と区別する
@@ -3235,6 +3236,17 @@ function swissPairRound_(players, opts) {
     if (byId[pair[0]].opponents[pair[1]]) rematches.push(pair);
   });
   return { pairs: out, bye: byeId, relaxed: relaxed, rematches: rematches, steps: steps };
+}
+
+/**
+ * 組み合わせに使う勝ち点（監査 PR-12）。順位表の行（swissStandings_ の戻り値）の勝・分・負・不戦の数から、
+ * swissStandings_ と同じ数え方で求める。順位表の行の points は、表示用の順位の決め方に「勝ち点」がないと
+ * 付かないため、組み合わせはこちらを使う。
+ */
+function swissPairingPoints_(row, cfg) {
+  var pts = cfg.points || { win: 2, draw: 1, loss: 0 };
+  var byePoints = typeof cfg.byePoints === 'number' ? cfg.byePoints : pts.win;
+  return (row.won || 0) * pts.win + (row.drawn || 0) * pts.draw + (row.lost || 0) * pts.loss + (row.byes || 0) * byePoints;
 }
 
 /**
@@ -8217,7 +8229,8 @@ function actionGenerateSwissRound_(ctx, payload) {
   var pointsOf = {};
   standing.forEach(function (r, i) {
     rankOf[r.playerId] = i;
-    pointsOf[r.playerId] = r.points || 0;
+    // 監査 PR-12: 表示用の順位の決め方に「勝ち点」がないと r.points は付かないので、勝・分・負・不戦の数から求める
+    pointsOf[r.playerId] = swissPairingPoints_(r, cfg);
   });
   var seedOf = {};
   members.forEach(function (e, i) {
@@ -8246,7 +8259,8 @@ function actionGenerateSwissRound_(ctx, payload) {
         return e.player_id;
       })
       .sort(function (a, b) {
-        return (rankOf[a] === undefined ? 999 : rankOf[a]) - (rankOf[b] === undefined ? 999 : rankOf[b]) || seedOf[a] - seedOf[b];
+        // 実際の勝ち点の多い順 → 順位表の順位 → シード。既定の決め方（勝ち点が先頭）では順位表の順位と同じ並び
+        return (pointsOf[b] || 0) - (pointsOf[a] || 0) || (rankOf[a] === undefined ? 999 : rankOf[a]) - (rankOf[b] === undefined ? 999 : rankOf[b]) || seedOf[a] - seedOf[b];
       });
   }
   var players = ordered.map(function (pid) {
