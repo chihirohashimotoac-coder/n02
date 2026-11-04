@@ -1249,7 +1249,7 @@
             view.data = res.data;
             renderData();
           }
-          notify('result', { reason: lastReason, previous: previous, data: view.data, changed: !!res.data && !!previous, notModified: !!res.notModified });
+          notify('result', { reason: lastReason, previous: previous, data: view.data, changed: !!res.data && !!previous, notModified: !!res.notModified, stale: !!res.stale });
           if (res.stale) {
             showBanner('warn', 'サーバーで最新データを読み込めなかったため、' + formatTime(res.publishedAt) + ' 時点の公開データを表示しています。');
           } else {
