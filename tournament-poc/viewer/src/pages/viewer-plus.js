@@ -39,33 +39,75 @@
     return data && data.stages && data.stages.length ? data.stages : data ? [{ id: 'main', name: '', groups: data.groups || [], progress: data.progress }] : [];
   }
 
+  /**
+   * 公開データのすべての試合（監査 PR-16）。形式ごとの置き場所: groups（ロビン・リーグ・スイス式）・rounds（トーナメント）・
+   * sides（ダブルエリミの勝者側・敗者側・グランドファイナル）・nights（ポイントシリーズの各節）・pairs（入替戦）。
+   * 同じ試合（同じ ID）は 1 回だけ数える
+   */
   function allMatches(data) {
+    var seen = {};
     var out = [];
+    var add = function (m) {
+      if (!m || !m.id || seen[m.id]) return;
+      seen[m.id] = true;
+      out.push(m);
+    };
+    var addRounds = function (rounds) {
+      (rounds || []).forEach(function (r) {
+        (r.matches || []).forEach(add);
+      });
+    };
     stagesOf(data).forEach(function (st) {
       (st.groups || []).forEach(function (g) {
-        out = out.concat(g.matches || []);
+        (g.matches || []).forEach(add);
       });
-      (st.rounds || []).forEach(function (r) {
-        out = out.concat(r.matches || []);
+      addRounds(st.rounds);
+      (st.sides || []).forEach(function (side) {
+        addRounds(side.rounds);
+      });
+      (st.nights || []).forEach(function (n) {
+        addRounds(n.rounds);
+      });
+      (st.pairs || []).forEach(function (pair) {
+        add(pair.match);
       });
     });
     return out;
   }
 
+  function sideId(side) {
+    return side && side.id ? side.id : null;
+  }
+
+  function involves(m, pid) {
+    return sideId(m.p1) === pid || sideId(m.p2) === pid;
+  }
+
+  /** 候補に出す選手（選手 ID ごとに 1 人。所属が公開されていれば所属も） */
   function players(data) {
-    var seen = {};
+    var byId = {};
     var out = [];
     var add = function (p) {
-      if (p && p.id && p.name && !seen[p.id]) {
-        seen[p.id] = true;
-        out.push({ id: p.id, name: p.name });
+      if (!p || !p.id || !p.name) return;
+      var known = byId[p.id];
+      if (known) {
+        if (!known.affiliation && p.affiliation) known.affiliation = p.affiliation;
+        return;
       }
+      var item = { id: p.id, name: p.name };
+      if (p.affiliation) item.affiliation = p.affiliation;
+      byId[p.id] = item;
+      out.push(item);
     };
     stagesOf(data).forEach(function (st) {
       (st.groups || []).forEach(function (g) {
         (g.players || []).forEach(add);
       });
       (st.entrants || []).forEach(add);
+      (st.roster || []).forEach(add);
+      (st.pairs || []).forEach(function (pair) {
+        (pair.players || []).forEach(add);
+      });
     });
     allMatches(data).forEach(function (m) {
       add(m.p1);
@@ -200,9 +242,10 @@
           })
           .map(function (p) {
             var n = allMatches(current).filter(function (m) {
-              return m.p1.id === p.id || m.p2.id === p.id;
+              return involves(m, p.id);
             }).length;
-            return { id: p.id, label: p.name, meta: n + ' 試合', player: p };
+            // 同じ名前の選手を見分けられるよう、所属が公開されていれば候補に出す
+            return { id: p.id, label: p.name, meta: (p.affiliation ? p.affiliation + '・' : '') + n + ' 試合', player: p };
           });
       },
       onPick: function (item) {
@@ -242,14 +285,14 @@
     if (!focus) return;
     var ids = {};
     allMatches(current).forEach(function (m) {
-      if (m.p1.id === focus.id || m.p2.id === focus.id) ids[m.id] = true;
+      if (involves(m, focus.id)) ids[m.id] = true;
     });
     Array.prototype.forEach.call(root.querySelectorAll('[data-match-id]'), function (n) {
       if (ids[n.getAttribute('data-match-id')]) n.classList.add('is-focus');
     });
-    // 順位表の行（選手名の見出しセル）
-    Array.prototype.forEach.call(root.querySelectorAll('.summary tbody th'), function (th) {
-      if (th.textContent === focus.name) th.parentNode.classList.add('is-focus');
+    // 順位表の行は選手 ID で一致させる（名前の文字列は所属を出すと一致せず、同じ名前の選手も区別できないため。監査 PR-16）
+    Array.prototype.forEach.call(root.querySelectorAll('.summary tbody tr[data-player-id]'), function (tr) {
+      if (tr.getAttribute('data-player-id') === focus.id) tr.classList.add('is-focus');
     });
   }
 
@@ -364,5 +407,5 @@
     },
   });
 
-  global.TPViewerPlus = { changedMatches: changedMatches, players: players, normalize: normalize };
+  global.TPViewerPlus = { changedMatches: changedMatches, players: players, matches: allMatches, normalize: normalize };
 })(typeof window !== 'undefined' ? window : this);

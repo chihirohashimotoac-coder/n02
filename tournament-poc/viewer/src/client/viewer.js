@@ -432,7 +432,8 @@
         if (o) cells.push(el('td', { className: 'zone zone--' + o.kind, text: [MOVE_LABEL[o.kind] || '', o.to ? '→ ' + o.to : ''].filter(Boolean).join(' ') }));
         else cells.push(el('td', { className: s.zone ? 'zone zone--' + s.zone : 'zone', text: s.zone ? ZONE_LABEL[s.zone] || '' : '' }));
       }
-      return el('tr', { className: s.zone ? 'is-zone-' + s.zone : null }, cells);
+      // 選手 ID（閲覧ページの「選手を探す」が行を選手 ID で強調する。監査 PR-16）
+      return el('tr', { className: s.zone ? 'is-zone-' + s.zone : null, 'data-player-id': s.playerId }, cells);
     });
     var p = g.progress;
     return el('section', { className: 'group', id: 'group-' + g.id, 'aria-labelledby': 'group-title-' + g.id }, [
@@ -755,7 +756,7 @@
             var n = nights[i];
             cells.push(el('td', { className: 'series__night', text: n && n.status === 'cancelled' ? '中止' : v === null || v === undefined ? '' : n && n.status !== 'complete' ? '(' + v + ')' : String(v) }));
           });
-          return el('tr', null, cells);
+          return el('tr', { 'data-player-id': r.playerId }, cells);
         })),
       ]),
     ]);
