@@ -595,8 +595,14 @@
      * 入力途中の内容（state の下書き）は消さない。「同じ操作としてもう一度送る」は同じ requestId で送る
      * （サーバーが二重実行を防ぐので、前の送信で保存されていれば保存済みとして返る）
      */
+    var noticeBox = null;
     function showUnconfirmed(action, err, okMessage, sentFrom) {
-      Array.prototype.forEach.call(toastBox.querySelectorAll('.toast--unconfirmed'), function (n) {
+      // 閉じるまで残る案内は画面の上に出す（下の通知欄は数秒で消える知らせ用。下の入力欄やボタンと重ねない）
+      if (!noticeBox) {
+        noticeBox = el('div', { className: 'notice-box' });
+        doc.body.appendChild(noticeBox);
+      }
+      Array.prototype.forEach.call(noticeBox.querySelectorAll('.toast--unconfirmed'), function (n) {
         n.parentNode.removeChild(n);
       });
       var box = el('div', { className: 'toast toast--error toast--unconfirmed', role: 'alert' });
@@ -631,7 +637,7 @@
           el('button', { className: 'btn btn--small btn--ghost', type: 'button', text: '閉じる', onClick: close }),
         ])
       );
-      toastBox.appendChild(box);
+      noticeBox.appendChild(box);
       if (viewKey() === sentFrom) reloadCurrent();
     }
 
