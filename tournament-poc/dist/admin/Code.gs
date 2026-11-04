@@ -9853,6 +9853,14 @@ function seasonPlanFor_(ctx, eventId, edits, opts) {
     });
   }
   var cfg = leagueConfig_(sc.league);
+  // 監査 PR-09: 照合では、確定したときの配置の設定（境目・目標人数・定員）で計算する（opts.config。確定記録の config）
+  if (opts && opts.config) {
+    cfg = Object.assign({}, cfg, {
+      thresholds: Array.isArray(opts.config.thresholds) ? opts.config.thresholds : cfg.thresholds,
+      targets: Array.isArray(opts.config.targets) ? opts.config.targets : cfg.targets,
+      capacities: Array.isArray(opts.config.capacities) ? opts.config.capacities : cfg.capacities,
+    });
+  }
   var plan = planSeasonPlacement_({
     seasonNo: sc.row.season_no,
     config: cfg,
@@ -10659,6 +10667,8 @@ function actionConfirmNextSeason_(ctx, payload) {
     warnings: plan.warnings,
     log: [],
     undo: SEASON_UNDO_VERSION_,
+    // 監査 PR-09: 確定したときの配置の設定。後から期制リーグの設定を変えても、照合はこの設定で計算する
+    config: { thresholds: cfg.thresholds, targets: cfg.targets, capacities: cfg.capacities },
   };
   // 前のコードで止まった跡を作り直すときは、その確定記録の行を持ち越す（作り直しがまた止まっても、印のない変更を戻せる）
   if (broken && broken.legacyRows.length) record.legacyRows = broken.legacyRows;
@@ -10714,9 +10724,14 @@ function seasonDrift_(ctx, nextRow) {
   record.rows.forEach(function (r) {
     if (r.movement === 'new') extra[r.key] = { name: r.name, status: 'active' };
   });
+  // 監査 PR-09: 確定したときの設定で計算する。記録にない（このコードより前の確定）ときは今の設定で計算するが、
+  // 確定の後に期制リーグの設定が変わっていたら、確定時の設定が分からないので自動では反映させない
+  var frozen = record.config && typeof record.config === 'object' ? record.config : null;
+  var league = ctx.table('Leagues').byKey[nextRow.league_id];
+  var settingsChanged = !frozen && !!(league && league.updated_at && nextRow.confirmed_at && String(league.updated_at) > String(nextRow.confirmed_at));
   var res;
   try {
-    res = seasonPlanFor_(ctx, nextRow.prev_event_id, edits, { extraCandidates: extra });
+    res = seasonPlanFor_(ctx, nextRow.prev_event_id, edits, { extraCandidates: extra, config: frozen });
   } catch (e) {
     if (!e.appCode) throw e;
     return { changed: true, problems: [e.publicMessage], diffs: [], basisVersion: '' };
@@ -10763,8 +10778,21 @@ function seasonDrift_(ctx, nextRow) {
       lock: lock === 'started' ? '次期の該当ディビジョンの試合が始まっているため、所属は変えられません（記録として承認してください）。' : lock === 'cards' ? '次期の該当ディビジョンに対戦カードがあります。試合が始まっていなければ、先に対戦カードを削除すると反映できます。' : r.newDivision > groups.length ? '次期のディビジョン数が足りません。' : '',
     });
   });
+  var problems = res.plan.problems;
+  if (settingsChanged) {
+    if (!changed) {
+      // 前期の結果は確定のときと同じ。今の設定で計算した違いは設定の変更によるもので、照合の対象ではない
+      diffs = [];
+    } else {
+      diffs.forEach(function (x) {
+        x.canApply = false;
+        x.lock = '確定の後に期制リーグの設定が変わり、確定したときの設定が記録にないため、自動では反映できません（違いを確かめて、記録として承認してください）。';
+      });
+      problems = problems.concat(['確定したときの設定が記録にありません（この機能の更新より前の確定）。違いには、確定の後の設定の変更によるものが混ざっている可能性があります。']);
+    }
+  }
   var ack = record.acknowledged && record.acknowledged.basisVersion === res.basisVersion ? record.acknowledged : null;
-  return { changed: changed, acknowledged: ack, diffs: diffs, problems: res.plan.problems, basisVersion: res.basisVersion, confirmedBasisVersion: record.basisVersion, log: record.log || [] };
+  return { changed: changed, acknowledged: ack, diffs: diffs, problems: problems, basisVersion: res.basisVersion, confirmedBasisVersion: record.basisVersion, log: record.log || [] };
 }
 
 /**
@@ -10846,7 +10874,7 @@ function actionReconcileNextSeason_(ctx, payload) {
   if (!remaining.length && !drift.problems.length) {
     // 違いがなくなった: 今の前期の結果を、次期の根拠にする
     record.basisVersion = drift.basisVersion;
-    record.basis = seasonPlanFor_(ctx, row.prev_event_id, storedEdits_(record), { extraCandidates: {} }).basis;
+    record.basis = seasonPlanFor_(ctx, row.prev_event_id, storedEdits_(record), { extraCandidates: {}, config: record.config && typeof record.config === 'object' ? record.config : null }).basis;
     delete record.acknowledged;
   } else if (payload.acknowledge === true) {
     record.acknowledged = { basisVersion: drift.basisVersion, at: ctx.now, by: ctx.user ? ctx.user.label : '', reason: reason, kept: remaining.map(function (x) { return { key: x.key, name: x.name, confirmed: x.confirmed, now: x.now }; }) };
