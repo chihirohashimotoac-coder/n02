@@ -248,7 +248,7 @@
             else reject((res && res.error) || { code: 'UNKNOWN', message: '不明な応答です。' });
           },
           function (err) {
-            if (err && err.timeout) reject({ code: 'TIMEOUT', message: '応答がありませんでした（' + Math.round((request.timeoutMs || 0) / 1000) + ' 秒）。' });
+            if (err && err.timeout) reject({ code: 'TIMEOUT', message: Math.round((request.timeoutMs || 0) / 1000) + ' 秒待っても応答がありませんでした。' });
             else reject({ code: 'NETWORK', message: '通信に失敗しました。' + (err && err.message ? '（' + err.message + '）' : '') });
           }
         );
@@ -257,7 +257,7 @@
     function unconfirmed(cause, send) {
       return {
         code: 'UNCONFIRMED',
-        message: '保存できたか確認できませんでした（' + ((cause && cause.message) || '通信が切れました。') + '）。入力した内容は残しています。最新の状態を読み込んで確認してください。',
+        message: '保存できたか確認できませんでした（理由: ' + String((cause && cause.message) || '通信が切れました').replace(/。\s*/g, ' ').replace(/（/g, ' ').replace(/）/g, '').replace(/\s+/g, ' ').trim() + '）。入力した内容は残しています。最新の状態を読み込んで確認してください。',
         cause: cause,
         resend: send,
       };
