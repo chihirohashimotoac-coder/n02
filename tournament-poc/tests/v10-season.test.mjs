@@ -526,10 +526,14 @@ test('次期の作成が途中で止まった跡（期の行だけが残った�
   const sheet = p.store.get().getSheetByName('Events');
   const rowIndex = sheet.rows.findIndex((r) => r[0] === id2);
   sheet.deleteRows(rowIndex + 1, 1);
+  const players = p.store.get().getSheetByName('Players').records().filter((r) => r.event_id === id2).length;
+  const members = p.store.get().getSheetByName('LeagueMembers').records().length;
   const again = p.ok('confirmNextSeason', { eventId: id1, planVersion: p.ok('previewNextSeason', { eventId: id1 }).planVersion });
-  assert.notEqual(again.eventId, id2);
-  assert.equal(p.store.get().getSheetByName('Players').records().filter((r) => r.event_id === id2).length, 0, '途中まで書いた行は消す');
-  assert.equal(p.store.get().getSheetByName('LeagueSeasons').records().filter((r) => r.event_id === id2).length, 0);
+  // 監査 PR-06: 同じ大会 ID・同じ期の行で作り直す（途中まで書いた行は消してから作るので、行は増えない）
+  assert.equal(again.eventId, id2);
+  assert.equal(p.store.get().getSheetByName('Players').records().filter((r) => r.event_id === id2).length, players, '途中まで書いた行は消してから作る');
+  assert.equal(p.store.get().getSheetByName('LeagueSeasons').records().filter((r) => r.event_id === id2).length, 1);
+  assert.equal(p.store.get().getSheetByName('LeagueMembers').records().length, members, '会員は増えない');
 });
 
 test('権限: 次期の作成・設定・照合は主催者と管理者だけ。共同主催者・管理パスワードは入替戦の運営とプレビューまで。他人の大会・会員の ID への差し替えは拒否', () => {

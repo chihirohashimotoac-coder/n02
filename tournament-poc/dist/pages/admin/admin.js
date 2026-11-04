@@ -4440,6 +4440,21 @@
       return wrap;
     }
 
+    /** 次期の作成が途中で止まった跡の説明（preview: プレビューの結果の中に出すとき） */
+    function renderSeasonRepair(x, preview) {
+      var parts = [];
+      if (x.rows) parts.push('途中まで書かれた次期の行 ' + x.rows + ' 件を消します');
+      if (x.removedMembers.length) parts.push('途中で作られた会員（' + x.removedMembers.join('、') + '）を消します');
+      if (x.restoredMembers.length) parts.push('会員（' + x.restoredMembers.join('、') + '）の記録（参加・脱退・表示名など）を作成前の状態に戻します');
+      if (x.keptMembers.length) parts.push('会員（' + x.keptMembers.join('、') + '）は他の大会の選手に付いているため残します');
+      var box = el('div', { className: 'notice', role: 'status' }, [
+        el('p', { text: '第' + x.seasonNo + '期の作成が、前回は途中で止まりました（大会はまだできていません）。' + (preview ? '確定すると、次のように片づけてから作り直します（大会 ID は前回と同じです）。' : '「次期の配置をプレビュー」で内容を確かめてから確定すると、片づけてから作り直します。') }),
+      ]);
+      if (parts.length) box.appendChild(el('ul', { className: 'plain-list' }, parts.map(function (t) { return el('li', { className: 'small', text: t }); })));
+      if (x.legacy) box.appendChild(el('p', { className: 'muted small', text: '前の版のアプリで止まった跡のため、表示名の変更は戻せません。確定の後、会員の表示名を確かめてください。' }));
+      return box;
+    }
+
     function renderSeasonConvert(d, s) {
       var panel = el('section', { className: 'panel' }, [
         el('h3', { text: '期制リーグにする' }),
@@ -4505,6 +4520,9 @@
         panel.appendChild(el('a', { className: 'btn', href: '#e=' + encodeURIComponent(s.next.eventId), text: '第' + s.next.no + '期の大会を開く' }));
         return panel;
       }
+      // 監査 PR-06: 次期の作成が途中で止まった跡（期の行はあるが大会がない）。確定のときに片づけてから作り直す
+      var pvNow = state.ui.seasonPreview && state.ui.seasonPreview.eventId === d.event.id ? state.ui.seasonPreview.data : null;
+      if (s.next && !s.next.exists && s.next.broken && !(pvNow && pvNow.repair)) panel.appendChild(renderSeasonRepair(s.next.broken, false));
       panel.appendChild(el('p', { className: 'muted small', text: '「次期の配置をプレビュー」→ 必要なら修正（所属・不参加・復帰・新規参加・表示名）→「確定して次期を作成」の順に進めます。確定するまで、次期の所属はどこにも保存しません。同順位が昇格・入替戦の対象やディビジョンの境目にかかるときは、この期の「組み合わせ」タブで順位を手動で決めてください（名前順などで自動では決めません）。' }));
       var pv = state.ui.seasonPreview && state.ui.seasonPreview.eventId === d.event.id ? state.ui.seasonPreview.data : null;
       panel.appendChild(el('div', { className: 'btn-row' }, [
@@ -4519,6 +4537,7 @@
         })),
       ]);
       panel.appendChild(head);
+      if (pv.repair) panel.appendChild(renderSeasonRepair(pv.repair, true));
       if (pv.problems.length) {
         panel.appendChild(el('div', { className: 'notice', role: 'alert' }, [el('p', { className: 'error', text: '確定できない理由（解決するまで次期は作れません）:' }), el('ul', { className: 'plain-list' }, pv.problems.map(function (x) { return el('li', { className: 'error small', text: x }); }))]));
       }

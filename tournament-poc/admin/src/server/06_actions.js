@@ -406,7 +406,9 @@ function newGroupRecords_(ctx, eventId, stageId, count, taken, startIndex, typeO
  */
 function createEventRecords_(ctx, input) {
   var events = ctx.table('Events');
-  var eventId = newId_('EVT', events.byKey);
+  // 監査 PR-06: 次期の作成が途中で止まった跡を作り直すときは、同じ大会 ID を使う（どの行も同じ ID の下に残り、また止まっても跡を消せる）
+  if (input.eventId && events.byKey[input.eventId]) throw appError_('INTERNAL', '大会 ID が重複しています。');
+  var eventId = input.eventId || newId_('EVT', events.byKey);
   var ruleTaken = Object.assign({}, ctx.table('Rules').byKey);
   var stageTaken = Object.assign({}, ctx.table('Stages').byKey);
   var groupTaken = Object.assign({}, ctx.table('Groups').byKey);

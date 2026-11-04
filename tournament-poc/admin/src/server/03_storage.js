@@ -285,8 +285,9 @@ function writeAppends_(table) {
  * 公開データの削除 → 大会に属する行 → 大会の行 → 履歴 → 公開データの更新。
  * 各表の中では 更新 → 削除 → 追加（更新は読み込んだときの行番号で書くため、削除より先）。
  */
-// v1.0: 期制リーグの行（会員・系列・期の連結）は大会の行より先に書く。次期の作成が途中で止まっても、期の連結が残っていれば
-// 次の確定の操作が「途中で止まった作成」と分かり、作り直せる（06c_season.js の removeBrokenSeason_）
+// v1.0: 期制リーグの行（会員・系列・期の連結）は大会の行より先に書く。
+// 監査 PR-06: 次期の作成は ctx.commitFirst で期の行（LeagueSeasons）を最初に書く（下の commitContext_）。どこで止まっても期の行が残り、
+// 次の確定の操作が「途中で止まった作成」と分かって作り直せる（06c_season.js の removeBrokenSeason_）
 var COMMIT_ORDER_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators', 'LeagueMembers', 'Leagues', 'LeagueSeasons', 'Events', 'History'];
 
 function commitContext_(ctx) {
@@ -304,6 +305,18 @@ function commitContext_(ctx) {
     return r._dirty;
   });
   var order = (snapOnlyDeletes ? ['PublicSnapshots'] : []).concat(COMMIT_ORDER_).concat(snap && snap.changed && !snapOnlyDeletes ? ['PublicSnapshots'] : []);
+  // 監査 PR-06: 操作が先に書く表を指定したら、それを最初に書く（次期の作成は期の行を最初に書き、どこで止まっても
+  // 「期の行はあるが大会の行がない」状態にして、次の確定で跡を消して作り直せるようにする。06c_season.js）。他の操作の順は変えない
+  var first = (ctx.commitFirst || []).filter(function (n) {
+    return order.indexOf(n) !== -1;
+  });
+  if (first.length) {
+    order = first.concat(
+      order.filter(function (n) {
+        return first.indexOf(n) === -1;
+      })
+    );
+  }
   pending.forEach(function (n) {
     if (order.indexOf(n) === -1) order.push(n);
   });

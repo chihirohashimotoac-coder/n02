@@ -178,6 +178,51 @@ test('主催者: 次期を作った後に前期の結果を訂正すると、次
   await expect(page.getByText(/照合 .*選手0[45] .*を反映（1 期目の結果の訂正）/)).toBeVisible();
 });
 
+test('次期の作成が途中で止まった（監査 PR-06）: 画面に跡と片づける内容を示し、もう一度確定すると同じ大会 ID で作り直す', async ({ page, request }) => {
+  await start(page, request);
+  const auth = await loginSession(request, ORGANIZER);
+  const e1 = (await adminCall(request, 'createSeasonLeague', { name: '中断リーグ', thresholds: [], rule: { format: 'legs', bestOf: 5 } }, auth)).data.eventId;
+  await adminCall(request, 'importPlayers', { eventId: e1, players: Array.from({ length: 6 }, (_, i) => ({ name: '選手0' + (i + 1) })) });
+  const d = (await adminCall(request, 'eventDetail', { eventId: e1 })).data;
+  await adminCall(request, 'autoAssign', { eventId: e1, stageId: d.stages[0].id });
+  await adminCall(request, 'generateMatches', { eventId: e1, stageId: d.stages[0].id });
+  await playLeague(request, e1);
+  await page.goto(`${ADMIN_PAGE}#e=${e1}`);
+  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await page.getByRole('button', { name: '次期の配置をプレビュー' }).click();
+  await page.locator('#season-join').fill('新人A');
+  await page.getByRole('button', { name: 'プレビューを更新（修正を反映）' }).first().click();
+  await expect(page.locator('#season-preview-result')).toContainText('次期: 7 人');
+  // 大会の行の書き込みで止める（期の行・ルール・選手・組・会員などは書かれる）
+  await request.post('/__fail-sheet-once', { data: { sheet: 'Events' } });
+  page.once('dialog', (dlg) => dlg.accept());
+  await page.locator('#season-confirm').click();
+  await expect(page.getByText('処理中にエラーが発生しました', { exact: false })).toBeVisible();
+  // 読み直すと、跡と片づける内容を示す
+  await page.reload();
+  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  const next = page.locator('#season-next');
+  await expect(next).toContainText('第2期の作成が、前回は途中で止まりました');
+  await expect(page.getByText('第2期: （作成が途中で止まりました）')).toBeVisible();
+  await page.getByRole('button', { name: '次期の配置をプレビュー' }).click();
+  await page.locator('#season-join').fill('新人A');
+  await page.getByRole('button', { name: 'プレビューを更新（修正を反映）' }).first().click();
+  await expect(next).toContainText('途中で作られた会員（新人A）を消します');
+  await expect(next).toContainText('大会 ID は前回と同じです');
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: test.info().outputPath('admin-season-repair.png'), fullPage: true });
+  page.once('dialog', (dlg) => dlg.accept());
+  await page.locator('#season-confirm').click();
+  await expect(page.locator('.event-head__title')).toHaveText('中断リーグ 第2期');
+  const e2 = eventIdOf(page);
+  const seasons = (await adminCall(request, 'eventDetail', { eventId: e1 })).data.season;
+  expect(seasons.next.eventId).toBe(e2);
+  expect(seasons.next.exists).toBe(true);
+  const d2 = (await adminCall(request, 'eventDetail', { eventId: e2 })).data;
+  expect(d2.players.map((x) => x.name).sort()).toEqual(['新人A', '選手01', '選手02', '選手03', '選手04', '選手05', '選手06']);
+  expect(d2.season.otherMembers).toEqual([]);
+});
+
 test('閲覧ページ: 50 人の 2 回総当たり（2,450 試合・分割した公開データ）を読み込み、節を選んで表示する（表示の時間を計測）', async ({ page, request }) => {
   await reset(request, { configured: true });
   await routeAppsScript(page, request);

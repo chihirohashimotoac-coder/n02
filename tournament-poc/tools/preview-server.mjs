@@ -177,6 +177,27 @@ const server = http.createServer(async (req, res) => {
       env.fault[app] = mode;
       return send(res, 200, 'application/json', '{"ok":true}');
     }
+    // 指定したシートへの次の書き込み（setValues）を 1 回だけ失敗させる（書き込みが途中で止まった場合の確認。監査 PR-06）
+    if (req.method === 'POST' && url.pathname === '/__fail-sheet-once') {
+      const { sheet: name } = await body(req);
+      const sheet = env.store.get().getSheetByName(name);
+      if (!sheet) return send(res, 404, 'application/json', '{"ok":false}');
+      const original = sheet.getRange.bind(sheet);
+      let armed = true;
+      sheet.getRange = (...args) => {
+        const r = original(...args);
+        const set = r.setValues.bind(r);
+        r.setValues = (v) => {
+          if (armed) {
+            armed = false;
+            throw new Error('Service Spreadsheets failed (simulated)');
+          }
+          return set(v);
+        };
+        return r;
+      };
+      return send(res, 200, 'application/json', '{"ok":true}');
+    }
     if (req.method === 'POST' && url.pathname === '/__set-admin-property') {
       const { key, value } = await body(req);
       env.admin.properties.setProperty(key, value);
