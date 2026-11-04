@@ -173,6 +173,14 @@ textarea.input { min-height: 110px; }
 .toast-box { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: grid; gap: 8px; width: min(560px, calc(100% - 32px)); z-index: 10; pointer-events: none; }
 .toast { padding: 10px 14px; border-radius: 10px; background: var(--ink); color: var(--bg); font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
 .toast--error { background: var(--danger); color: #fff; }
+/* 監査 PR-05: 保存できたか確認できなかったときの案内。画面の上に閉じるまで残し、ボタンを押せるようにする（下の通知は入力欄へのタップを妨げない） */
+.notice-box { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); display: grid; gap: 8px; width: min(560px, calc(100% - 32px)); z-index: 20; }
+.notice-box:empty { display: none; }
+.toast--unconfirmed { pointer-events: auto; display: grid; gap: 8px; }
+.toast--unconfirmed p { margin: 0; }
+.toast--unconfirmed .btn-row { margin: 0; flex-wrap: wrap; }
+.toast--unconfirmed .btn { background: #fff; color: var(--ink); border-color: #fff; }
+.toast--unconfirmed .btn--ghost { background: transparent; color: #fff; border-color: rgba(255,255,255,.7); }
 .busy-indicator { position: fixed; top: 10px; right: 10px; padding: 4px 10px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 13px; display: none; z-index: 11; }
 body.is-busy .busy-indicator { display: block; }
 
@@ -287,7 +295,7 @@ h4 { margin: 8px 0 4px; font-size: 15px; }
   body { background: #fff; color: #000; font-size: 11pt; }
   body.is-printing > *:not(.print-root) { display: none !important; }
   body.is-printing .print-root { display: block; }
-  body:not(.is-printing) .topbar, body:not(.is-printing) .tabs, body:not(.is-printing) .btn, body:not(.is-printing) .batch-bar, body:not(.is-printing) .toast-box, body:not(.is-printing) .busy-indicator { display: none !important; }
+  body:not(.is-printing) .topbar, body:not(.is-printing) .tabs, body:not(.is-printing) .btn, body:not(.is-printing) .batch-bar, body:not(.is-printing) .toast-box, body:not(.is-printing) .notice-box, body:not(.is-printing) .busy-indicator { display: none !important; }
   .print-head h1 { font-size: 16pt; margin: 0 0 2mm; }
   .print-head p { margin: 0 0 4mm; font-size: 9pt; }
   .print-stage { font-size: 13pt; margin: 5mm 0 2mm; break-after: avoid; page-break-after: avoid; }
