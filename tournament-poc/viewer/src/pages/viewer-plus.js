@@ -312,7 +312,10 @@
         var finals = changed.filter(function (m) {
           return m.status === 'final';
         }).length;
-        if (changed.length) UX.toast('ok', finals ? finals + ' 試合の結果が確定しました。' : changed.length + ' 試合の結果が更新されました。');
+        var changedText = changed.length ? (finals ? finals + ' 試合の結果が確定しました。' : changed.length + ' 試合の結果が更新されました。') : '';
+        // 監査 PR-17: サーバーが最新を読めず予備（stale）を返したときは「最新の状態です」と言わない（上の帯と合わせる）
+        if (d.stale) UX.toast('info', (changedText ? changedText + ' ' : '') + 'サーバーで最新データを読み込めなかったため、前回のデータを表示しています。');
+        else if (changedText) UX.toast('ok', changedText);
         else UX.toast('ok', '最新の状態です。');
       } else if (changed.length) {
         var f = changed.filter(function (m) {

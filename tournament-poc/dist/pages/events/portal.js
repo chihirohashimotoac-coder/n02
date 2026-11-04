@@ -455,7 +455,11 @@
           state.pub.loading = false;
           render();
           scheduleRefresh();
-          if (reason === 'manual' && !state.pub.error) toast('ok', state.pub.version !== before ? '大会の一覧を更新しました。' : '一覧は最新の状態です。');
+          if (reason === 'manual' && !state.pub.error) {
+            // 監査 PR-17: サーバーが最新を読めず予備（stale）を返したときは「最新」と言わない（一覧の下の表示と合わせる）
+            if (state.pub.stale) toast('info', 'サーバーで最新の一覧を読み込めなかったため、前回のデータを表示しています。');
+            else toast('ok', state.pub.version !== before ? '大会の一覧を更新しました。' : '一覧は最新の状態です。');
+          }
         });
     }
 
