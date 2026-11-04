@@ -327,3 +327,16 @@ test('印刷（PDF）: 複数ページの表は行の途中で切らず、各ペ
   expect(await page.locator('#print-root .print-table thead').first().evaluate((e) => getComputedStyle(e).display)).toBe('table-header-group');
   expect(await page.locator('#print-root .print-table tr').first().evaluate((e) => getComputedStyle(e).breakInside)).toBe('avoid');
 });
+
+test('作成欄の見積もり（監査 PR-07）: リーグ → プレーオフ 12 人・3 ディビジョン・プレーオフ 4 人は、各ディビジョン 2 人・合計 6 人・5 試合と表示する', async ({ page, request }) => {
+  await start(page, request);
+  await page.getByLabel(/大会の形式/).selectOption('league_playoff');
+  await page.getByLabel(/想定の参加人数/).fill('12');
+  await page.getByLabel(/ディビジョン数/).fill('3');
+  await page.getByLabel(/プレーオフ（決勝）に進む人数/).fill('4');
+  const box = page.locator('.estimate-panel');
+  await expect(box).toContainText('プレーオフ: 5 試合（6 人）');
+  await expect(box).toContainText('各ディビジョンの上位 2 人');
+  await expect(box).toContainText('3 ディビジョン × 2 人 = 6 人');
+  await expect(box).toContainText('入力したプレーオフの人数 4 人とは異なります');
+});

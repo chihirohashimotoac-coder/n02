@@ -241,9 +241,12 @@ function estimateFormat_(id, params) {
     var ds = robin('リーグ', n, D);
     if (id === 'league_playoff') {
       var po = Math.max(2, Math.floor(Number(p.playoff) || 2));
-      var reach = Math.min(po, ds.reduce(function (a, k) { return a + k; }, 0));
+      // 作成時と同じく、各ディビジョンの上位 ceil(プレーオフの人数 / ディビジョン数) 人が進む（06_actions.js の league_playoff）。
+      // 人数の少ないディビジョンは全員。合計がプレーオフの人数と違うことがある（監査 PR-07）
+      var perDivision = Math.max(1, Math.ceil(po / D));
+      var reach = advancing(ds, perDivision);
       ko('プレーオフ', reach);
-      if (D > 1) notes.push('プレーオフへは各ディビジョンの上位が進みます（' + D + ' ディビジョン × 上位 ' + Math.ceil(po / D) + ' 人の目安）。');
+      if (D > 1) notes.push('プレーオフへは各ディビジョンの上位 ' + perDivision + ' 人が進みます（' + D + ' ディビジョン × ' + perDivision + ' 人 = ' + reach + ' 人' + (reach !== po ? '。入力したプレーオフの人数 ' + po + ' 人とは異なります' : '') + '）。');
     }
   } else if (id === 'multi_robin_ko') {
     var s1 = robin('予選ロビン', n, G);
