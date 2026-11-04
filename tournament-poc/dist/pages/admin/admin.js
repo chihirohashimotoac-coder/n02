@@ -3708,7 +3708,12 @@
         if (st.feeds.length) list.appendChild(el('p', { className: 'muted small', text: '「直接出場」は前の段階を経ずに決勝から出る選手です（例: 招待選手）。前の段階の参加者は直接出場にできません。進出を確定しても直接出場の選手は残ります。' }));
         list.appendChild(
           el('div', { className: 'btn-row' }, [
-            el('button', { className: 'btn btn--primary', type: 'button', 'data-mut': true, 'data-locked': dirty ? null : '1', text: '出場者とシードを保存', onClick: function () { mutate('setEntrants', { eventId: d.event.id, stageId: st.id, entrants: draft.map(function (x) { return { playerId: x.playerId, startRound: x.startRound, direct: x.direct }; }) }, '保存しました。').then(function () { delete state.entrantDraft[st.id]; render(); }); } }),
+            el('button', { className: 'btn btn--primary', type: 'button', 'data-mut': true, 'data-locked': dirty ? null : '1', text: '出場者とシードを保存', onClick: function () { mutate('setEntrants', { eventId: d.event.id, stageId: st.id, entrants: draft.map(function (x) { return { playerId: x.playerId, startRound: x.startRound, direct: x.direct }; }) }, '保存しました。').then(function (data) {
+              // 監査 PR-14: 下書きを消すのは保存できたときだけ（保存されなかった・確認できない・ログインが切れたときは残す）
+              if (!data) return;
+              delete state.entrantDraft[st.id];
+              render();
+            }); } }),
             dirty ? el('button', { className: 'btn btn--ghost', type: 'button', text: '変更を取り消す', onClick: function () { delete state.entrantDraft[st.id]; render(); } }) : null,
           ])
         );
