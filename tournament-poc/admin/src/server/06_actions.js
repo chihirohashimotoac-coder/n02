@@ -1680,6 +1680,44 @@ function sourceRankings_(stageView) {
  * - 進出先がスイス式・シリーズ: 全員を 1 つの組（参加者名簿）へ
  * 戻り値: { targets: [{ stage, rows: [{ playerId, groupId, seed, label, sourceGroupId, sourceRank, direct }], report }] }
  */
+/**
+ * 進出先 target の出場者を、進出元 stage から見て分ける（監査 PR-02）。
+ * - own: この進出元から来た進出者（確定・取り消しで入れ替える）
+ * - kept: 直接出場（勝ち抜き戦のみ）と、他の確定済みの進出元から来た進出者（触らない）
+ * 由来の記録がない出場者（v0.7 以前の進出者・手で入れた選手・確定を外した進出元の残り）は、
+ * 他に確定済みの進出元がなければ従来どおり own に入れ、あれば誰のものか決められないので止める（自動で書き換えない）。
+ */
+function advancementOwnership_(bundle, stage, target) {
+  var bracket = isBracketStage_(target);
+  var otherSources = {};
+  bundle.stages.forEach(function (st) {
+    if (st.stage_id === stage.stage_id) return;
+    var c = stageConfig_(st);
+    if (c.advanced && c.advancement.some(function (r) { return r.targetStageId === target.stage_id; })) otherSources[st.stage_id] = st;
+  });
+  var own = [];
+  var kept = [];
+  var unknown = [];
+  bundle.entries.forEach(function (e) {
+    if (e.stage_id !== target.stage_id) return;
+    var meta = entryMeta_(e);
+    if (meta.direct === true && bracket) kept.push({ entry: e, direct: true });
+    else if (meta.fromStageId === stage.stage_id) own.push(e);
+    else if (meta.fromStageId && otherSources[meta.fromStageId]) kept.push({ entry: e, direct: false, source: otherSources[meta.fromStageId] });
+    else unknown.push(e);
+  });
+  if (unknown.length) {
+    var names = Object.keys(otherSources).map(function (k) {
+      return '「' + otherSources[k].name + '」';
+    });
+    if (names.length) {
+      throw appError_('LOCKED', '「' + target.name + '」に、どの段階から進出したか記録のない出場者が ' + unknown.length + ' 人います。' + names.join('・') + 'からも進出が確定しているため、自動では入れ替えません。進出先の出場者を確認してください。');
+    }
+    own = own.concat(unknown);
+  }
+  return { own: own, kept: kept, otherSources: otherSources };
+}
+
 function planAdvancement_(bundle, stage) {
   var cfg = stageConfig_(stage);
   if (!cfg.advancement.length) throw appError_('VALIDATION', '進出ルールが設定されていません。「形式」タブで設定してください。');
@@ -1740,10 +1778,51 @@ function planAdvancement_(bundle, stage) {
     });
     var rows = [];
     var report = { notes: [] };
+    // 他の確定済みの進出元から来た進出者・直接出場は残す。同じ選手が重ならないようにする（監査 PR-02）
+    var owner = advancementOwnership_(bundle, stage, target);
+    var others = owner.kept
+      .filter(function (k) {
+        return !k.direct;
+      })
+      .map(function (k) {
+        return k.entry;
+      })
+      .sort(function (a, b) {
+        return (a.seed || 0) - (b.seed || 0);
+      });
+    var otherBy = {};
+    others.forEach(function (e) {
+      otherBy[e.player_id] = e;
+    });
+    var nameOfPlayer = function (pid) {
+      var p = bundle.players.filter(function (x) {
+        return x.player_id === pid;
+      })[0];
+      return p ? p.display_name : '選手';
+    };
+    list.forEach(function (r) {
+      var o = otherBy[r.playerId];
+      if (o) {
+        var src = bundle.stageById[entryMeta_(o).fromStageId];
+        throw appError_('VALIDATION', nameOfPlayer(r.playerId) + ' は「' + (src ? src.name : '別の段階') + '」から「' + target.name + '」へ進出済みで、重複しています。進出ルールか前の段階の出場者を見直してください。');
+      }
+    });
+    var keptRow = function (e) {
+      return { playerId: e.player_id, groupId: e.group_id || '', seed: e.seed, label: e.source_label || '', kept: true };
+    };
+    if (others.length) {
+      var sourceNames = Object.keys(owner.otherSources).map(function (k) {
+        return '「' + owner.otherSources[k].name + '」';
+      });
+      report.notes.push(sourceNames.join('・') + 'から確定済みの進出者 ' + others.length + ' 人はそのまま残し、その後ろに並べます。');
+    }
     if (target.type === STAGE_TYPE.SINGLE_ELIMINATION || target.type === STAGE_TYPE.DOUBLE_ELIMINATION) {
-      var direct = bundle.entries
-        .filter(function (e) {
-          return e.stage_id === targetId && entryMeta_(e).direct === true;
+      var direct = owner.kept
+        .filter(function (k) {
+          return k.direct;
+        })
+        .map(function (k) {
+          return k.entry;
         })
         .sort(function (a, b) {
           return (a.seed || 0) - (b.seed || 0);
@@ -1754,20 +1833,23 @@ function planAdvancement_(bundle, stage) {
       });
       list.forEach(function (r) {
         if (directIds[r.playerId]) {
-          var p = bundle.players.filter(function (x) {
-            return x.player_id === r.playerId;
-          })[0];
-          throw appError_('VALIDATION', (p ? p.display_name : '選手') + ' は「' + target.name + '」の直接出場者に登録されていて、進出者と重複しています。どちらかを外してください。');
+          throw appError_('VALIDATION', nameOfPlayer(r.playerId) + ' は「' + target.name + '」の直接出場者に登録されていて、進出者と重複しています。どちらかを外してください。');
         }
       });
       direct.forEach(function (e, i) {
         rows.push({ playerId: e.player_id, groupId: '', seed: i + 1, label: e.source_label || '直接出場', direct: true, startRound: e.start_round || 1 });
       });
+      // 他の進出元の進出者はシードも変えない。この進出元の進出者は、それより後ろのシードにする
+      var nextSeed = direct.length;
+      others.forEach(function (e) {
+        rows.push(keptRow(e));
+        nextSeed = Math.max(nextSeed, e.seed || 0);
+      });
       list.forEach(function (r) {
-        rows.push({ playerId: r.playerId, groupId: '', seed: rows.length + 1, label: r.label, sourceGroupId: r.sourceGroupId, sourceRank: r.rank });
+        rows.push({ playerId: r.playerId, groupId: '', seed: ++nextSeed, label: r.label, sourceGroupId: r.sourceGroupId, sourceRank: r.rank });
       });
       if (tcfg.maxEntrants && rows.length > tcfg.maxEntrants) {
-        throw appError_('VALIDATION', '「' + target.name + '」の枠は ' + tcfg.maxEntrants + ' 人ですが、直接出場 ' + direct.length + ' 人 + 進出 ' + list.length + ' 人 = ' + rows.length + ' 人になります。進出ルールか枠数を見直してください。');
+        throw appError_('VALIDATION', '「' + target.name + '」の枠は ' + tcfg.maxEntrants + ' 人ですが、直接出場 ' + direct.length + ' 人 + 進出 ' + (rows.length - direct.length) + ' 人 = ' + rows.length + ' 人になります。進出ルールか枠数を見直してください。');
       }
       if (direct.length) report.notes.push('直接出場 ' + direct.length + ' 人を上位シードに置き、続けて進出者を「順位 → グループ」の順に並べます。');
     } else if (isRoundRobinStage_(target)) {
@@ -1789,9 +1871,18 @@ function planAdvancement_(bundle, stage) {
         info[r.playerId] = r;
       });
       res.groups.forEach(function (ids, gi) {
-        if (ids.length < 2) throw appError_('VALIDATION', '進出先「' + target.name + '」の' + groups[gi].name + 'が ' + ids.length + ' 人になります（総当たりには 2 人以上必要）。グループ数か進出人数を見直してください。');
+        var inGroup = others.filter(function (e) {
+          return e.group_id === groups[gi].group_id;
+        });
+        var base = inGroup.reduce(function (mx, e) {
+          return Math.max(mx, e.seed || 0);
+        }, 0);
+        if (inGroup.length + ids.length < 2) throw appError_('VALIDATION', '進出先「' + target.name + '」の' + groups[gi].name + 'が ' + (inGroup.length + ids.length) + ' 人になります（総当たりには 2 人以上必要）。グループ数か進出人数を見直してください。');
+        inGroup.forEach(function (e) {
+          rows.push(keptRow(e));
+        });
         ids.forEach(function (pid, k) {
-          rows.push({ playerId: pid, groupId: groups[gi].group_id, seed: k + 1, label: info[pid].label, sourceGroupId: info[pid].sourceGroupId, sourceRank: info[pid].rank });
+          rows.push({ playerId: pid, groupId: groups[gi].group_id, seed: base + k + 1, label: info[pid].label, sourceGroupId: info[pid].sourceGroupId, sourceRank: info[pid].rank });
         });
       });
       report.notes.push('進出者を順位の帯ごとに蛇行の順で配り、同じ進出元のグループの選手がなるべく同じ組にならないようにしました。前の段階の成績は持ち越しません。');
@@ -1800,11 +1891,16 @@ function planAdvancement_(bundle, stage) {
       var g1 = bundle.groups.filter(function (g) {
         return g.stage_id === targetId;
       })[0];
+      var next = 0;
+      others.forEach(function (e) {
+        rows.push(keptRow(e));
+        next = Math.max(next, e.seed || 0);
+      });
       list.forEach(function (r) {
-        rows.push({ playerId: r.playerId, groupId: target.type === STAGE_TYPE.SERIES ? '' : g1 ? g1.group_id : '', seed: rows.length + 1, label: r.label, sourceGroupId: r.sourceGroupId, sourceRank: r.rank });
+        rows.push({ playerId: r.playerId, groupId: target.type === STAGE_TYPE.SERIES ? '' : g1 ? g1.group_id : '', seed: ++next, label: r.label, sourceGroupId: r.sourceGroupId, sourceRank: r.rank });
       });
     }
-    return { stage: target, rows: rows, report: report };
+    return { stage: target, rows: rows, report: report, own: owner.own };
   });
   return { targets: targets };
 }
@@ -1833,7 +1929,7 @@ function actionPreviewAdvancement_(ctx, payload) {
           type: t.stage.type,
           notes: t.report.notes,
           rows: t.rows.map(function (r) {
-            return { playerId: r.playerId, name: nameOf[r.playerId] || '', seed: r.seed, label: r.label, group: r.groupId ? groupName[r.groupId] || '' : '', direct: !!r.direct };
+            return { playerId: r.playerId, name: nameOf[r.playerId] || '', seed: r.seed, label: r.label, group: r.groupId ? groupName[r.groupId] || '' : '', direct: !!r.direct, kept: !!r.kept };
           }),
         };
       }),
@@ -1855,11 +1951,17 @@ function actionConfirmAdvancement_(ctx, payload) {
   var taken = Object.assign({}, entries.byKey);
   var added = [];
   plan.targets.forEach(function (t) {
-    // 直接出場の選手は残し、それ以外（前回の進出者・手で入れた選手）を入れ替える
+    // この進出元の前回の進出者（と、由来の記録がない出場者。他に確定済みの進出元がないときだけ）を入れ替える。
+    // 直接出場と、他の進出元の進出者は残す（監査 PR-02）
+    var ownIds = {};
+    t.own.forEach(function (e) {
+      ownIds[e.entry_id] = true;
+    });
     deleteRecords_(entries, entries.rows.filter(function (e) {
-      return e.stage_id === t.stage.stage_id && !(entryMeta_(e).direct === true && isBracketStage_(t.stage));
+      return ownIds[e.entry_id];
     }));
     t.rows.forEach(function (r) {
+      if (r.kept) return;
       if (r.direct) {
         var keep = entries.rows.filter(function (e) {
           return e.stage_id === t.stage.stage_id && e.player_id === r.playerId;
@@ -1884,7 +1986,7 @@ function actionConfirmAdvancement_(ctx, payload) {
   recordHistory_(ctx, 'stage.advance', 'Stage', stage.stage_id, eventId, null, {
     advanced: added.length,
     targets: plan.targets.map(function (t) {
-      return { stageId: t.stage.stage_id, rows: t.rows.map(function (r) { return [r.playerId, r.seed, r.groupId, r.label]; }) };
+      return { stageId: t.stage.stage_id, rows: t.rows.filter(function (r) { return !r.kept; }).map(function (r) { return [r.playerId, r.seed, r.groupId, r.label]; }) };
     }),
   });
   return { eventId: eventId, advanced: added.length };
@@ -1906,17 +2008,27 @@ function actionUndoAdvancement_(ctx, payload) {
   if (targetMatches.some(function (m) { return matchStarted_(m) && m.result_type !== RESULT_TYPE.BYE; })) {
     throw appError_('LOCKED', '進出先の段階で結果が入力されているため取り消せません。先に進出先の結果を「未開始」に戻してください。');
   }
+  // この進出元の進出者だけを外す。直接出場の選手（進出とは別に登録したもの）と、他の進出元の進出者は残す（監査 PR-02）。
+  // 由来の記録がない出場者は、他に確定済みの進出元がなければ従来どおり外し、あれば止める（advancementOwnership_）
+  var removeIds = {};
+  Object.keys(targets).forEach(function (tid) {
+    var target = bundle.stageById[tid];
+    if (!target) return;
+    advancementOwnership_(bundle, stage, target).own.forEach(function (e) {
+      if (entryMeta_(e).direct === true) return;
+      removeIds[e.entry_id] = true;
+    });
+  });
   deleteRecords_(ctx.table('Matches'), ctx.table('Matches').rows.filter(function (m) {
     return targets[m.stage_id];
   }));
-  // 直接出場の選手（進出とは別に登録したもの）は残す
   deleteRecords_(ctx.table('Entries'), ctx.table('Entries').rows.filter(function (e) {
-    return targets[e.stage_id] && entryMeta_(e).direct !== true;
+    return removeIds[e.entry_id];
   }));
   cfg.advanced = false;
   cfg.advancedAt = '';
   saveStage_(ctx, ctx.table('Stages').byKey[stage.stage_id], cfg, ['advanced', 'advancedAt']);
-  recordHistory_(ctx, 'stage.undoAdvance', 'Stage', stage.stage_id, eventId, null, { removedMatches: targetMatches.length });
+  recordHistory_(ctx, 'stage.undoAdvance', 'Stage', stage.stage_id, eventId, null, { removedMatches: targetMatches.length, removedEntries: Object.keys(removeIds).length });
   return { eventId: eventId };
 }
 
