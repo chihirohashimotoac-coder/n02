@@ -262,9 +262,22 @@ function estimateFormat_(id, params) {
     notes.push('各節の得点は到達した順位に対する総点です（準決勝・決勝の点を足し合わせません）。');
   } else if (id === 'swiss') {
     var R = Math.max(1, Math.floor(Number(p.swissRounds) || 1));
-    stages.push({ name: 'スイス式', matches: R * Math.floor(n / 2), note: R + ' 回戦' + (n % 2 ? '・毎回戦 1 人が不戦（Bye）' : '') });
-    if (n >= 2 && R > n - 1) problems.push('回戦数（' + R + '）が多すぎます。' + n + ' 人では ' + (n - 1) + ' 回戦までしか全員が再戦なしで組めません。');
-    else if (n >= 2 && R > Math.ceil(Math.log(n) / Math.LN2) + 2) notes.push('回戦数が多いと、後半は成績の近い相手と再戦なしで組めないことがあります（その場合は理由を表示します）。');
+    // 監査 PR-18（W-007）: 再戦なし・不戦（Bye）を同じ人に 2 回与えずに組める回戦数の上限は、奇数の人数は n 回戦
+    // （毎回戦 1 人が不戦。全員が 1 回ずつ不戦になる）、偶数は n − 1 回戦。不戦は試合数に含めず、別に数える
+    var odd = n % 2 === 1;
+    var maxRounds = odd ? n : n - 1;
+    var swissStage = { name: 'スイス式', matches: R * Math.floor(n / 2), note: R + ' 回戦' + (odd && n >= 2 ? '・不戦（Bye）は毎回戦 1 人で計 ' + R + ' 回（試合数に含めません）' : '') };
+    if (odd && n >= 2) swissStage.byes = R;
+    stages.push(swissStage);
+    if (n >= 2 && R > maxRounds) {
+      problems.push(
+        '回戦数（' + R + '）が多すぎます。' + n + ' 人では ' + maxRounds + ' 回戦までしか' +
+          (odd ? '、再戦なし・同じ人に 2 回目の不戦（Bye）なしで組めません（奇数の人数は毎回戦 1 人が不戦になり、' + n + ' 回戦で全員が 1 回ずつ不戦になります）。' : '全員が再戦なしで組めません。')
+      );
+    } else if (n >= 2 && (R > Math.ceil(Math.log(n) / Math.LN2) + 2 || (!odd && n >= 6 && R === maxRounds))) {
+      // 偶数の上限（n − 1 回戦）は、それまでの組み合わせによっては最後の回戦を再戦なしで組めない（6 人 5 回戦など）
+      notes.push('回戦数が多いと、後半は成績の近い相手と再戦なしで組めないことがあります（その場合は理由を表示します）。');
+    }
     var po3 = Math.floor(Number(p.playoff) || 0);
     if (po3 >= 2) ko('決勝トーナメント', Math.min(po3, n));
   } else {
