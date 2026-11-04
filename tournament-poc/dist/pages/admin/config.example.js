@@ -7,4 +7,6 @@
 window.TPOC_ADMIN_CONFIG = {
   endpoint: 'https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXXXXXX/exec',
   googleClientId: '000000000000-xxxxxxxx.apps.googleusercontent.com',
+  // 任意: 通信の期限（ミリ秒）。書かなければ 読み込み 45 秒・保存 45 秒・復元など 120 秒
+  // timeouts: { query: 45000, mutate: 45000, long: 120000 },
 };

@@ -205,7 +205,39 @@
 
   /* ---------- サーバー呼び出し ---------- */
 
-  function createApi(runner) {
+  /**
+   * 通信の期限（ミリ秒。監査 PR-05）。応答がなければ待ち続けずに止める。admin/config.js の timeouts で変えられる。
+   * 書き込みは、期限内に応答がなくても Apps Script 側では保存されていることがある（「確認できない」として扱う）
+   */
+  var DEFAULT_TIMEOUTS = { query: 45000, mutate: 45000, long: 120000 };
+  // 大きな本文・処理の重い操作（復元・次期の作成）は長めに待つ
+  var LONG_ACTIONS = { restoreEvent: true, confirmNextSeason: true, importPlayers: true };
+  // 1 回目の結果が分からないまま送り直したときに、これらの応答が来たら「1 回目で保存済み」の可能性が高い（確認不能として扱う）
+  var AFTER_UNKNOWN_SUSPECT = { CONFLICT: true, ALREADY_FINAL: true, LOCKED: true, PARTIAL_WRITE: true, BUSY: true };
+
+  function resolveTimeouts(config) {
+    var t = (config && config.timeouts) || {};
+    var pick = function (v, d) {
+      return typeof v === 'number' && v >= 1000 ? v : d;
+    };
+    return { query: pick(t.query, DEFAULT_TIMEOUTS.query), mutate: pick(t.mutate, DEFAULT_TIMEOUTS.mutate), long: pick(t.long, DEFAULT_TIMEOUTS.long) };
+  }
+
+  /**
+   * options.timeouts: { query, mutate, long }、options.wait(ms) → Promise（試験用）
+   * 書き込みの結果は 3 つに分ける: 保存済み（resolve）・保存されなかった（reject。サーバーが理由を返した）・
+   * 確認できない（reject、code = UNCONFIRMED。通信が切れた・応答がなかった。resend() で同じ操作として送り直せる）
+   */
+  function createApi(runner, options) {
+    var opts = options || {};
+    var timeouts = opts.timeouts || DEFAULT_TIMEOUTS;
+    var wait =
+      opts.wait ||
+      function (ms) {
+        return new Promise(function (r) {
+          setTimeout(r, ms);
+        });
+      };
     function callOnce(request) {
       return new Promise(function (resolve, reject) {
         runner(
@@ -215,31 +247,67 @@
             else reject((res && res.error) || { code: 'UNKNOWN', message: '不明な応答です。' });
           },
           function (err) {
-            reject({ code: 'NETWORK', message: '通信に失敗しました。' + (err && err.message ? '（' + err.message + '）' : '') });
+            if (err && err.timeout) reject({ code: 'TIMEOUT', message: '応答がありませんでした（' + Math.round((request.timeoutMs || 0) / 1000) + ' 秒）。' });
+            else reject({ code: 'NETWORK', message: '通信に失敗しました。' + (err && err.message ? '（' + err.message + '）' : '') });
           }
         );
       });
     }
+    function unconfirmed(cause, send) {
+      return {
+        code: 'UNCONFIRMED',
+        message: '保存できたか確認できませんでした（' + ((cause && cause.message) || '通信が切れました。') + '）。入力した内容は残しています。最新の状態を読み込んで確認してください。',
+        cause: cause,
+        resend: send,
+      };
+    }
+    /**
+     * 同じ requestId で送る。BUSY（サーバーが実行しなかった）は 2 回まで待って送り直す。
+     * 通信エラー・期限切れ（実行されたか分からない）は 1 回だけ同じ requestId で送り直す（サーバーは requestId と
+     * 作ったレコードの印で二重実行を防ぐ）。それでも分からなければ UNCONFIRMED
+     */
+    function send(request, uncertain) {
+      var busyLeft = 2;
+      var unknownLeft = uncertain ? 0 : 1;
+      var attempt = function (unsure) {
+        return callOnce(request).then(
+          function (data) {
+            if (unsure && data && typeof data === 'object') data.recovered = true;
+            return data;
+          },
+          function (err) {
+            var code = err && err.code;
+            if (code === 'BUSY' && busyLeft > 0) {
+              busyLeft--;
+              return wait(1500).then(function () {
+                return attempt(unsure);
+              });
+            }
+            if ((code === 'NETWORK' || code === 'TIMEOUT') && unknownLeft > 0) {
+              unknownLeft--;
+              return wait(1500).then(function () {
+                return attempt(true);
+              });
+            }
+            if (code === 'NETWORK' || code === 'TIMEOUT' || code === 'PARTIAL_WRITE' || (unsure && AFTER_UNKNOWN_SUSPECT[code])) {
+              throw unconfirmed(err, function () {
+                return send(request, true);
+              });
+            }
+            throw err;
+          }
+        );
+      };
+      return attempt(!!uncertain);
+    }
     return {
       query: function (action, payload) {
-        return callOnce({ action: action, payload: payload || {} });
+        return callOnce({ action: action, payload: payload || {}, timeoutMs: timeouts.query });
       },
-      /**
-       * 書き込み。通信エラーのときだけ、同じ requestId で 1 回だけ再送する。
-       * サーバーは requestId で二重実行を防ぐので、再送しても 2 回反映されることはない。
-       */
+      /** 書き込み。結果は上の 3 つのどれか。保存済みのとき data.recovered = true なら、送り直しで確かめられたもの */
       mutate: function (action, payload) {
-        var request = { action: action, payload: payload || {}, requestId: newRequestId() };
-        return callOnce(request).catch(function (err) {
-          if (err && (err.code === 'NETWORK' || err.code === 'BUSY')) {
-            return new Promise(function (r) {
-              setTimeout(r, 1500);
-            }).then(function () {
-              return callOnce(request);
-            });
-          }
-          throw err;
-        });
+        var request = { action: action, payload: payload || {}, requestId: newRequestId(), timeoutMs: LONG_ACTIONS[action] ? timeouts.long : timeouts.mutate };
+        return send(request, false);
       },
     };
   }
@@ -294,10 +362,28 @@
     }
   }
 
-  /** GitHub Pages から運営用 Web アプリ（doPost）へ JSON を送る。Cookie は送らない */
+  /**
+   * GitHub Pages から運営用 Web アプリ（doPost）へ JSON を送る。Cookie は送らない。
+   * request.timeoutMs を過ぎても応答がなければ打ち切って fail({ timeout: true }) を呼ぶ（監査 PR-05）。ok / fail はどちらか 1 回だけ
+   */
   function createFetchRunner(win, endpoint, getAuth) {
     return function (request, ok, fail) {
       var body = { action: request.action, payload: request.payload, requestId: request.requestId, auth: getAuth() };
+      var settled = false;
+      var ctrl = typeof win.AbortController === 'function' ? new win.AbortController() : null;
+      var timer = null;
+      var done = function (fn, value) {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        fn(value);
+      };
+      if (request.timeoutMs) {
+        timer = setTimeout(function () {
+          done(fail, { timeout: true });
+          if (ctrl) ctrl.abort();
+        }, request.timeoutMs);
+      }
       win
         .fetch(endpoint, {
           method: 'POST',
@@ -306,6 +392,7 @@
           credentials: 'omit',
           cache: 'no-store',
           redirect: 'follow',
+          signal: ctrl ? ctrl.signal : undefined,
         })
         .then(function (r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -313,9 +400,11 @@
         })
         .then(
           function (data) {
-            ok(data);
+            done(ok, data);
           },
-          fail
+          function (err) {
+            done(fail, err);
+          }
         );
     };
   }
@@ -398,11 +487,12 @@
       if (state.google) return { session: state.google.session };
       return undefined;
     }
-    var api = createApi(createFetchRunner(win, config.endpoint, currentAuth));
+    var timeouts = resolveTimeouts(config);
+    var api = createApi(createFetchRunner(win, config.endpoint, currentAuth), { timeouts: timeouts });
     // ログアウト（サーバー側での無効化）だけは、今の画面のログインを送らない（消したセッションは本文で送る）
     var plainApi = createApi(createFetchRunner(win, config.endpoint, function () {
       return undefined;
-    }));
+    }), { timeouts: timeouts });
 
     function toast(kind, text) {
       var item = el('div', { className: 'toast toast--' + kind, role: kind === 'error' ? 'alert' : 'status', text: text });
@@ -454,39 +544,140 @@
       toast('error', '保存しました。ただし閲覧ページへの反映に失敗しました（' + data.publication.message + '）。「公開データを再生成」でやり直せます。');
     }
 
-    /** 書き込み操作の共通処理。実行中は他の書き込みボタンを押せなくする。 */
-    function mutate(action, payload, okMessage) {
+    /** 今の画面（どの大会・どのモード）。応答が届いたときに、送ったときと同じ画面かを確かめる（監査 PR-05） */
+    function viewKey() {
+      return state.route.mode + ':' + (state.route.mode === 'event' ? state.route.eventId : state.eventId || '');
+    }
+
+    var CREATE_ACTIONS = { createEvent: true, createSampleEvent: true, duplicateEvent: true, restoreEvent: true, createSeasonLeague: true, confirmNextSeason: true };
+
+    /** 保存済みの応答を画面に反映する。送った後に別の画面へ移っていたら、その画面は書き換えない */
+    function applyMutation(action, data, okMessage, sentFrom) {
+      var moved = viewKey() !== sentFrom;
+      var message = okMessage ? (typeof okMessage === 'function' ? okMessage(data) : okMessage) : '';
+      if (data && data.recovered) message = (message || '保存しました。') + '（通信が途切れたため送り直して確かめました）';
+      if (moved) {
+        // 前の画面の操作の結果。今の画面（別の大会など）は書き換えない
+        toast('ok', (message || '保存しました。') + '（前の画面の操作）');
+        warnPublication(data);
+        return data;
+      }
+      // 大会を作ったら、その大会の運営画面へ（通信の再送で二重に作られた場合も同じ大会を開く）
+      if (data && data.eventId && CREATE_ACTIONS[action]) {
+        if (message && !data.duplicate) toast('ok', message);
+        else if (data.duplicate) toast('ok', '前の送信で保存されていました。');
+        warnPublication(data);
+        goTo('#e=' + encodeURIComponent(data.eventId));
+        return data;
+      }
+      if (data && data.duplicate) {
+        toast('ok', '前の送信で保存されていました。最新の状態を読み込みます。');
+        if (state.eventId) return loadDetail(state.eventId).then(function () {
+          return data;
+        });
+        return loadBoot().then(function () {
+          return data;
+        });
+      }
+      if (data && data.detail) {
+        state.detail = data.detail;
+        state.eventId = data.detail.event.id;
+      }
+      if (data && data.storage) state.boot = data;
+      if (message) toast('ok', message);
+      warnPublication(data);
+      render();
+      return data;
+    }
+
+    /**
+     * 保存できたか確認できなかったとき（監査 PR-05）: 閉じるまで残る案内を出し、最新の状態を読み込む。
+     * 入力途中の内容（state の下書き）は消さない。「同じ操作としてもう一度送る」は同じ requestId で送る
+     * （サーバーが二重実行を防ぐので、前の送信で保存されていれば保存済みとして返る）
+     */
+    function showUnconfirmed(action, err, okMessage, sentFrom) {
+      Array.prototype.forEach.call(toastBox.querySelectorAll('.toast--unconfirmed'), function (n) {
+        n.parentNode.removeChild(n);
+      });
+      var box = el('div', { className: 'toast toast--error toast--unconfirmed', role: 'alert' });
+      var close = function () {
+        if (box.parentNode) box.parentNode.removeChild(box);
+      };
+      box.appendChild(el('p', { text: err.message }));
+      box.appendChild(
+        el('div', { className: 'btn-row' }, [
+          el('button', {
+            className: 'btn btn--small',
+            type: 'button',
+            text: '最新の状態を読み込む',
+            onClick: function () {
+              close();
+              reloadCurrent();
+            },
+          }),
+          err.resend
+            ? el('button', {
+                className: 'btn btn--small btn--primary',
+                type: 'button',
+                text: '同じ操作としてもう一度送る',
+                onClick: function () {
+                  close();
+                  runMutation(action, function () {
+                    return err.resend();
+                  }, okMessage, sentFrom);
+                },
+              })
+            : null,
+          el('button', { className: 'btn btn--small btn--ghost', type: 'button', text: '閉じる', onClick: close }),
+        ])
+      );
+      toastBox.appendChild(box);
+      if (viewKey() === sentFrom) reloadCurrent();
+    }
+
+    /** 今の画面の内容を読み直す（大会を開いていれば詳細、そうでなければ一覧） */
+    function reloadCurrent() {
+      if (state.eventId) return loadDetail(state.eventId);
+      if (state.route.mode !== 'event') return loadBoot();
+      return Promise.resolve();
+    }
+
+    function runMutation(action, sendFn, okMessage, sentFrom) {
       if (state.busy) return Promise.resolve(null);
       setBusy(true);
-      return api
-        .mutate(action, payload)
-        .then(function (data) {
-          // 大会を作ったら、その大会の運営画面へ（通信の再送で二重に作られた場合も同じ大会を開く）
-          if (data && data.eventId && (action === 'createEvent' || action === 'createSampleEvent' || action === 'duplicateEvent' || action === 'restoreEvent' || action === 'createSeasonLeague' || action === 'confirmNextSeason')) {
-            if (okMessage && !data.duplicate) toast('ok', okMessage);
-            warnPublication(data);
-            goTo('#e=' + encodeURIComponent(data.eventId));
-            return data;
+      return sendFn()
+        .then(
+          function (data) {
+            return applyMutation(action, data, okMessage, sentFrom);
+          },
+          function (err) {
+            if (err && err.code === 'UNCONFIRMED') {
+              showUnconfirmed(action, err, okMessage, sentFrom);
+              return null;
+            }
+            // 前の画面の操作の失敗は、今の画面を読み直さずに知らせるだけ
+            if (viewKey() !== sentFrom && !(err && AUTH_ERRORS[err.code])) {
+              toast('error', ((err && err.message) || 'エラーが発生しました。') + '（前の画面の操作）');
+              return null;
+            }
+            return handleError(err);
           }
-          if (data && data.duplicate) {
-            if (state.eventId) return loadDetail(state.eventId);
-            return loadBoot();
-          }
-          if (data && data.detail) {
-            state.detail = data.detail;
-            state.eventId = data.detail.event.id;
-          }
-          if (data && data.storage) state.boot = data;
-          if (okMessage) toast('ok', typeof okMessage === 'function' ? okMessage(data) : okMessage);
-          warnPublication(data);
-          render();
-          return data;
-        })
-        .catch(handleError)
+        )
         .then(function (data) {
           setBusy(false);
           return data;
         });
+    }
+
+    /**
+     * 書き込み操作の共通処理。実行中は他の書き込みボタンを押せなくする。
+     * 結果: 保存済み → data / 保存されなかった・確認できない → null（入力途中の内容は呼び出し側で消さないこと）
+     */
+    function mutate(action, payload, okMessage) {
+      var sentFrom = viewKey();
+      return runMutation(action, function () {
+        return api.mutate(action, payload);
+      }, okMessage, sentFrom);
     }
 
     /* ---------- ログイン ---------- */
@@ -718,10 +909,19 @@
         })
         .catch(function (err) {
           if (err && AUTH_ERRORS[err.code]) return handleError(err);
-          root.textContent = '';
-          root.appendChild(el('p', { className: 'panel error', text: (err && err.message) || '読み込みに失敗しました。' }));
-          root.appendChild(el('button', { className: 'btn', type: 'button', text: '再読み込み', onClick: loadBoot }));
+          showLoadFailure(err, loadBoot);
         });
+    }
+
+    /** 最初の読み込みに失敗した・応答がなかったとき: 待ち続けずに理由と「再読み込み」を出す（監査 PR-05） */
+    function showLoadFailure(err, retry) {
+      root.textContent = '';
+      root.appendChild(el('p', { className: 'panel error', text: (err && err.message) || '読み込みに失敗しました。' }));
+      root.appendChild(el('button', { className: 'btn', type: 'button', text: '再読み込み', onClick: function () {
+        root.textContent = '';
+        root.appendChild(el('p', { className: 'panel', text: '読み込み中…' }));
+        retry();
+      } }));
     }
 
     /**
@@ -767,20 +967,40 @@
             render();
             return;
           }
+          if (err && !AUTH_ERRORS[err.code] && !state.detail && state.eventId === eventId) {
+            return showLoadFailure(err, function () {
+              return loadEventFirst(eventId);
+            });
+          }
           handleError(err);
         });
     }
 
+    var detailSeq = 0;
     function loadDetail(eventId) {
+      var seq = ++detailSeq;
       return api
         .query('eventDetail', { eventId: eventId })
         .then(function (detail) {
+          // 読み込み中に別の大会へ移った・より新しい読み込みがあった: 古い応答で画面を戻さない（監査 PR-05）
+          var current = state.route.mode === 'event' ? state.route.eventId : state.eventId;
+          if (seq !== detailSeq || (current && current !== eventId)) return;
           state.detail = detail;
           state.eventId = eventId;
           state.editing = {};
           render();
         })
-        .catch(handleError);
+        .catch(function (err) {
+          var current = state.route.mode === 'event' ? state.route.eventId : state.eventId;
+          if (seq !== detailSeq || (current && current !== eventId)) return;
+          // まだ何も表示していない大会の読み込みが失敗した: 待ち続けずに「再読み込み」を出す。表示中の内容は残して知らせるだけ
+          if (err && !AUTH_ERRORS[err.code] && !state.detail) {
+            return showLoadFailure(err, function () {
+              return loadDetail(eventId);
+            });
+          }
+          return handleError(err);
+        });
     }
 
     /** 管理者はその場で開く（URL は #admin のまま）。主催者はその大会の運営画面の URL へ */
@@ -4525,7 +4745,7 @@
     return { state: state };
   }
 
-  global.TPAdmin = { checkResult: checkResult, checkFixed: checkFixed, createApi: createApi, legsToWin: legsToWin, parseHash: parseHash, eventUrl: eventUrl, decodeJwtPayload: decodeJwtPayload, createFetchRunner: createFetchRunner };
+  global.TPAdmin = { checkResult: checkResult, checkFixed: checkFixed, createApi: createApi, resolveTimeouts: resolveTimeouts, legsToWin: legsToWin, parseHash: parseHash, eventUrl: eventUrl, decodeJwtPayload: decodeJwtPayload, createFetchRunner: createFetchRunner };
 
   if (global.document && global.TPOC_ADMIN_CONFIG) {
     var go = function () {

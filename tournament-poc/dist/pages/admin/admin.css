@@ -173,6 +173,12 @@ textarea.input { min-height: 110px; }
 .toast-box { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: grid; gap: 8px; width: min(560px, calc(100% - 32px)); z-index: 10; pointer-events: none; }
 .toast { padding: 10px 14px; border-radius: 10px; background: var(--ink); color: var(--bg); font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
 .toast--error { background: var(--danger); color: #fff; }
+/* 監査 PR-05: 保存できたか確認できなかったときの案内。閉じるまで残し、ボタンを押せるようにする（他の通知は下の入力欄へのタップを妨げない） */
+.toast--unconfirmed { pointer-events: auto; display: grid; gap: 8px; }
+.toast--unconfirmed p { margin: 0; }
+.toast--unconfirmed .btn-row { margin: 0; flex-wrap: wrap; }
+.toast--unconfirmed .btn { background: #fff; color: var(--ink); border-color: #fff; }
+.toast--unconfirmed .btn--ghost { background: transparent; color: #fff; border-color: rgba(255,255,255,.7); }
 .busy-indicator { position: fixed; top: 10px; right: 10px; padding: 4px 10px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 13px; display: none; z-index: 11; }
 body.is-busy .busy-indicator { display: block; }
 
