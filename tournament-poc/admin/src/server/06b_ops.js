@@ -48,7 +48,8 @@ function actionGenerateSwissRound_(ctx, payload) {
   var pointsOf = {};
   standing.forEach(function (r, i) {
     rankOf[r.playerId] = i;
-    pointsOf[r.playerId] = r.points || 0;
+    // 監査 PR-12: 表示用の順位の決め方に「勝ち点」がないと r.points は付かないので、勝・分・負・不戦の数から求める
+    pointsOf[r.playerId] = swissPairingPoints_(r, cfg);
   });
   var seedOf = {};
   members.forEach(function (e, i) {
@@ -77,7 +78,8 @@ function actionGenerateSwissRound_(ctx, payload) {
         return e.player_id;
       })
       .sort(function (a, b) {
-        return (rankOf[a] === undefined ? 999 : rankOf[a]) - (rankOf[b] === undefined ? 999 : rankOf[b]) || seedOf[a] - seedOf[b];
+        // 実際の勝ち点の多い順 → 順位表の順位 → シード。既定の決め方（勝ち点が先頭）では順位表の順位と同じ並び
+        return (pointsOf[b] || 0) - (pointsOf[a] || 0) || (rankOf[a] === undefined ? 999 : rankOf[a]) - (rankOf[b] === undefined ? 999 : rankOf[b]) || seedOf[a] - seedOf[b];
       });
   }
   var players = ordered.map(function (pid) {
