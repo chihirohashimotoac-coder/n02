@@ -1096,6 +1096,12 @@ function actionUpdateStage_(ctx, payload) {
   };
   var type = stage.type;
   var bracket = isBracketStage_(stage);
+  // 監査 PR-11（C-013）: 進出確定後は、順位・回戦を変える設定（不戦勝の Leg 数・節の順位ポイント・節の数・スイス式の回戦数）を
+  // 変えさせない（進出者は確定したときの順位で決まっているため）。運営画面は保存のたびに全項目を送るので、今と同じ値は通す。
+  // 「進出を取り消す」の後は変えられる
+  var lockAfterAdvance = function (label, same) {
+    if (cfg.advanced && !same) throw appError_('LOCKED', '進出確定後は' + label + 'を変更できません。先に「進出を取り消す」を行ってください。');
+  };
 
   if (payload.name !== undefined) stage.name = cleanText_(payload.name, '段階の名前', ADMIN_CONFIG.MAX_LABEL_LENGTH);
 
@@ -1134,6 +1140,7 @@ function actionUpdateStage_(ctx, payload) {
   }
   if (payload.walkoverLegs !== undefined && (isGroupStage_(stage) || type === STAGE_TYPE.SERIES)) {
     if (payload.walkoverLegs !== 'exclude' && payload.walkoverLegs !== 'award') throw appError_('VALIDATION', '不戦勝の Leg 数の扱いが不正です。');
+    lockAfterAdvance('不戦勝の Leg 数の扱い', payload.walkoverLegs === cfg.walkoverLegs);
     set('walkoverLegs', payload.walkoverLegs);
   }
 
@@ -1163,17 +1170,20 @@ function actionUpdateStage_(ctx, payload) {
     }, 0);
     if (payload.rounds !== undefined) {
       var rounds = parseSmallInt_(payload.rounds, '回戦数', 1, ADMIN_CONFIG.MAX_SWISS_ROUNDS, cfg.rounds);
+      lockAfterAdvance('回戦数', rounds === cfg.rounds);
       if (rounds < generated) throw appError_('LOCKED', 'すでに ' + generated + ' 回戦まで組んでいるため、回戦数をそれより少なくできません。');
       set('rounds', rounds);
     }
     if (payload.firstRound !== undefined) {
       if (payload.firstRound !== 'seed' && payload.firstRound !== 'random') throw appError_('VALIDATION', '1 回戦の組み方が不正です。');
-      if (generated) throw appError_('LOCKED', '1 回戦を組んだ後は変更できません。');
+      // 運営画面は保存のたびに送るので、今と同じ値は通す（監査 PR-11 で同じ形にそろえた）
+      if (generated && payload.firstRound !== cfg.firstRound) throw appError_('LOCKED', '1 回戦を組んだ後は変更できません。');
       set('firstRound', payload.firstRound);
     }
     if (payload.byePoints !== undefined) {
-      if (generated) throw appError_('LOCKED', '組み合わせを作った後は、不戦（Bye）の点を変更できません。');
-      set('byePoints', parseSmallInt_(payload.byePoints, '不戦（Bye）の点', 0, 99, cfg.byePoints));
+      var byePoints = parseSmallInt_(payload.byePoints, '不戦（Bye）の点', 0, 99, cfg.byePoints);
+      if (generated && byePoints !== cfg.byePoints) throw appError_('LOCKED', '組み合わせを作った後は、不戦（Bye）の点を変更できません。');
+      set('byePoints', byePoints);
     }
   }
   if (isEliminationStage_(stage)) {
@@ -1224,13 +1234,18 @@ function actionUpdateStage_(ctx, payload) {
     set('grandFinal', payload.grandFinal);
   }
   if (type === STAGE_TYPE.SERIES) {
-    if (payload.nightPoints !== undefined) set('nightPoints', parseNightPoints_(payload.nightPoints, cfg.nightPoints));
+    if (payload.nightPoints !== undefined) {
+      var np = parseNightPoints_(payload.nightPoints, cfg.nightPoints);
+      lockAfterAdvance('節の順位ポイント', np.join(',') === cfg.nightPoints.join(','));
+      set('nightPoints', np);
+    }
     if (payload.nightDraw !== undefined) {
       if (['random', 'standing', 'seed'].indexOf(payload.nightDraw) === -1) throw appError_('VALIDATION', '節の組み合わせの決め方が不正です。');
       set('nightDraw', payload.nightDraw);
     }
     if (payload.nights !== undefined) {
       var nights = parseSmallInt_(payload.nights, '節の数', 1, ADMIN_CONFIG.MAX_SERIES_NIGHTS, cfg.nights);
+      lockAfterAdvance('節の数', nights === cfg.nights);
       resizeSeriesNights_(ctx, bundle, stage, nights);
       set('nights', nights);
     }
