@@ -1718,8 +1718,9 @@ function writeAppends_(table) {
  * 公開データの削除 → 大会に属する行 → 大会の行 → 履歴 → 公開データの更新。
  * 各表の中では 更新 → 削除 → 追加（更新は読み込んだときの行番号で書くため、削除より先）。
  */
-// v1.0: 期制リーグの行（会員・系列・期の連結）は大会の行より先に書く。次期の作成が途中で止まっても、期の連結が残っていれば
-// 次の確定の操作が「途中で止まった作成」と分かり、作り直せる（06c_season.js の removeBrokenSeason_）
+// v1.0: 期制リーグの行（会員・系列・期の連結）は大会の行より先に書く。
+// 監査 PR-06: 次期の作成は ctx.commitFirst で期の行（LeagueSeasons）を最初に書く（下の commitContext_）。どこで止まっても期の行が残り、
+// 次の確定の操作が「途中で止まった作成」と分かって作り直せる（06c_season.js の removeBrokenSeason_）
 var COMMIT_ORDER_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators', 'LeagueMembers', 'Leagues', 'LeagueSeasons', 'Events', 'History'];
 
 function commitContext_(ctx) {
@@ -1737,6 +1738,18 @@ function commitContext_(ctx) {
     return r._dirty;
   });
   var order = (snapOnlyDeletes ? ['PublicSnapshots'] : []).concat(COMMIT_ORDER_).concat(snap && snap.changed && !snapOnlyDeletes ? ['PublicSnapshots'] : []);
+  // 監査 PR-06: 操作が先に書く表を指定したら、それを最初に書く（次期の作成は期の行を最初に書き、どこで止まっても
+  // 「期の行はあるが大会の行がない」状態にして、次の確定で跡を消して作り直せるようにする。06c_season.js）。他の操作の順は変えない
+  var first = (ctx.commitFirst || []).filter(function (n) {
+    return order.indexOf(n) !== -1;
+  });
+  if (first.length) {
+    order = first.concat(
+      order.filter(function (n) {
+        return first.indexOf(n) === -1;
+      })
+    );
+  }
   pending.forEach(function (n) {
     if (order.indexOf(n) === -1) order.push(n);
   });
@@ -5562,7 +5575,9 @@ function newGroupRecords_(ctx, eventId, stageId, count, taken, startIndex, typeO
  */
 function createEventRecords_(ctx, input) {
   var events = ctx.table('Events');
-  var eventId = newId_('EVT', events.byKey);
+  // 監査 PR-06: 次期の作成が途中で止まった跡を作り直すときは、同じ大会 ID を使う（どの行も同じ ID の下に残り、また止まっても跡を消せる）
+  if (input.eventId && events.byKey[input.eventId]) throw appError_('INTERNAL', '大会 ID が重複しています。');
+  var eventId = input.eventId || newId_('EVT', events.byKey);
   var ruleTaken = Object.assign({}, ctx.table('Rules').byKey);
   var stageTaken = Object.assign({}, ctx.table('Stages').byKey);
   var groupTaken = Object.assign({}, ctx.table('Groups').byKey);
@@ -9695,8 +9710,10 @@ function leagueMembers_(ctx, leagueId) {
 /** 今期にいない会員のうち、どこかの期に出たことがある人（復帰の候補） */
 function rejoinCandidates_(ctx, sc, inSeason) {
   var seasonEvents = {};
+  var events = ctx.table('Events').byKey;
   sc.all.forEach(function (r) {
-    seasonEvents[r.event_id] = true;
+    // 大会の行がない期の行は、作成が途中で止まった跡（大会を消すと期の行も消える）。その選手は数えない
+    if (events[r.event_id]) seasonEvents[r.event_id] = true;
   });
   var played = {};
   ctx.table('Players').rows.forEach(function (p) {
@@ -10309,28 +10326,153 @@ function actionClearPlayoffs_(ctx, payload) {
 function actionPreviewNextSeason_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   var sc = requireSeason_(ctx, eventId);
+  // 監査 PR-06: 次期の作成が途中で止まった跡があれば、確定と同じく跡を消した後の状態で配置を計算し、消す内容を示す。
+  // プレビューは読み取りの操作で、この ctx の変更はシートに書かない（07_api.js の runQuery_ は書き込まない）
+  var repair = null;
+  if (sc.next && !ctx.table('Events').byKey[sc.next.event_id]) repair = removeBrokenSeason_(ctx, sc).summary;
   var probe = seasonPlanFor_(ctx, eventId, {});
   var edits = parseSeasonEdits_(payload.edits, probe.inSeason, probe.candidates);
   var res = seasonPlanFor_(ctx, eventId, edits);
   var out = seasonPlanView_(res);
   if (sc.next) out.nextEventId = ctx.table('Events').byKey[sc.next.event_id] ? sc.next.event_id : '';
+  if (repair) out.repair = repair;
   out.canConfirm = eventRole_(ctx.user, ctx.table('Events').byKey[eventId], ctx) === 'owner' || eventRole_(ctx.user, ctx.table('Events').byKey[eventId], ctx) === 'admin';
   return out;
 }
 
-/**
- * 次期の作成が途中で止まった跡（期の行はあるが大会の行がない）を消す。大会に属する行も消してから作り直す
- */
-function removeBrokenSeason_(ctx, seasonRow) {
-  var id = seasonRow.event_id;
-  ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators'].forEach(function (name) {
-    var t = ctx.table(name);
-    deleteRecords_(t, t.rows.filter(function (r) {
-      return r.event_id === id;
-    }));
+/** 確定記録の版。1 = 会員の変更に戻し方の印（meta.seasonUndo）を残す（監査 PR-06）。0（なし）はそれより前のコード */
+var SEASON_UNDO_VERSION_ = 1;
+/** 次期の大会に属する行を持つシート（途中で止まった跡を消すときに見る） */
+var SEASON_CHILD_TABLES_ = ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches', 'Collaborators'];
+
+/** 会員の meta から戻し方の印を除いたもの（印の中に前の印を入れ子にしない） */
+function metaWithoutUndo_(meta) {
+  var out = {};
+  Object.keys(meta || {}).forEach(function (k) {
+    if (k !== 'seasonUndo') out[k] = meta[k];
   });
-  deleteRecords_(ctx.table('LeagueSeasons'), [seasonRow]);
-  recordHistory_(ctx, 'season.repair', 'League', seasonRow.league_id, '', null, { removedEventId: id, seasonNo: seasonRow.season_no });
+  return out;
+}
+
+/**
+ * 次期の作成が途中で止まった跡（期の行はあるが大会の行がない）の片づけ方を調べる。何も書き換えない。
+ * - 次期の大会 ID の行（ルール〜共同主催者）
+ * - 会員: 戻し方の印（meta.seasonUndo.eventId がこの大会 ID）があれば、印の内容（作成前の状態・表示名・meta）に戻す。
+ *   新規参加で作った会員（印の created）は、他の大会の選手から参照されていなければ消す
+ * - 印のない会員（このコードより前の作成の跡）: 確定記録の行で、その作成が変えたと分かるものだけ戻す。
+ *   新規参加（joinedSeason が次期・via season）を消す、不参加（leftAfterSeason が今期）を参加中に、
+ *   復帰（rejoinedSeason が次期・脱退したことがある）を脱退に。表示名の変更は戻さない（前の名前が分からないため）
+ * 無関係な期制リーグ・大会の行は見ない。
+ */
+function brokenSeasonPlan_(ctx, sc) {
+  var row = sc.next;
+  var id = row.event_id;
+  var nextNo = sc.row.season_no + 1;
+  var prevNo = sc.row.season_no;
+  var rows = {};
+  var rowCount = 0;
+  SEASON_CHILD_TABLES_.forEach(function (name) {
+    rows[name] = ctx.table(name).rows.filter(function (r) {
+      return r.event_id === id;
+    });
+    rowCount += rows[name].length;
+  });
+  // 他の大会（残っている大会）の選手が参照している会員は消さない
+  var used = {};
+  ctx.table('Players').rows.forEach(function (p) {
+    if (p.member_id && p.event_id !== id) used[p.member_id] = true;
+  });
+  var record = readSeasonPlan_(row, {}) || {};
+  var legacyRows = record.undo ? record.legacyRows || [] : record.rows || [];
+  var legacyOf = {};
+  legacyRows.forEach(function (r) {
+    if (r && typeof r.key === 'string') legacyOf[r.key] = r.movement;
+  });
+  var remove = [];
+  var restore = [];
+  var kept = [];
+  leagueMembers_(ctx, sc.league.league_id).forEach(function (m) {
+    var meta = safeJson_(m.meta_json, {}) || {};
+    var undo = meta.seasonUndo;
+    if (undo && undo.eventId === id) {
+      if (undo.created) {
+        if (used[m.member_id]) kept.push(m);
+        else remove.push(m);
+      } else {
+        restore.push({ member: m, status: undo.status || 'active', name: typeof undo.display_name === 'string' ? undo.display_name : m.display_name, meta: undo.meta && typeof undo.meta === 'object' ? undo.meta : metaWithoutUndo_(meta) });
+      }
+      return;
+    }
+    var movement = legacyOf[m.member_id];
+    if (!movement) return;
+    if (movement === 'new') {
+      if (meta.joinedSeason === nextNo && meta.via === 'season') {
+        if (used[m.member_id]) kept.push(m);
+        else remove.push(m);
+      }
+      return;
+    }
+    var next = metaWithoutUndo_(meta);
+    if (movement === 'leave') {
+      if (m.status === 'left' && meta.leftAfterSeason === prevNo) {
+        delete next.leftAfterSeason;
+        restore.push({ member: m, status: 'active', name: m.display_name, meta: next });
+      }
+      return;
+    }
+    if (meta.rejoinedSeason === nextNo && (m.status || 'active') === 'active' && typeof meta.leftAfterSeason === 'number') {
+      delete next.rejoinedSeason;
+      restore.push({ member: m, status: 'left', name: m.display_name, meta: next });
+    }
+  });
+  return {
+    row: row,
+    eventId: id,
+    rows: rows,
+    remove: remove,
+    restore: restore,
+    kept: kept,
+    legacy: !record.undo,
+    legacyRows: legacyRows,
+    summary: {
+      seasonNo: nextNo,
+      rows: rowCount,
+      removedMembers: remove.map(function (m) {
+        return m.display_name;
+      }),
+      restoredMembers: restore.map(function (x) {
+        return x.name;
+      }),
+      keptMembers: kept.map(function (m) {
+        return m.display_name;
+      }),
+      legacy: !record.undo,
+    },
+  };
+}
+
+/**
+ * 次期の作成が途中で止まった跡を消す（ctx の上だけ。書き込みは commitContext_）。期の行は残し、作り直しで上書きする
+ * （同じ大会 ID で作り直すので、作り直しがまた途中で止まっても、次の確定で同じように片づけられる）
+ */
+function removeBrokenSeason_(ctx, sc) {
+  var plan = brokenSeasonPlan_(ctx, sc);
+  SEASON_CHILD_TABLES_.forEach(function (name) {
+    deleteRecords_(ctx.table(name), plan.rows[name]);
+  });
+  var members = ctx.table('LeagueMembers');
+  deleteRecords_(members, plan.remove);
+  plan.restore.forEach(function (x) {
+    var m = x.member;
+    m.status = x.status;
+    m.display_name = x.name;
+    m.meta_json = JSON.stringify(x.meta);
+    m.rev = (m.rev || 0) + 1;
+    m.updated_at = ctx.now;
+    updateRecord_(members, m);
+  });
+  recordHistory_(ctx, 'season.repair', 'League', plan.row.league_id, '', null, { removedEventId: plan.eventId, seasonNo: plan.summary.seasonNo, rows: plan.summary.rows, removedMembers: plan.summary.removedMembers, restoredMembers: plan.summary.restoredMembers, keptMembers: plan.summary.keptMembers, legacy: plan.legacy });
+  return plan;
 }
 
 /**
@@ -10344,9 +10486,11 @@ function actionConfirmNextSeason_(ctx, payload) {
   var eventId = requireId_(payload.eventId, '大会');
   assertOwnerRole_(ctx, eventId, '次期の作成');
   var sc = requireSeason_(ctx, eventId);
+  var broken = null;
   if (sc.next) {
-    if (ctx.table('Events').byKey[sc.next.event_id]) return { eventId: sc.next.event_id, existing: true };
-    removeBrokenSeason_(ctx, sc.next);
+    // 作成済み（大会の行まで書けた）。履歴・公開データの書き込みで止まった後の再試行でも、各期の公開データをそろえる
+    if (ctx.table('Events').byKey[sc.next.event_id]) return { eventId: sc.next.event_id, existing: true, alsoPublish: seasonSiblings_(ctx, sc.next.event_id) };
+    broken = removeBrokenSeason_(ctx, sc);
   }
   var later = sc.all.filter(function (r) {
     return (r.season_no || 0) > (sc.row.season_no || 0) && ctx.table('Events').byKey[r.event_id];
@@ -10370,6 +10514,7 @@ function actionConfirmNextSeason_(ctx, payload) {
   var prevRule = stageRule_(res.bundle, leagueStagePrev);
   var ruleSpec = cfg.rule || (prevRule ? ruleSpecOf_(prevRule) : { format: 'legs', bestOf: 5, setBestOf: null, provisional: true });
   var created = createEventRecords_(ctx, {
+    eventId: broken ? broken.eventId : '',
     organizerName: prev.organizer_name || '',
     name: payload.name ? cleanText_(payload.name, '大会名', ADMIN_CONFIG.MAX_EVENT_NAME_LENGTH) : seasonEventName_(sc.league.name, nextNo),
     dateLabel: cleanText_(payload.dateLabel, '開催日', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }),
@@ -10402,6 +10547,8 @@ function actionConfirmNextSeason_(ctx, payload) {
   if (plan.divisionCount > 1) addPromotionStage_(ctx, ev.event_id, 2, playoffRuleSpec_(cfg, ruleSpec), plan.divisionCount);
 
   // 会員: 新規参加を作り、復帰を参加中に、不参加を脱退にする。表示名は今期の名前（変えたものはその名前）
+  // 監査 PR-06: 変えた会員には戻し方の印（seasonUndo: この次期の大会 ID と変更前の状態）を残す。作成が途中で止まったら、
+  // 次の確定がこの印で元に戻してから作り直す（removeBrokenSeason_）。印は次に同じ会員を変えるときに上書きする
   var membersTable = ctx.table('LeagueMembers');
   var memTaken = Object.assign({}, membersTable.byKey);
   var keyToMember = {};
@@ -10411,13 +10558,14 @@ function actionConfirmNextSeason_(ctx, payload) {
       var id = newId_('LMB', memTaken);
       memTaken[id] = true;
       keyToMember[row.key] = id;
-      addMembers.push({ member_id: id, league_id: sc.league.league_id, display_name: row.name, status: 'active', meta_json: JSON.stringify({ joinedSeason: nextNo, via: 'season', at: ctx.now, names: [] }), rev: 1, created_at: ctx.now, updated_at: ctx.now });
+      addMembers.push({ member_id: id, league_id: sc.league.league_id, display_name: row.name, status: 'active', meta_json: JSON.stringify({ joinedSeason: nextNo, via: 'season', at: ctx.now, names: [], seasonUndo: { eventId: ev.event_id, created: true } }), rev: 1, created_at: ctx.now, updated_at: ctx.now });
       return;
     }
     keyToMember[row.key] = row.key;
     var m = membersTable.byKey[row.key];
     if (!m) return;
     var meta = safeJson_(m.meta_json, {});
+    var undo = { eventId: ev.event_id, status: m.status || 'active', display_name: m.display_name, meta: metaWithoutUndo_(meta) };
     var changed = false;
     if (row.movement === 'leave') {
       if (m.status !== 'left') {
@@ -10432,7 +10580,7 @@ function actionConfirmNextSeason_(ctx, payload) {
         changed = true;
       }
       if (m.display_name !== row.name) {
-        meta.names = (Array.isArray(meta.names) ? meta.names : []).concat([{ name: m.display_name, until: ctx.now }]).slice(-20);
+        meta.names = (Array.isArray(meta.names) ? meta.names : []).concat([{ name: m.display_name, until: ctx.now, season: nextNo }]).slice(-20);
         m.display_name = row.name;
         changed = true;
       }
@@ -10443,6 +10591,7 @@ function actionConfirmNextSeason_(ctx, payload) {
       }
     }
     if (changed) {
+      meta.seasonUndo = undo;
       m.meta_json = JSON.stringify(meta);
       m.rev = (m.rev || 0) + 1;
       m.updated_at = ctx.now;
@@ -10509,8 +10658,25 @@ function actionConfirmNextSeason_(ctx, payload) {
     }),
     warnings: plan.warnings,
     log: [],
+    undo: SEASON_UNDO_VERSION_,
   };
-  newSeasonRecord_(ctx, sc.league.league_id, nextNo, ev.event_id, eventId, record);
+  // 前のコードで止まった跡を作り直すときは、その確定記録の行を持ち越す（作り直しがまた止まっても、印のない変更を戻せる）
+  if (broken && broken.legacyRows.length) record.legacyRows = broken.legacyRows;
+  if (broken) {
+    // 期の行は作り直しで上書きする（同じ期の行・同じ大会 ID）
+    var seasonRow = broken.row;
+    seasonRow.season_no = nextNo;
+    seasonRow.confirmed_at = ctx.now;
+    seasonRow.confirmed_by = ctx.user ? ctx.user.label : '';
+    writeSeasonPlan_(seasonRow, record);
+    seasonRow.rev = (seasonRow.rev || 0) + 1;
+    seasonRow.updated_at = ctx.now;
+    updateRecord_(ctx.table('LeagueSeasons'), seasonRow);
+  } else {
+    newSeasonRecord_(ctx, sc.league.league_id, nextNo, ev.event_id, eventId, record);
+  }
+  // 監査 PR-06: 期の行を最初に書く。どこで止まっても「期の行はあるが大会の行がない」状態になり、次の確定で跡を消して作り直せる
+  ctx.commitFirst = ['LeagueSeasons'];
   recordHistory_(ctx, 'season.next', 'League', sc.league.league_id, eventId, null, { nextEventId: ev.event_id, season: nextNo, divisions: plan.divisionCount, sizes: record.sizes, by: ctx.user ? ctx.user.label : '' });
   recordHistory_(ctx, 'season.created', 'League', sc.league.league_id, ev.event_id, null, { from: eventId, season: nextNo, rows: record.rows.length });
   // 各期の公開データは期の一覧を持つので、前期だけでなく全部の期を作り直す
@@ -10718,7 +10884,7 @@ function seasonDetail_(ctx, bundle, view, role) {
     seasonRev: sc.row.rev || 0,
     seasons: sc.all.map(function (r) {
       var ev = events[r.event_id];
-      return { no: r.season_no, eventId: r.event_id, name: ev ? ev.name : '（削除済み）', exists: !!ev, isPublic: ev ? !!ev.is_public : false, current: r.event_id === eventId, canOpen: !!ev && canManageEvent_(ctx.user, ev, ctx) };
+      return { no: r.season_no, eventId: r.event_id, name: ev ? ev.name : '（作成が途中で止まりました）', exists: !!ev, isPublic: ev ? !!ev.is_public : false, current: r.event_id === eventId, canOpen: !!ev && canManageEvent_(ctx.user, ev, ctx) };
     }),
     next: null,
     prevEventId: sc.row.prev_event_id || '',
@@ -10772,8 +10938,10 @@ function seasonDetail_(ctx, bundle, view, role) {
   }
   if (sc.next) {
     var nev = events[sc.next.event_id];
-    out.next = { eventId: sc.next.event_id, no: sc.next.season_no, name: nev ? nev.name : '（削除済み）', exists: !!nev, confirmedAt: sc.next.confirmed_at, confirmedBy: owner ? sc.next.confirmed_by : '' };
+    out.next = { eventId: sc.next.event_id, no: sc.next.season_no, name: nev ? nev.name : '（作成が途中で止まりました）', exists: !!nev, confirmedAt: sc.next.confirmed_at, confirmedBy: owner ? sc.next.confirmed_by : '' };
     if (nev) out.next.drift = seasonDrift_(ctx, sc.next);
+    // 監査 PR-06: 作成が途中で止まった跡（読み取りだけ。片づけは次の確定で行う）
+    else out.next.broken = brokenSeasonPlan_(ctx, sc).summary;
   }
   if (sc.row.prev_event_id) {
     var record = readSeasonPlan_(sc.row, null);
