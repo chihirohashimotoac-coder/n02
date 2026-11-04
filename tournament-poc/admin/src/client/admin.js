@@ -2912,12 +2912,13 @@
             return { points: usePts.checked ? { win: Number(pw.value), draw: Number(pd.value), loss: Number(pl.value) } : null };
           }
         );
-        var wl = el('select', { className: 'input input--auto', 'aria-label': '不戦勝の Leg 数' }, [
+        // 監査 PR-11: 進出確定後は順位を変える設定を変えられない（サーバーも拒否する）。取り消せば変えられる
+        var wl = el('select', { className: 'input input--auto', 'aria-label': '不戦勝の Leg 数', disabled: cfg.advanced }, [
           el('option', { value: 'exclude', text: '数えない（既定。実際に投げていないため）', selected: cfg.walkoverLegs !== 'award' ? true : null }),
           el('option', { value: 'award', text: '勝者に勝利に必要な Leg 数・敗者に 0 として数える', selected: cfg.walkoverLegs === 'award' ? true : null }),
         ]);
-        add(field('不戦勝の試合の Leg 数の扱い（途中棄権・失格はその時点の実際の Leg 数を数えます）', wl), function () {
-          return { walkoverLegs: wl.value };
+        add(field('不戦勝の試合の Leg 数の扱い（途中棄権・失格はその時点の実際の Leg 数を数えます' + (cfg.advanced ? '。進出確定後は変更不可' : '') + '）', wl), function () {
+          return cfg.advanced ? {} : { walkoverLegs: wl.value };
         });
         if (cfg.points) parts.push(adjustmentEditor(st));
         var labels = el('textarea', {
@@ -2937,18 +2938,21 @@
       }
       if (type === 'swiss') {
         var rounds = numIn(cfg.rounds, 1, 15, '回戦数');
+        if (cfg.advanced) rounds.disabled = true;
         var first = el('select', { className: 'input input--auto', 'aria-label': '1 回戦の組み方' }, [
           el('option', { value: 'seed', text: 'シード順（上半分と下半分）', selected: cfg.firstRound !== 'random' ? true : null }),
           el('option', { value: 'random', text: '抽選', selected: cfg.firstRound === 'random' ? true : null }),
         ]);
         var byePts = numIn(cfg.byePoints, 0, 99, '不戦（Bye）の点');
         add(el('div', { className: 'stack stack--tight' }, [
-          field('回戦数', rounds),
+          field(cfg.advanced ? '回戦数（進出確定後は変更不可）' : '回戦数', rounds),
           field('1 回戦の組み方', first),
           field('不戦（Bye）の点（Buchholz では不戦を 0 として数えます）', byePts),
           el('p', { className: 'muted small', text: '2 回戦以降は、勝ち点の近い選手どうしを再戦なしで組みます（このアプリの汎用のスイス式で、特定の大会の規則の再現ではありません）。組めないときは理由を表示して条件を緩めます。' }),
         ]), function () {
-          return { rounds: Number(rounds.value), firstRound: first.value, byePoints: Number(byePts.value) };
+          var v = { firstRound: first.value, byePoints: Number(byePts.value) };
+          if (!cfg.advanced) v.rounds = Number(rounds.value);
+          return v;
         });
       }
       if (group || type === 'series') {
@@ -2959,7 +2963,8 @@
       }
       if (type === 'series') {
         var nights = numIn(cfg.nights, 1, 30, '節の数');
-        var np = el('input', { className: 'input', value: cfg.nightPoints.join(', '), 'aria-label': '節の順位ポイント' });
+        var np = el('input', { className: 'input', value: cfg.nightPoints.join(', '), 'aria-label': '節の順位ポイント', disabled: cfg.advanced });
+        if (cfg.advanced) nights.disabled = true;
         var nd = el('select', { className: 'input input--auto', 'aria-label': '節の組み合わせの決め方' }, [
           el('option', { value: 'random', text: '節ごとに抽選（既定）', selected: cfg.nightDraw === 'random' ? true : null }),
           el('option', { value: 'standing', text: 'その時点の累計順位でシード', selected: cfg.nightDraw === 'standing' ? true : null }),
@@ -2967,14 +2972,14 @@
         ]);
         var tbS = tiebreakEditor(cfg.tiebreakers, cfg.advanced, (d.tiebreakersFor || {}).series);
         add(el('div', { className: 'stack stack--tight' }, [
-          field('節の数（中止の節は数に含めたまま、完了の条件から外します）', nights),
-          field('順位ポイント（優勝, 準優勝, 準決勝敗退, 準々決勝敗退 …。到達した順位の総点）', np),
+          field('節の数（中止の節は数に含めたまま、完了の条件から外します' + (cfg.advanced ? '。進出確定後は変更不可' : '') + '）', nights),
+          field('順位ポイント（優勝, 準優勝, 準決勝敗退, 準々決勝敗退 …。到達した順位の総点' + (cfg.advanced ? '。進出確定後は変更不可' : '') + '）', np),
           field('節の組み合わせ', nd),
           tbS.node,
         ]), function () {
           return {
-            nights: Number(nights.value),
-            nightPoints: np.value.split(/[,、\s]+/).filter(Boolean).map(Number),
+            nights: cfg.advanced ? undefined : Number(nights.value),
+            nightPoints: cfg.advanced ? undefined : np.value.split(/[,、\s]+/).filter(Boolean).map(Number),
             nightDraw: nd.value,
             tiebreakers: cfg.advanced ? undefined : tbS.value(),
           };
