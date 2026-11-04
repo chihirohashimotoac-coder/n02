@@ -203,6 +203,79 @@ var NO_COMPLETION_CHECK_ = [
 var WRITE_JOURNAL_KEY_ = 'WRITE_JOURNAL';
 
 /**
+ * 監査 PR-05: 版番号（rev）や事前の確認で二重実行を止められない「作成・追加」の操作。
+ * 二重実行防止のキャッシュ（10 分）は消えることがあるので、作ったレコードに要求の印（requestMark）を残し、
+ * 同じ利用者の同じ requestId の再送は、印のあるレコードを見つけて「保存済み」として返す（別の操作として実行し直さない）。
+ * 値は印を残す場所: event = 大会（Events.config_json）、players = 追加した選手（Players.meta_json）、stage = 段階（Stages.config_json）
+ */
+var DURABLE_DEDUPE_ACTIONS_ = {
+  createEvent: 'event',
+  createSampleEvent: 'event',
+  duplicateEvent: 'event',
+  restoreEvent: 'event',
+  createSeasonLeague: 'event',
+  addPlayers: 'players',
+  importPlayers: 'players',
+  addStage: 'stage',
+};
+
+/** 要求の印: 利用者と requestId から作った dedupeKey（SHA-256）の先頭 24 桁。表示・公開データには出さない */
+function requestMark_(dedupeKey) {
+  return String(dedupeKey).replace(/^req:/, '').slice(0, 24);
+}
+
+function hasRequestMark_(json, mark) {
+  return typeof json === 'string' && json.indexOf('"requestMark":"' + mark + '"') !== -1;
+}
+
+/** 同じ要求で作ったレコードがあれば、前の送信の結果（保存済み）を返す。なければ null */
+function findRequestMarked_(ctx, kind, payload, mark) {
+  if (kind === 'event') {
+    var ev = ctx.table('Events').rows.filter(function (e) {
+      return hasRequestMark_(e.config_json, mark);
+    })[0];
+    return ev ? { eventId: ev.event_id, duplicate: true } : null;
+  }
+  var eventId = payload && typeof payload.eventId === 'string' ? payload.eventId : '';
+  if (!eventId) return null;
+  if (kind === 'players') {
+    var found = ctx.table('Players').rows.some(function (r) {
+      return r.event_id === eventId && hasRequestMark_(r.meta_json, mark);
+    });
+    return found ? { eventId: eventId, duplicate: true } : null;
+  }
+  if (kind === 'stage') {
+    var st = ctx.table('Stages').rows.filter(function (r) {
+      return r.event_id === eventId && hasRequestMark_(r.config_json, mark);
+    })[0];
+    return st ? { eventId: eventId, stageId: st.stage_id, duplicate: true } : null;
+  }
+  return null;
+}
+
+function withRequestMark_(json, mark) {
+  var obj = safeJson_(json, {});
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) obj = {};
+  obj.requestMark = mark;
+  return JSON.stringify(obj);
+}
+
+/** この操作で作ったレコード（まだシートに書いていない行）に要求の印を付ける */
+function stampRequestMark_(ctx, kind, result, mark) {
+  if (kind === 'event' && result.eventId) {
+    var ev = ctx.table('Events').byKey[result.eventId];
+    if (ev) ev.config_json = withRequestMark_(ev.config_json, mark);
+  } else if (kind === 'players') {
+    ctx.table('Players').added.forEach(function (r) {
+      r.meta_json = withRequestMark_(r.meta_json, mark);
+    });
+  } else if (kind === 'stage' && result.stageId) {
+    var st = ctx.table('Stages').byKey[result.stageId];
+    if (st) st.config_json = withRequestMark_(st.config_json, mark);
+  }
+}
+
+/**
  * 書き込みの途中で止まった操作の目印（スクリプト プロパティ）。書き込みの直前に置き、書き終えたら消す。
  * 残っていれば、前の操作の書き込みが途中で止まった（Google 側のエラー・時間切れ）可能性がある。
  */
@@ -234,17 +307,21 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
     if (done) return duplicateResult_(done);
     var props = PropertiesService.getScriptProperties();
     var journal = readWriteJournal_();
-    if (journal && journal.key === dedupeKey) {
-      // 同じ操作の再送: 前回の書き込みが途中で止まっている可能性があるので、もう一度は実行しない
-      throw appError_('PARTIAL_WRITE', '前回の保存が途中で止まった可能性があります。画面を再読み込みして内容を確認してから、必要ならもう一度操作してください。');
-    }
+    var sameJournal = !!(journal && journal.key === dedupeKey);
+    var markKind = spec.needsStorage === false ? '' : DURABLE_DEDUPE_ACTIONS_[action] || '';
+    var partialWrite = function () {
+      return appError_('PARTIAL_WRITE', '前回の保存が途中で止まった可能性があります。画面を再読み込みして内容を確認してから、必要ならもう一度操作してください。');
+    };
+    // 同じ操作の再送: 前回の書き込みが途中で止まっている可能性があるので、もう一度は実行しない
+    // （作成・追加の操作は、作ったレコードが残っていれば保存済みとして返す。下の要求の印の照合）
+    if (sameJournal && !markKind) throw partialWrite();
     var result;
     if (spec.needsStorage === false) {
       result = spec.fn({ actor: user.label, user: user }, payload);
     } else {
       assertSchemaCurrent_();
       var ctx = contextFor_(user, null);
-      if (journal) {
+      if (journal && !sameJournal) {
         // 別の操作の書き込みが途中で止まっていた: 記録だけ残して先へ進む（管理者が履歴で確認できる）
         recordHistory_(ctx, 'storage.incompleteWrite', 'Storage', '', journal.eventId || '', null, { action: journal.action, at: journal.at, actor: journal.actor });
         props.deleteProperty(WRITE_JOURNAL_KEY_);
@@ -257,9 +334,20 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
         ctx.user = user;
       }
       if (spec.scope === 'event') authorizeEventPayload_(ctx, payload);
+      // 監査 PR-05: 作成・追加の再送は、キャッシュが消えていても、前の送信で作ったレコードを見つけて保存済みとして返す
+      var mark = markKind ? requestMark_(dedupeKey) : '';
+      if (mark) {
+        var prior = findRequestMarked_(ctx, markKind, payload, mark);
+        if (prior) {
+          cache.put(dedupeKey, JSON.stringify(prior.stageId ? { eventId: prior.eventId, stageId: prior.stageId } : { eventId: prior.eventId }), ADMIN_CONFIG.REQUEST_DEDUPE_TTL_SEC);
+          return prior;
+        }
+        if (sameJournal) throw partialWrite();
+      }
       // 自動終了（F05）の判定は、試合・組み合わせ・段階が変わりうる操作の後だけ（大会設定の保存などでは判定しない）
       ctx.touchedResults = NO_COMPLETION_CHECK_.indexOf(action) === -1;
       result = spec.fn(ctx, payload) || {};
+      if (mark) stampRequestMark_(ctx, markKind, result, mark);
       var eventIds = [];
       if (result.eventId) eventIds.push(result.eventId);
       (result.alsoPublish || []).forEach(function (id) {
