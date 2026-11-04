@@ -9215,6 +9215,8 @@ function actionRestoreEvent_(ctx, payload) {
   rows.Groups.forEach(function (g) {
     if (!stageById[g.stage_id]) problems.push('グループ「' + g.name + '」の段階がありません');
   });
+  // 監査 PR-04: 書き込む前に、すべての列の値を検査する（数式になりうる先頭文字・長さ・型・列挙値・参照の矛盾）
+  validateRestoreRows_(ev, rows, mode, problems);
   var names = {};
   rows.Players.forEach(function (p) {
     try {
@@ -9245,6 +9247,12 @@ function actionRestoreEvent_(ctx, payload) {
     throw appError_('VALIDATION', '復元していません（ファイルの内容が不正です）: ' + uniq.slice(0, 8).join(' / ') + (uniq.length > 8 ? ' ほか' : ''));
   }
   var name = cleanText_(payload.name || ev.name + '（復元）', '大会名', ADMIN_CONFIG.MAX_EVENT_NAME_LENGTH);
+  // ルールの名前・メモはファイルの値を使わず、形式から作り直す（validateRestoreRows_ で形式は検査済み）
+  rows.Rules = rows.Rules.map(function (r) {
+    var out = Object.assign({}, r);
+    applyRule_(out, restoreRuleSpec_(r), ctx.now);
+    return out;
+  });
   var res = cloneEventStructure_(ctx, { event: ev, rules: rows.Rules, stages: rows.Stages, groups: rows.Groups, players: rows.Players }, {
     name: name,
     dateLabel: typeof ev.date_label === 'string' ? cleanText_(ev.date_label, '開催日', ADMIN_CONFIG.MAX_LABEL_LENGTH, { allowEmpty: true }) : '',
@@ -9328,8 +9336,167 @@ function actionRestoreEvent_(ctx, payload) {
     var view = buildEventView_(collectEvent_(ctx, res.event.event_id), true);
     if (view.progress.check) throw appError_('VALIDATION', '復元していません: ファイルの試合結果に、ルールと合わないものが ' + view.progress.check + ' 試合あります。');
   }
+  // 監査 PR-04: 設定のみの復元でも、運営画面と公開データを作れることを保存する前に確かめる（作れなければ何も登録しない）
+  try {
+    var bundle = collectEvent_(ctx, res.event.event_id);
+    buildEventView_(bundle, true);
+    buildPublicSnapshot_(bundle);
+  } catch (e) {
+    if (e && e.appCode === 'VALIDATION') throw e;
+    console.error('restoreEvent: view check failed', e && e.message);
+    throw appError_('VALIDATION', '復元していません: ファイルの設定から大会を表示できませんでした（段階の設定が不正です）。');
+  }
   recordHistory_(ctx, 'event.restore', 'Event', res.event.event_id, res.event.event_id, null, { from: ev.event_id, exportedAt: a.exportedAt || '', mode: mode, counts: counts, by: ctx.user ? ctx.user.label : '' });
   return { eventId: res.event.event_id, restored: counts, mode: mode };
+}
+
+/* ---------- 復元するファイルの検査（監査 PR-04） ---------- */
+
+// スプレッドシートの 1 セルの上限（50,000 文字）。JSON の列もこれを超えると保存できない
+var RESTORE_CELL_MAX_ = 50000;
+var RESTORE_INT_MAX_ = 100000;
+var RESTORE_ISO_TIME_ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+
+/** 文字列の列: 空・文字列だけ。長さ・制御文字・数式として解釈されうる先頭（= + @、数値でない -）を拒否する */
+function restoreTextProblem_(value, max) {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value !== 'string') return '形式が不正です';
+  if (value.length > max) return max + ' 文字を超えています';
+  if (/[\u0000-\u001f\u007f]/.test(value)) return '使用できない文字が含まれています';
+  var head = value.replace(/^\s+/, '');
+  if (/^[=+@]/.test(head) || (/^-/.test(head) && !/^-\d+(\.\d+)?$/.test(head))) return '先頭に = + - @ は使用できません';
+  return '';
+}
+
+/** JSON の列: 空か、オブジェクトの JSON（先頭は {。セルの上限まで） */
+function restoreJsonProblem_(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value !== 'string') return '形式が不正です';
+  if (value.length > RESTORE_CELL_MAX_) return '長すぎます';
+  var parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch (e) {
+    return 'JSON として読めません';
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 'JSON の形式が不正です';
+  return '';
+}
+
+/** 整数の列: 空か、0 以上の整数（数字だけの文字列も可） */
+function restoreIntProblem_(value, max) {
+  if (value === null || value === undefined || value === '') return '';
+  var n = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!isFinite(n) || Math.floor(n) !== n || n < 0 || n > (max || RESTORE_INT_MAX_)) return '整数ではないか、範囲外です';
+  return '';
+}
+
+/** ルールの形式と Best of（作成・変更の画面と同じ検査） */
+function restoreRuleSpec_(r) {
+  var format = r.format === RULE_FORMAT.BEST_OF_SETS ? 'sets' : r.format === RULE_FORMAT.FIXED_LEGS ? 'fixed' : r.format === RULE_FORMAT.BEST_OF_LEGS ? 'legs' : '';
+  if (!format) throw appError_('VALIDATION', 'ルールの形式が不正です。');
+  var num = function (v) {
+    return restoreIntProblem_(v, 999) || v === '' || v === null || v === undefined ? NaN : Number(v);
+  };
+  return parseRuleInput_({ format: format, bestOf: num(r.best_of), setBestOf: format === 'sets' ? num(r.set_best_of) : undefined, provisional: r.is_provisional === true });
+}
+
+function validateRestoreRows_(ev, rows, mode, problems) {
+  var add = function (where, problem) {
+    if (problem) problems.push(where + ': ' + problem);
+  };
+  var text = function (where, value, max) {
+    add(where, restoreTextProblem_(value, max));
+  };
+  var json = function (where, value) {
+    add(where, restoreJsonProblem_(value));
+  };
+  var int = function (where, value, max) {
+    add(where, restoreIntProblem_(value, max));
+  };
+  var L = ADMIN_CONFIG.MAX_LABEL_LENGTH;
+  var N = ADMIN_CONFIG.MAX_NOTE_LENGTH;
+  // 大会（名前・開催日は後で cleanText_ が検査する）
+  json('大会の設定', ev.config_json);
+  // 同じ ID の行が 2 つあると参照の付け替えが壊れる
+  ['Rules', 'Players', 'Stages', 'Groups', 'Entries', 'Matches'].forEach(function (name) {
+    var seen = {};
+    rows[name].forEach(function (r) {
+      var id = r && r[SCHEMA[name].key];
+      if (!id) return;
+      if (seen[id]) problems.push(name + ' に同じ ID の行があります');
+      seen[id] = true;
+    });
+  });
+  rows.Rules.forEach(function (r, i) {
+    try {
+      restoreRuleSpec_(r);
+    } catch (e) {
+      if (!e.appCode) throw e;
+      problems.push('ルール ' + (i + 1) + ': ' + e.publicMessage);
+    }
+  });
+  var stageOf = {};
+  rows.Stages.forEach(function (st, i) {
+    var w = '段階 ' + (i + 1);
+    text(w + ' の名前', st.name, L);
+    if (!st.name) problems.push(w + ' の名前がありません');
+    int(w + ' の順番', st.order);
+    json(w + ' の設定', st.config_json);
+    stageOf[st.stage_id] = st;
+  });
+  var groupStage = {};
+  rows.Groups.forEach(function (g, i) {
+    var w = 'グループ ' + (i + 1);
+    text(w + ' の名前', g.name, L);
+    int(w + ' の順番', g.order);
+    json(w + ' の設定', g.meta_json);
+    groupStage[g.group_id] = g.stage_id;
+  });
+  var players = mode === 'full' || rows.Players.length ? rows.Players : [];
+  players.forEach(function (p, i) {
+    var w = '選手 ' + (i + 1);
+    text(w + ' の所属', p.affiliation, L);
+    text(w + ' のメモ', p.notes, N);
+    if (p.rating !== null && p.rating !== undefined && p.rating !== '' && !(typeof p.rating === 'number' ? isFinite(p.rating) : /^-?\d+(\.\d+)?$/.test(String(p.rating)))) problems.push(w + ' の Rt が数値ではありません');
+    int(w + ' のシード', p.seed);
+    json(w + ' の設定', p.meta_json);
+  });
+  if (mode !== 'full') return;
+  var statuses = Object.keys(MATCH_STATUS).map(function (k) {
+    return MATCH_STATUS[k];
+  });
+  var resultTypes = Object.keys(RESULT_TYPE).map(function (k) {
+    return RESULT_TYPE[k];
+  });
+  rows.Entries.forEach(function (e, i) {
+    var w = '出場者 ' + (i + 1);
+    int(w + ' のシード', e.seed);
+    int(w + ' の手動の順位', e.manual_order);
+    int(w + ' の開始回戦', e.start_round);
+    text(w + ' の進出元', e.source_label, L);
+    json(w + ' の設定', e.meta_json);
+    if (e.group_id && groupStage[e.group_id] && groupStage[e.group_id] !== e.stage_id) problems.push(w + ' のグループが別の段階のものです');
+  });
+  rows.Matches.forEach(function (m, i) {
+    var w = '試合 ' + (i + 1);
+    ['round', 'order', 'player1_legs', 'player2_legs', 'player1_sets', 'player2_sets'].forEach(function (k) {
+      int(w + ' の ' + k, m[k]);
+    });
+    ['next_match_slot', 'loser_next_match_slot'].forEach(function (k) {
+      if (m[k] !== null && m[k] !== undefined && m[k] !== '' && m[k] !== 1 && m[k] !== 2) problems.push(w + ' の ' + k + ' が不正です');
+    });
+    text(w + ' の表示名', m.label, L);
+    text(w + ' の結果のメモ', m.result_note, N);
+    if (statuses.indexOf(m.status) === -1) problems.push(w + ' の状態が不正です');
+    if (resultTypes.indexOf(m.result_type || '') === -1) problems.push(w + ' の結果の種類が不正です');
+    if (['', 'W', 'L', 'GF'].indexOf(m.bracket_side || '') === -1) problems.push(w + ' の勝者側・敗者側の指定が不正です');
+    if (m.confirmed_at && !(typeof m.confirmed_at === 'string' && RESTORE_ISO_TIME_.test(m.confirmed_at))) problems.push(w + ' の確定日時が不正です');
+    json(w + ' の予定', m.schedule_json);
+    json(w + ' の設定', m.meta_json);
+    if (m.group_id && groupStage[m.group_id] && groupStage[m.group_id] !== m.stage_id) problems.push(w + ' のグループが別の段階のものです');
+    if (m.winner_id && m.winner_id !== m.player1_id && m.winner_id !== m.player2_id) problems.push(w + ' の勝者が対戦者ではありません');
+  });
 }
 
 function remapEntryMeta_(text, maps) {
