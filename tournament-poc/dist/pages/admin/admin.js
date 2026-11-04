@@ -1961,6 +1961,9 @@
     }
 
     /** 下書きのうち、そのまま「確定」できる結果（Leg 制は画面側でも成立条件を確認。セット制の Leg 合計はサーバーで確認） */
+    // サーバーの一括確定の上限（06_actions.js の MAX_BATCH_RESULTS_ と同じ。tests/batch-limit.test.mjs で照合）
+    var MAX_BATCH_RESULTS = 64;
+
     function batchCandidates(st) {
       var out = [];
       stageMatches(st).forEach(function (m) {
@@ -1981,7 +1984,11 @@
       return out;
     }
 
-    /** 入力済みの試合をまとめて確定するバー（画面下に固定）。入力のたびに件数を更新する */
+    /**
+     * 入力済みの試合をまとめて確定するバー（画面下に固定）。入力のたびに件数を更新する。
+     * 監査 PR-15: 1 回に送るのはサーバーの上限（MAX_BATCH_RESULTS）まで。多いときは画面の順で先頭から送り、
+     * 残りの件数を示す（押すたびに次の分を送る）。保存できた分だけ下書きから外す
+     */
     function batchBar(st) {
       var d = state.detail;
       var label = el('span', { className: 'batch-bar__label' });
@@ -1989,10 +1996,12 @@
       var bar = el('div', { className: 'batch-bar', role: 'region', 'aria-label': 'まとめて確定' }, [label, button]);
       var current = [];
       var update = function () {
-        current = batchCandidates(st);
-        bar.hidden = current.length < 2;
-        label.textContent = '確定できる入力が ' + current.length + ' 試合あります';
-        button.textContent = current.length + ' 試合をまとめて確定';
+        var all = batchCandidates(st);
+        current = all.slice(0, MAX_BATCH_RESULTS);
+        var rest = all.length - current.length;
+        bar.hidden = all.length < 2;
+        label.textContent = '確定できる入力が ' + all.length + ' 試合あります' + (rest ? '（1 回に ' + MAX_BATCH_RESULTS + ' 試合まで。残り ' + rest + ' 試合はこの後に確定できます）' : '');
+        button.textContent = current.length + ' 試合をまとめて確定' + (rest ? '（残り ' + rest + ' 試合）' : '');
         button.disabled = state.busy;
       };
       button.addEventListener('click', function () {
