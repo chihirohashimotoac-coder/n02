@@ -462,6 +462,9 @@ body {
 
 .stage {
   display: grid;
+  /* 列の幅を画面幅までに抑える（既定の auto の列は、中身の最小幅まで広がる。ダブルエリミの表・ポイントシリーズの節の列でページが横にはみ出していた）。
+     表が収まらないときは、表の中（.bracket__scroll・.round-columns・.table-scroll）だけが横にスクロールする */
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   margin-bottom: 24px;
   min-width: 0;
