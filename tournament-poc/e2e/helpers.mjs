@@ -68,9 +68,14 @@ export async function routeAppsScript(page, request, seen = []) {
   return seen;
 }
 
-/** 横スクロールが発生していないこと（スマートフォン表示の確認） */
+/**
+ * 横スクロールが発生していないこと（スマートフォン表示の確認）。
+ * 指定した画面の幅と比べる: スマートフォンの条件（isMobile）では、ページが画面より広いとブラウザがページ全体を縮小し、
+ * window.innerWidth もページの幅まで広がるため、innerWidth と比べるとはみ出しを見逃す
+ */
 export async function expectNoHorizontalOverflow(page) {
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  const width = page.viewportSize().width;
+  const overflow = await page.evaluate((w) => Math.max(document.documentElement.scrollWidth, window.innerWidth) - w, width);
   expect(overflow).toBeLessThanOrEqual(0);
 }
 
