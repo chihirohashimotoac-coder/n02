@@ -7716,7 +7716,10 @@ function propagateElimination_(ctx, match, beforeWinner, afterWinner) {
     var next = table.byKey[mv.id];
     if (!next) return;
     if (matchStarted_(next)) {
-      throw appError_('LOCKED', '次の試合（' + (next.label || next.round + '回戦') + '）が始まっているため変更できません。先に次の試合を「未開始」に戻してください。');
+      // 監査 PR-19: 棄権・失格した選手の分の不戦勝（実際には行っていない）で、入れ替わる選手がその当事者なら、
+      // 不戦勝を取り消して未開始に戻す（必要なら保存の後の autoForfeitWithdrawn_ が新しい組み合わせにもう一度かける）
+      if (isWithdrawnForfeitOf_(ctx, next, mv.before)) undoWithdrawnForfeit_(ctx, next);
+      else throw appError_('LOCKED', '次の試合（' + (next.label || next.round + '回戦') + '）が始まっているため変更できません。先に次の試合を「未開始」に戻してください。');
     }
     next['player' + (mv.slot === 2 ? 2 : 1) + '_id'] = mv.after || '';
     next.rev = (next.rev || 0) + 1;
@@ -7756,9 +7759,17 @@ function propagateRedrawn_(ctx, match, beforeWinner, afterWinner) {
     return swap[m.player1_id] !== undefined || swap[m.player2_id] !== undefined;
   });
   targets.forEach(function (m) {
-    if (matchStarted_(m)) {
-      throw appError_('LOCKED', '後の試合（' + (m.label || m.round + '回戦') + '）が始まっているため、' + name + 'の勝者は変更できません。先に後の試合を「未開始」に戻してください。');
-    }
+    if (!matchStarted_(m)) return;
+    // 監査 PR-19: 棄権・失格した選手の分の不戦勝は取り消せる。ただし、その勝者を抽選で入れた後の回戦があれば、
+    // どの枠を空けるかが決まらないので従来どおり止める
+    var placed = later.some(function (x) {
+      return (x.round || 0) > (m.round || 0);
+    });
+    if (!placed && isWithdrawnForfeitOf_(ctx, m, swap[m.player1_id] !== undefined ? m.player1_id : m.player2_id)) return;
+    throw appError_('LOCKED', '後の試合（' + (m.label || m.round + '回戦') + '）が始まっているため、' + name + 'の勝者は変更できません。先に後の試合を「未開始」に戻してください。');
+  });
+  targets.forEach(function (m) {
+    if (matchStarted_(m)) undoWithdrawnForfeit_(ctx, m);
   });
   targets.forEach(function (m) {
     if (swap[m.player1_id] !== undefined) m.player1_id = swap[m.player1_id];
@@ -7795,6 +7806,43 @@ function syncGrandFinalReset_(ctx, gf1) {
   gf2.rev = (gf2.rev || 0) + 1;
   gf2.updated_at = ctx.now;
   updateRecord_(table, gf2);
+}
+
+/**
+ * 監査 PR-19: 試合 m が「棄権・失格した選手の分の不戦勝（実際には行っていない）」で、pid がその当事者か。
+ * 不戦勝・失格の確定で、Leg・セットの記録がなく、負けた側が棄権・失格の記録を持つ選手のときだけ
+ * （自動の不戦勝・棄権の処理で付いたもの。実際に戦った途中棄権・失格は Leg を記録するので含まない）
+ */
+function isWithdrawnForfeitOf_(ctx, m, pid) {
+  if (!pid || (pid !== m.player1_id && pid !== m.player2_id)) return false;
+  if (m.status !== MATCH_STATUS.FINAL || !m.winner_id) return false;
+  if (m.result_type !== RESULT_TYPE.WALKOVER && m.result_type !== RESULT_TYPE.DISQUALIFIED) return false;
+  if ((m.player1_legs || 0) !== 0 || (m.player2_legs || 0) !== 0 || (m.player1_sets || 0) !== 0 || (m.player2_sets || 0) !== 0) return false;
+  var loser = m.winner_id === m.player1_id ? m.player2_id : m.player1_id;
+  return isWithdrawn_(ctx.table('Players').byKey[loser]);
+}
+
+/**
+ * 監査 PR-19: 棄権・失格した選手の分の不戦勝を取り消して未開始に戻す。不戦勝で進んだ先の枠も空ける
+ * （進んだ先が始まっていれば propagateElimination_ が LOCKED で止める。その場合は何も書き込まれない）
+ */
+function undoWithdrawnForfeit_(ctx, m) {
+  var before = pickResult_(m);
+  var winner = m.winner_id;
+  m.status = MATCH_STATUS.SCHEDULED;
+  m.winner_id = '';
+  m.result_type = '';
+  m.result_note = '';
+  m.player1_legs = 0;
+  m.player2_legs = 0;
+  m.player1_sets = 0;
+  m.player2_sets = 0;
+  m.confirmed_at = '';
+  m.rev = (m.rev || 0) + 1;
+  m.updated_at = ctx.now;
+  propagateElimination_(ctx, m, winner, '');
+  updateRecord_(ctx.table('Matches'), m);
+  recordHistory_(ctx, 'match.walkoverUndone', 'Match', m.match_id, m.event_id, before, pickResult_(m));
 }
 
 /**
