@@ -1037,38 +1037,33 @@ function staffFailKey_(eventId) {
 /**
  * 管理パスワードを確かめる。同じ大会で間違いが続いたら、しばらく受け付けない（総当たり対策）。
  * 大会が存在するかどうかを推測されないよう、理由は区別しない。
+ * 監査 PR-20: スクリプト全体のロックは取らない。誤りの試行が運営の保存を待たせない（BUSY の原因にしない）よう、
+ * 回数はキャッシュの読み書きだけで数える。並列に届いた誤りは少し数え漏らすことがある（締め出しの規則は同じ）。
  */
 function verifyStaffPassword_(ctx, eventId, password) {
   if (!isValidId_(eventId) || typeof password !== 'string' || !password || password.length > STAFF_PASSWORD_MAX_) {
     throw appError_('AUTH_INVALID', '大会または管理パスワードが違います。');
   }
-  // 回数の確認から書き戻しまでをロックの中で行う。並列に送られた間違いも 1 回ずつ数える
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(ADMIN_CONFIG.LOCK_WAIT_MS)) {
-    throw appError_('BUSY', '他の処理が実行中です。数秒後にもう一度お試しください。');
+  var cache = CacheService.getScriptCache();
+  var fails = Number(cache.get(staffFailKey_(eventId)) || 0);
+  if (fails >= STAFF_FAIL_LIMIT_) {
+    throw appError_('AUTH_LOCKED', '管理パスワードの間違いが続いたため、10 分間この大会はパスワードで開けません。時間をおいてお試しください。');
   }
-  try {
-    var cache = CacheService.getScriptCache();
-    var fails = Number(cache.get(staffFailKey_(eventId)) || 0);
-    if (fails >= STAFF_FAIL_LIMIT_) {
-      throw appError_('AUTH_LOCKED', '管理パスワードの間違いが続いたため、10 分間この大会はパスワードで開けません。時間をおいてお試しください。');
-    }
-    var events = ctx.table('Events');
-    var event = events.byKey[eventId];
-    var matched =
-      event &&
-      !events.duplicates[eventId] &&
-      event.staff_pass_hash &&
-      event.staff_pass_salt &&
-      safeEqual_(staffPasswordHash_(eventId, event.staff_pass_salt, password), event.staff_pass_hash);
-    if (!matched) {
-      cache.put(staffFailKey_(eventId), String(fails + 1), STAFF_FAIL_WINDOW_SEC_);
-      throw appError_('AUTH_INVALID', '大会または管理パスワードが違います。');
-    }
-    return event;
-  } finally {
-    lock.releaseLock();
+  var events = ctx.table('Events');
+  var event = events.byKey[eventId];
+  var matched =
+    event &&
+    !events.duplicates[eventId] &&
+    event.staff_pass_hash &&
+    event.staff_pass_salt &&
+    safeEqual_(staffPasswordHash_(eventId, event.staff_pass_salt, password), event.staff_pass_hash);
+  if (!matched) {
+    // 照合の間に他の誤りが数えられていたら、その数に足す（読み直してから書く。数え漏れを減らす）
+    var now = Number(cache.get(staffFailKey_(eventId)) || 0);
+    cache.put(staffFailKey_(eventId), String(Math.max(now, fails) + 1), STAFF_FAIL_WINDOW_SEC_);
+    throw appError_('AUTH_INVALID', '大会または管理パスワードが違います。');
   }
+  return event;
 }
 
 /* ---------- 利用者の判定 ---------- */
