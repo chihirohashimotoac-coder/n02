@@ -156,7 +156,8 @@ function swissPairRound_(players, opts) {
 function swissPairingPoints_(row, cfg) {
   var pts = cfg.points || { win: 2, draw: 1, loss: 0 };
   var byePoints = typeof cfg.byePoints === 'number' ? cfg.byePoints : pts.win;
-  return (row.won || 0) * pts.win + (row.drawn || 0) * pts.draw + (row.lost || 0) * pts.loss + (row.byes || 0) * byePoints;
+  // 監査 PR-13: 加減点（順位表の行の adjustment）も入れる
+  return (row.won || 0) * pts.win + (row.drawn || 0) * pts.draw + (row.lost || 0) * pts.loss + (row.byes || 0) * byePoints + (row.adjustment || 0);
 }
 
 /**
@@ -219,10 +220,20 @@ function swissStandings_(memberIds, finals, cfg, manual) {
       a.points += pts.loss;
     }
   });
+  // 監査 PR-13: 加減点を勝ち点に入れる（総当たりの tallyStats_ と同じ）。順位表と次の回戦の組み合わせの両方に効く
+  if (Array.isArray(cfg.adjustments)) {
+    cfg.adjustments.forEach(function (adj) {
+      var s = stats[adj.playerId];
+      if (!s || typeof adj.points !== 'number') return;
+      s.points += adj.points;
+      s.adjustment += adj.points;
+    });
+  }
+  // Buchholz は相手の試合の勝ち点だけで数える（ある選手への加減点で、その相手全員の Buchholz を動かさない）
   memberIds.forEach(function (pid) {
     var s = stats[pid];
     s.buchholz = s.opponents.reduce(function (sum, oid) {
-      return sum + (stats[oid] ? stats[oid].points : 0);
+      return sum + (stats[oid] ? stats[oid].points - (stats[oid].adjustment || 0) : 0);
     }, 0);
   });
   return computeStandingsFromStats_(memberIds, stats, finals, cfg.tiebreakers || ['points', 'buchholz', 'leg_diff', 'legs_for'], manual || {});
