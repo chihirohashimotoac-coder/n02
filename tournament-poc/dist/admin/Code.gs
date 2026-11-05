@@ -11286,9 +11286,11 @@ function actionDiagnoseStorage_(ctx) {
     ref('Entries', e, e.entry_id, '出場の選手', players, e.player_id, true);
     var g = e.group_id ? ref('Entries', e, e.entry_id, '出場のグループ', groups, e.group_id, false) : null;
     if (g && st && g.stage_id !== st.stage_id) add('other_event', 'Entries', e.entry_id, e.event_id, '出場のグループ（' + g.group_id + '）は別の段階（' + g.stage_id + '）のグループです。');
-    var key = e.stage_id + '|' + e.player_id;
+    // ポイントシリーズは節（グループ）ごとに出場の行を持つので、同じ節の中で数える。ほかの段階は段階の中で数える
+    var perGroup = st && st.type === STAGE_TYPE.SERIES;
+    var key = e.stage_id + '|' + (perGroup ? e.group_id || '' : '') + '|' + e.player_id;
     if (e.stage_id && e.player_id) {
-      if (seenEntry[key]) add('duplicate_entry', 'Entries', e.entry_id, e.event_id, '段階（' + e.stage_id + '）に選手（' + e.player_id + '）の出場が複数あります（' + seenEntry[key] + '）。');
+      if (seenEntry[key]) add('duplicate_entry', 'Entries', e.entry_id, e.event_id, (perGroup ? '段階（' + e.stage_id + '）の節（' + (e.group_id || '名簿') + '）' : '段階（' + e.stage_id + '）') + 'に選手（' + e.player_id + '）の出場が複数あります（' + seenEntry[key] + '）。');
       else seenEntry[key] = e.entry_id;
     }
   });

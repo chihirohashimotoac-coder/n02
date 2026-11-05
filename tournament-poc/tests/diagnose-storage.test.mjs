@@ -149,7 +149,7 @@ function playStage(p, id, sid) {
   }
 }
 
-test('誤検知しない: ダブルエリミ（リセットあり・5 人）・6 人のトーナメント（不戦）・回戦ごとの抽選・スイス式 5 人（Bye）・予選→決勝の進出・棄権の不戦勝', () => {
+test('誤検知しない: ダブルエリミ（リセットあり・5 人）・6 人のトーナメント（不戦）・回戦ごとの抽選・スイス式 5 人（Bye）・予選→決勝の進出・棄権の不戦勝・ポイントシリーズ（節ごとの出場）', () => {
   const p = setupPair();
   p.ok('initializeStorage');
   const mk = (payload, n) => {
@@ -200,6 +200,17 @@ test('誤検知しない: ダブルエリミ（リセットあり・5 人）・6
   d = p.ok('eventDetail', { eventId: rk });
   p.ok('generateBracket', { eventId: rk, stageId: d.stages[1].id });
   playStage(p, rk, d.stages[1].id);
+  // ポイントシリーズ 6 人 2 節（節ごとに出場の行を持つ）→ プレーオフ
+  const ps = mk({ name: 'PS', template: 'series_playoff', nights: 2, playoff: 2 }, 6);
+  const psSt = p.ok('eventDetail', { eventId: ps }).stages[0];
+  p.ok('updateStage', { stageId: psSt.id, rev: psSt.rev, nightDraw: 'seed' });
+  p.ok('autoAssign', { eventId: ps, stageId: psSt.id });
+  for (const night of psSt.nights) {
+    p.ok('generateNight', { eventId: ps, groupId: night.id });
+    playStage(p, ps, psSt.id);
+  }
+  // サンプル大会（ポイントシリーズのサンプルを含む）
+  p.ok('createSampleEvent', { publish: true });
   const r = p.ok('diagnoseStorage');
   assert.equal(r.total, 0, JSON.stringify(r.issues, null, 1));
   // 実際に不戦・リセット・Bye・棄権の不戦勝ができていること（試験の前提）
