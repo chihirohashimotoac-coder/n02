@@ -20,6 +20,7 @@ function adminActions_() {
     initializeStorage: { fn: actionInitializeStorage_, scope: 'platform', mutating: true, needsStorage: false },
     migrateStorage: { fn: actionMigrateStorage_, scope: 'platform', mutating: true, needsStorage: false },
     setViewerUrl: { fn: actionSetViewerUrl_, scope: 'platform', mutating: true, needsStorage: false },
+    diagnoseStorage: { fn: actionDiagnoseStorage_, scope: 'platform', mutating: false },
     createEvent: { fn: actionCreateEvent_, scope: 'create', mutating: true },
     createSampleEvent: { fn: actionCreateSampleEvent_, scope: 'create', mutating: true },
     setStaffPassword: { fn: actionSetStaffPassword_, scope: 'event', mutating: true },
