@@ -10871,6 +10871,10 @@ function actionReconcileNextSeason_(ctx, payload) {
       .sort(byOrder_);
     var memberOf = memberOfPlayers_(nextBundle);
     var entries = ctx.table('Entries');
+    var sizeBefore = {};
+    entries.rows.forEach(function (e) {
+      if (e.stage_id === nls.stage_id) sizeBefore[e.group_id] = (sizeBefore[e.group_id] || 0) + 1;
+    });
     var seen = {};
     apply.forEach(function (key) {
       var x = isValidId_(key) ? byKey[key] : null;
@@ -10902,9 +10906,17 @@ function actionReconcileNextSeason_(ctx, payload) {
     entries.rows.forEach(function (e) {
       if (e.stage_id === nls.stage_id) counts[e.group_id] = (counts[e.group_id] || 0) + 1;
     });
+    // 監査 PR-10: 定員（次期の確定と同じく、設定した定員だけ。空欄の部は上限なし）。確定したときの設定で数える（監査 PR-09 と同じ）。
+    // 反映で人数が増えて定員を超える部があれば拒否する（同時の入れ替え・空きへの補充は通る。確定の後の手作業などで、
+    // もともと定員を超えている部から出す・入れ替える反映は止めない）
+    var capacities = record.config && Array.isArray(record.config.capacities) ? record.config.capacities : leagueConfig_(ctx.table('Leagues').byKey[row.league_id] || {}).capacities;
     groups.forEach(function (g, i) {
       var need = seasonMinSize_(i + 1, groups.length);
       if ((counts[g.group_id] || 0) < need) throw appError_('VALIDATION', '反映すると ' + g.name + ' が ' + (counts[g.group_id] || 0) + ' 人になります（' + need + ' 人以上が必要）。反映する選手を見直してください。');
+      var cap = capacities[i] || null;
+      if (cap && (counts[g.group_id] || 0) > cap && (counts[g.group_id] || 0) > (sizeBefore[g.group_id] || 0)) {
+        throw appError_('VALIDATION', '反映すると ' + g.name + ' が ' + counts[g.group_id] + ' 人になり、定員（' + cap + ' 人）を超えます。出る選手と入る選手を一緒に反映するか、反映する選手を見直してください。');
+      }
     });
   }
   var remaining = drift.diffs.filter(function (x) {
