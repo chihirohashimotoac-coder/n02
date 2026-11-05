@@ -1617,7 +1617,56 @@
           el('p', { className: 'muted small', text: 'データ保存先: ' + boot.storage.spreadsheetName + '（ID: ' + boot.storage.spreadsheetId + '）' }),
         ])
       );
+      wrap.appendChild(diagnosePanel());
       return wrap;
+    }
+
+    /** データの点検（管理者だけ・読み取りだけ）。行どうしの参照の切れ・勝ち上がりの不一致などを一覧にする。修復はしない */
+    function diagnosePanel() {
+      var dg = state.ui.diagnose || {};
+      var panel = el('section', { className: 'panel', id: 'diagnose' }, [
+        el('h2', { text: 'データの点検（読み取りだけ）' }),
+        el('p', { className: 'muted', text: 'シートの行どうしの参照の切れ、勝ち上がりの不一致、読めない設定、途中で止まった次期の作成の跡などを一覧にします。シートは書き換えません。直すときは、対象の大会と原因を確かめてから個別に行ってください。' }),
+        el('div', { className: 'btn-row' }, [
+          el('button', {
+            className: 'btn',
+            type: 'button',
+            disabled: !!dg.loading,
+            text: dg.loading ? '点検しています…' : dg.result ? 'もう一度点検する' : '点検する',
+            onClick: function () {
+              state.ui.diagnose = { loading: true };
+              render();
+              api
+                .query('diagnoseStorage', {})
+                .then(function (res) {
+                  state.ui.diagnose = { result: res };
+                  render();
+                })
+                .catch(function (err) {
+                  state.ui.diagnose = {};
+                  render();
+                  handleError(err);
+                });
+            },
+          }),
+        ]),
+      ]);
+      var r = dg.result;
+      if (!r) return panel;
+      panel.appendChild(el('p', { className: r.total ? 'error' : 'muted', role: 'status', text: formatDateTime(r.checkedAt) + ' の点検: ' + (r.total ? r.total + ' 件の問題があります（' + r.kinds.map(function (k) { return k.label + ' ' + k.count; }).join('・') + '）。' + (r.truncated ? '一覧は先頭の ' + r.issues.length + ' 件です。' : '') : '問題は見つかりませんでした。') }));
+      if (r.issues.length) {
+        panel.appendChild(
+          el('div', { className: 'table-wrap' }, [
+            el('table', { className: 'table diagnose-table' }, [
+              el('thead', null, [el('tr', null, ['種類', 'シート', '行の ID', '大会', '内容'].map(function (h) { return el('th', { scope: 'col', text: h }); }))]),
+              el('tbody', null, r.issues.map(function (x) {
+                return el('tr', null, [el('td', { text: x.label }), el('td', { text: x.sheet }), el('td', { text: x.id }), el('td', { text: x.eventId }), el('td', { text: x.detail })]);
+              })),
+            ]),
+          ])
+        );
+      }
+      return panel;
     }
 
     function field(label, control) {
