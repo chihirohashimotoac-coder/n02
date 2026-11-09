@@ -629,10 +629,13 @@ test.describe('キーボードショートカット', () => {
     }
   });
 
-  test('N で新しいゲームへ戻る', async ({ page }) => {
+  test('N は New と同じ終了確認を開き、Enter（YES）で新しいゲームへ戻る', async ({ page }) => {
     await enterGameScore(page, 100);
     await page.keyboard.press('n');
+    await expect(page.getByRole('dialog', { name: 'ゲームの終了確認' })).toContainText('ゲームを終了しますか？');
+    await page.keyboard.press('Enter');
     await expect(page.locator('.mode-card').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /保存した対戦を再開/ })).toHaveCount(0);
   });
 
   test('U で直前の入力を取り消す（長押しの連射は無視される）', async ({ page }) => {

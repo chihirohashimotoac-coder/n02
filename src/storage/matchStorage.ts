@@ -25,19 +25,22 @@ export interface HistoryEntry {
 
 export type ThemeName = 'clean' | 'neon' | 'navy';
 
-export function saveCurrentMatch(state: X01MatchState | null): void {
-  try {
-    if (state === null) localStorage.removeItem(CURRENT_MATCH_KEY);
-    else localStorage.setItem(CURRENT_MATCH_KEY, JSON.stringify(state));
-  } catch {
-    // ignore storage failures
-  }
+export type MatchMode = X01Settings['mode'];
+
+/**
+ * チェックアウト練習's in-progress match. 通常01 and チェックアウト練習 used to share
+ * CURRENT_MATCH_KEY, so starting one silently replaced the other's saved game; each now has its own
+ * slot. 通常01 stays on the pre-existing key, so a saved 01 match survives this release untouched.
+ */
+export const CURRENT_CHECKOUT_MATCH_KEY = 'n02-current-checkout-v1';
+
+function currentMatchKey(mode: MatchMode): string {
+  return mode === 'checkout' ? CURRENT_CHECKOUT_MATCH_KEY : CURRENT_MATCH_KEY;
 }
 
-export function loadCurrentMatch(): X01MatchState | null {
+function parseMatch(raw: string | null): X01MatchState | null {
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(CURRENT_MATCH_KEY);
-    if (!raw) return null;
     const parsed = JSON.parse(raw) as X01MatchState;
     if (!parsed?.settings || !Array.isArray(parsed.players)) return null;
     return parsed;
@@ -46,8 +49,65 @@ export function loadCurrentMatch(): X01MatchState | null {
   }
 }
 
-export function clearCurrentMatch(): void {
-  saveCurrentMatch(null);
+/**
+ * A checkout match saved before the split sits in CURRENT_MATCH_KEY. Move it to its own slot (unless
+ * that slot already holds a newer one, which then wins) so it is offered as チェックアウト練習 and no
+ * longer blocks a 01 save.
+ */
+function migrateSharedCheckoutSave(): void {
+  try {
+    const raw = localStorage.getItem(CURRENT_MATCH_KEY);
+    const parsed = parseMatch(raw);
+    if (!raw || parsed?.settings.mode !== 'checkout') return;
+    if (localStorage.getItem(CURRENT_CHECKOUT_MATCH_KEY) === null) {
+      localStorage.setItem(CURRENT_CHECKOUT_MATCH_KEY, raw);
+    }
+    localStorage.removeItem(CURRENT_MATCH_KEY);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+/** Saved under the slot of the match's own mode (通常01 or チェックアウト練習). */
+export function saveCurrentMatch(state: X01MatchState): void {
+  try {
+    localStorage.setItem(currentMatchKey(state.settings.mode), JSON.stringify(state));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+export function loadCurrentMatch(mode: MatchMode): X01MatchState | null {
+  migrateSharedCheckoutSave();
+  try {
+    const parsed = parseMatch(localStorage.getItem(currentMatchKey(mode)));
+    // A slot only ever answers for its own mode.
+    return parsed && (parsed.settings.mode ?? '01') === mode ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearCurrentMatch(mode: MatchMode): void {
+  try {
+    localStorage.removeItem(currentMatchKey(mode));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+/** e.g. "501・LEG 2" / "CHECKOUT・LEG 3" - names a saved match on its resume button and prompt. */
+export function savedMatchLabel(match: X01MatchState): string {
+  const mode = match.settings.mode === '01' ? `${match.settings.startScore}` : 'CHECKOUT';
+  return `${mode}・LEG ${match.leg}`;
+}
+
+/**
+ * Whether nothing has been thrown yet: leg 1, no visit recorded, no leg completed. Leaving such a
+ * match loses nothing, so its exit is not confirmed.
+ */
+export function isUntouchedMatch(state: X01MatchState): boolean {
+  return state.leg === 1 && state.completed.length === 0 && state.visits.length === 0;
 }
 
 export function loadHistory(): HistoryEntry[] {

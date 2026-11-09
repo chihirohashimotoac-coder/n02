@@ -23,7 +23,7 @@ import { TOWER_GAUGE_ART } from '../../domain/practice/towerAssets';
 /** Hosts the screen with real state, the way PracticeFlow does, so inputs actually accumulate. */
 function Harness({ initial }: { initial: TowerState }) {
   const [state, setState] = useState(initial);
-  return <TowerGame state={state} onChange={setState} onExit={() => {}} />;
+  return <TowerGame state={state} onChange={setState} onExit={() => {}} onSaveAndExit={() => {}} />;
 }
 
 /** 3 LIFE, so a GAME OVER is three darts away rather than five. */

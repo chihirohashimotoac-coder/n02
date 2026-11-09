@@ -15,9 +15,10 @@ import {
   type X01MatchState,
 } from '../domain/x01Engine';
 import { suggestCheckoutRoute, validFinishDartCounts, checkoutRouteLabel } from '../domain/darts';
-import { appendHistory, removeLatestHistory } from '../storage/matchStorage';
+import { appendHistory, isUntouchedMatch, removeLatestHistory } from '../storage/matchStorage';
 import MatchResultCard from './MatchResultCard';
 import DialogShell from './common/DialogShell';
+import ExitConfirmDialog from './common/ExitConfirmDialog';
 import { isFieldOwned, isInertKeystroke, isNativeActivation } from './common/keyboardPolicy';
 import AwardOverlay, { type AwardPresentation } from './common/AwardOverlay';
 import { useAwardPreload } from './common/useAwardPreload';
@@ -35,7 +36,7 @@ interface Props {
   onExit: (options?: { clearSave?: boolean }) => void;
 }
 
-type Modal = 'none' | 'menu' | 'finish-darts' | 'round-limit' | 'stats' | 'edit';
+type Modal = 'none' | 'menu' | 'finish-darts' | 'round-limit' | 'stats' | 'edit' | 'confirm-exit';
 
 export default function GameScreen({ state, onChange, onExit }: Props) {
   const [entry, setEntry] = useState('');
@@ -205,16 +206,17 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     });
   }, [state.completed, state.players, state.settings.mode]);
 
-  // COM opponents take their turn automatically.
+  // COM opponents take their turn automatically - but not while 「ゲームを終了しますか？」 is asking:
+  // a COM throw landing behind it could end the leg and stack the leg result on top of it.
   useEffect(() => {
-    if (!isComTurn || state.legResult || state.matchWinner !== null) return;
+    if (!isComTurn || state.legResult || state.matchWinner !== null || modal === 'confirm-exit') return;
     const timer = setTimeout(() => {
       const next = maybePlayComTurn(state);
       onChange(next);
       announceAward(next, state);
     }, 700);
     return () => clearTimeout(timer);
-  }, [announceAward, isComTurn, state, onChange]);
+  }, [announceAward, isComTurn, modal, state, onChange]);
 
   const submitScore = useCallback(
     (rawValue: string, finishDarts?: number) => {
@@ -335,6 +337,15 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     setPendingFinish(activePlayer.remaining);
     setModal('finish-darts');
   }, [activePlayer.remaining, showNotice]);
+
+  /**
+   * New (and its N key). Once anything has been thrown it asks 「ゲームを終了しますか？」 first - a
+   * mis-tap on New used to drop the match in one touch. Nothing thrown yet means nothing to lose.
+   */
+  const requestExit = useCallback(() => {
+    if (isUntouchedMatch(state)) onExit({ clearSave: true });
+    else setModal('confirm-exit');
+  }, [onExit, state]);
 
   const closeFinishDialog = useCallback(() => {
     setModal('none');
@@ -502,7 +513,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
               break;
             case 'n':
               event.preventDefault();
-              onExit({ clearSave: true });
+              requestExit();
               break;
             case 'u':
               event.preventDefault();
@@ -531,6 +542,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     pressKey,
     pressStats,
     activeSelection,
+    requestExit,
     showNotice,
     state,
   ]);
@@ -689,7 +701,7 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
         </div>
 
         <nav className="n01-menu-table" aria-label="ゲームメニュー">
-          <button type="button" onClick={() => onExit({ clearSave: true })}>
+          <button type="button" onClick={requestExit}>
             New
           </button>
           <button type="button" onClick={openFinishDialog}>
@@ -1102,6 +1114,19 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
             戻る（本数を選び直す） <kbd>ESC</kbd>
           </button>
         </DialogShell>
+      )}
+
+      {effectiveModal === 'confirm-exit' && (
+        <ExitConfirmDialog
+          guardKeys
+          backdropClassName="n01-modal-backdrop"
+          cardClassName="n01-modal-card menu-list"
+          returnFocusTo={scrollRef}
+          onYes={() => onExit({ clearSave: true })}
+          onNo={() => setModal('none')}
+          // The match is already saved after every visit; leaving without clearing keeps it.
+          onSave={() => onExit({ clearSave: false })}
+        />
       )}
 
       {/* Never a dialog: pointer-events: none, takes no focus, and blocks nothing underneath. */}

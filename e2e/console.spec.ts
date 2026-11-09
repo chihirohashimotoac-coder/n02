@@ -104,7 +104,7 @@ test.describe('no console errors', () => {
     await page.getByRole('button', { name: /SAME SETTINGS/ }).click();
     await enterCountUpRound(page, 100);
     await page.locator('.countup-menu button', { hasText: 'PRACTICE' }).click();
-    await page.getByRole('button', { name: '続ける' }).click();
+    await page.getByRole('dialog', { name: 'ゲームの終了確認' }).getByRole('button', { name: /NO/ }).click();
 
     expect(errors).toEqual([]);
   });

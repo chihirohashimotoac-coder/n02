@@ -63,13 +63,17 @@ test.describe('ペンタスロン X01 のキーボード操作（通常01と同�
   });
 
   /**
-   * 通常01's N abandons the match. Here it is the footer's 中断, which keeps the save - so the
-   * session is still offered for resume afterwards.
+   * N is the footer's 中断, so in 個別練習 it asks 「ゲームを終了しますか？」 like the button does;
+   * 途中経過を保存する keeps the session for resume afterwards.
    */
-  test('N で中断してメニューへ戻る（セッションは残る）', async ({ page }) => {
+  test('N で中断の確認を開き、途中経過を保存するとセッションが残る', async ({ page }) => {
     await start501(page);
     await enterPentScore(page, 100);
     await page.keyboard.press('n');
+    await page
+      .getByRole('dialog', { name: 'ゲームの終了確認' })
+      .getByRole('button', { name: '途中経過を保存する' })
+      .click();
     await expect(page.locator('.mode-card').first()).toBeVisible();
 
     await page.locator('.mode-card[data-mode="pentathlon-single"]').click();

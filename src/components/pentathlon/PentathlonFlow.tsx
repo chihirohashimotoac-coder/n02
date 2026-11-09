@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import TopBar from '../TopBar';
 import AwardOverlay, { type AwardPresentation } from '../common/AwardOverlay';
+import ResumePromptDialog from '../common/ResumePromptDialog';
 import { useAwardPreload } from '../common/useAwardPreload';
 import { loadAwardDisplay, saveAwardDisplay } from '../../storage/awardSettings';
 import ThemeSelect from '../ThemeSelect';
@@ -41,6 +42,12 @@ import type { DartHit } from '../../domain/darts';
 import type { PentathlonSession, PlayerIndex } from '../../domain/pentathlon/types';
 import type { ThemeName } from '../../storage/matchStorage';
 
+/** The 個別練習 menu key ("preset:discipline") of a session or of the options that start one. */
+function singleGameKey(source: { preset: string; disciplines?: readonly string[] }): string | undefined {
+  const disciplineId = source.disciplines?.[0];
+  return disciplineId ? `${source.preset}:${disciplineId}` : undefined;
+}
+
 /** The menu label of the discipline a saved 個別練習 session was playing. */
 function singleGameLabel(session: PentathlonSession): string | undefined {
   const disciplineId = session.disciplines?.[0];
@@ -66,6 +73,8 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
   const [savedSession, setSavedSession] = useState<PentathlonSession | null>(load);
   const [lastOptions, setLastOptions] = useState<CreateSessionOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** 個別練習: a start of the same discipline as the saved session, waiting on the resume prompt. */
+  const [pendingStart, setPendingStart] = useState<CreateSessionOptions | null>(null);
 
   const update = useCallback(
     (next: PentathlonSession) => {
@@ -150,6 +159,35 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
     onExit();
   }, [onExit]);
 
+  /** 個別練習's YES on 「ゲームを終了しますか？」: leave and delete the saved session. */
+  const handleDiscardAndExit = useCallback(() => {
+    clear();
+    setSession(null);
+    setSavedSession(null);
+    onExit();
+  }, [clear, onExit]);
+  const singleExitConfirm = useMemo(
+    () => (isSingle ? { onDiscard: handleDiscardAndExit } : undefined),
+    [handleDiscardAndExit, isSingle],
+  );
+
+  /**
+   * 個別練習's 「開始」. Starting the discipline the saved session was playing asks
+   * 「前回の途中から始めますか？」 first; any other discipline starts as before.
+   */
+  const requestSingleStart = useCallback(
+    (options: CreateSessionOptions) => {
+      const saved = load();
+      // Only a game still being played is 途中: one left on its result screen has nothing to resume.
+      if (saved && saved.status === 'playing' && singleGameKey(saved) === singleGameKey(options)) {
+        setPendingStart(options);
+      } else {
+        start(options);
+      }
+    },
+    [load, start],
+  );
+
   const handleFinish = useCallback(() => {
     clear();
     setSession(null);
@@ -205,7 +243,7 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
         <section className="setup-layout">
           {isSingle ? (
             <SingleGameSetup
-              onStart={start}
+              onStart={requestSingleStart}
               onCancel={onExit}
               initialKey={
                 lastOptions?.disciplines
@@ -228,6 +266,24 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
             <ThemeSelect theme={theme} onChange={onChangeTheme} />
           </div>
         </section>
+        {pendingStart && (
+          <ResumePromptDialog
+            backdropClassName="n01-modal-backdrop pent-modal-backdrop"
+            cardClassName="n01-modal-card pent-modal-card menu-list"
+            savedLabel={savedSession ? singleGameLabel(savedSession) : undefined}
+            onYes={() => {
+              setPendingStart(null);
+              resume();
+            }}
+            onNo={() => {
+              setPendingStart(null);
+              clear();
+              setSavedSession(null);
+              start(pendingStart);
+            }}
+            onCancel={() => setPendingStart(null)}
+          />
+        )}
       </div>
     );
   }
@@ -247,6 +303,7 @@ export default function PentathlonFlow({ theme, onChangeTheme, onExit, variant =
           onEditVisit={handleEditVisit}
           canUndoRound={canUndoRoundSession(session)}
           onExit={handleExitToMenu}
+          exitConfirm={singleExitConfirm}
           error={error}
           onError={setError}
           awardsEnabled={awardsEnabled}

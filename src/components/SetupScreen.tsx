@@ -7,6 +7,7 @@ import { computeDefaultMaxRounds, type X01MatchState, type X01Settings } from '.
 import {
   defaultTargetLegs,
   loadHistory,
+  savedMatchLabel,
   type HistoryEntry,
   type ThemeName,
 } from '../storage/matchStorage';
@@ -15,8 +16,10 @@ interface Props {
   settings: X01Settings;
   onChangeSettings: (settings: X01Settings) => void;
   onStart: (settings: X01Settings) => void;
-  onResume?: () => void;
-  savedMatch: X01MatchState | null;
+  /** Resumes the saved match of that mode. */
+  onResume: (mode: X01Settings['mode']) => void;
+  /** Saved in-progress matches, one slot per mode (通常01・チェックアウト練習). */
+  savedMatches: X01MatchState[];
   theme: ThemeName;
   onChangeTheme: (theme: ThemeName) => void;
   onStartPentathlon: () => void;
@@ -41,7 +44,7 @@ export default function SetupScreen({
   onChangeSettings,
   onStart,
   onResume,
-  savedMatch,
+  savedMatches,
   theme,
   onChangeTheme,
   onStartPentathlon,
@@ -101,11 +104,10 @@ export default function SetupScreen({
     onStart(settings);
   };
 
-  const savedLabel = useMemo(() => {
-    if (!savedMatch) return null;
-    const mode = savedMatch.settings.mode === '01' ? `${savedMatch.settings.startScore}` : 'CHECKOUT';
-    return `${mode}・LEG ${savedMatch.leg}`;
-  }, [savedMatch]);
+  const savedEntries = useMemo(
+    () => savedMatches.map((match) => ({ mode: match.settings.mode, label: savedMatchLabel(match) })),
+    [savedMatches],
+  );
 
   return (
     <div className="app-shell">
@@ -195,11 +197,17 @@ export default function SetupScreen({
           <button type="button" className="primary-button" onClick={handleStart}>
             ➤ ゲームを開始
           </button>
-          {onResume && (
-            <button type="button" className="resume-button" onClick={onResume}>
-              保存した対戦を再開 <span>{savedLabel}</span>
+          {savedEntries.map((entry) => (
+            <button
+              key={entry.mode}
+              type="button"
+              className="resume-button"
+              data-saved-mode={entry.mode}
+              onClick={() => onResume(entry.mode)}
+            >
+              保存した対戦を再開 <span>{entry.label}</span>
             </button>
-          )}
+          ))}
           {error && (
             <p className="notice error" role="alert">
               {error}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import DialogShell from '../common/DialogShell';
+import ExitConfirmDialog from '../common/ExitConfirmDialog';
 import TowerBoard from './TowerBoard';
 import TowerGauge from './TowerGauge';
 import TowerScene from './TowerScene';
@@ -32,7 +33,10 @@ import { hasSeenTowerHelp, markTowerHelpSeen } from '../../storage/towerStorage'
 interface Props {
   state: TowerState;
   onChange: (state: TowerState) => void;
+  /** Leaves the climb and discards it, including any copy saved by 「途中経過を保存する」. */
   onExit: () => void;
+  /** 「途中経過を保存する」: keeps the climb so the next TOWER start can resume it. */
+  onSaveAndExit: () => void;
 }
 
 type Modal = 'none' | 'menu' | 'help' | 'confirm-exit' | 'rewind';
@@ -84,7 +88,7 @@ function sceneBand(floor: number, finalFloor: number): number {
  * styles: while it is mounted nothing reaches GameScreen, the X01 engine, Pentathlon or COUNT-UP,
  * and when it unmounts it takes its own listener with it and leaves nothing behind.
  */
-export default function TowerGame({ state, onChange, onExit }: Props) {
+export default function TowerGame({ state, onChange, onExit, onSaveAndExit }: Props) {
   const [modal, setModal] = useState<Modal>(() => (hasSeenTowerHelp() ? 'none' : 'help'));
   const [notice, setNotice] = useState<string | null>(null);
   const [flash, setFlash] = useState<Flash | null>(null);
@@ -236,7 +240,7 @@ export default function TowerGame({ state, onChange, onExit }: Props) {
   }, [goNext, judge, modal, state, undo]);
 
   const requestExit = useCallback(() => {
-    // Nothing is persisted mid-game, so leaving with a climb in progress discards it - ask once.
+    // Nothing thrown yet means nothing to lose; otherwise ask 「ゲームを終了しますか？」 first.
     if (totalThrows(state) > 0) setModal('confirm-exit');
     else onExit();
   }, [onExit, state]);
@@ -609,22 +613,15 @@ export default function TowerGame({ state, onChange, onExit }: Props) {
       )}
 
       {modal === 'confirm-exit' && (
-        <DialogShell
-          label="TOWERの終了確認"
+        <ExitConfirmDialog
           backdropClassName="tower-modal-backdrop"
+          cardClassName="tower-modal-card menu-list"
+          noteClassName="tower-modal-note"
           returnFocusTo={shellRef}
-          cardClassName="tower-modal-card"
-          onClose={() => setModal('none')}
-        >
-          <h2>現在の TOWER を終了しますか？</h2>
-          <p className="tower-modal-note">途中経過は保存されません。</p>
-          <button type="button" className="tower-modal-primary" onClick={onExit}>
-            終了して PRACTICE へ
-          </button>
-          <button type="button" className="tower-modal-cancel" onClick={() => setModal('none')}>
-            続ける
-          </button>
-        </DialogShell>
+          onYes={onExit}
+          onNo={() => setModal('none')}
+          onSave={onSaveAndExit}
+        />
       )}
 
       {modal === 'rewind' && rewind && (
