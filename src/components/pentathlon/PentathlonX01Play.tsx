@@ -130,18 +130,18 @@ export default function PentathlonX01Play({
    * visits can take the selected cell away underneath it; treating a stale pair as "nothing
    * selected" keeps every digit going to the keypad rather than to a cell that is no longer there.
    */
+  const activeSelection = useMemo(() => {
+    if (selected === null) return null;
+    const state = current.progress[selected.player].state as X01SoloState;
+    return state.visits[selected.visitIndex] !== undefined ? selected : null;
+  }, [current.progress, selected]);
+
   /** 中断 - see `exitConfirm`. Untouched means no visit in this discipline and none completed before it. */
   const requestExit = useCallback(() => {
     if (!exitConfirm) onExit();
     else if (navCells.length === 0 && session.records.length === 0) exitConfirm.onDiscard();
     else setModal('confirm-exit');
   }, [exitConfirm, navCells.length, onExit, session.records.length]);
-
-  const activeSelection = useMemo(() => {
-    if (selected === null) return null;
-    const state = current.progress[selected.player].state as X01SoloState;
-    return state.visits[selected.visitIndex] !== undefined ? selected : null;
-  }, [current.progress, selected]);
 
   /** Arrow keys walk the played cells; the first press parks on the most recent visit. */
   const moveSelection = useCallback(

@@ -177,6 +177,25 @@ test.describe('通常01・チェックアウト練習', () => {
     await expect(remaining(page)).toHaveText('401');
   });
 
+  test('on a COM turn the COM waits while the dialog is open, and throws once after NO', async ({ page }) => {
+    await openFreshApp(page);
+    await page.locator('.toggle-field', { hasText: 'COM対戦' }).nth(1).locator('input').check();
+    await startX01(page);
+    await enterGameScore(page, 60);
+    // The COM now has its 700ms turn; the dialog opens first and holds it.
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+    await expect(exitDialog(page)).toBeVisible();
+    const comCells = page.locator('.n01-score-table tbody tr td:nth-child(4) button');
+    await page.waitForTimeout(1500);
+    await expect(comCells).toHaveCount(0);
+    await expect(page.locator('.n01-modal-card')).toHaveCount(1);
+
+    await page.keyboard.press('Escape');
+    await expect(comCells).toHaveCount(1);
+    await page.waitForTimeout(1500);
+    await expect(comCells).toHaveCount(1);
+  });
+
   test('a checkout match saved in the shared slot before this release is offered as checkout', async ({ page }) => {
     await openFreshApp(page);
     await startX01(page, 'checkout');

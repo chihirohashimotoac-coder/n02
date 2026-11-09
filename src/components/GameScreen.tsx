@@ -206,16 +206,17 @@ export default function GameScreen({ state, onChange, onExit }: Props) {
     });
   }, [state.completed, state.players, state.settings.mode]);
 
-  // COM opponents take their turn automatically.
+  // COM opponents take their turn automatically - but not while 「ゲームを終了しますか？」 is asking:
+  // a COM throw landing behind it could end the leg and stack the leg result on top of it.
   useEffect(() => {
-    if (!isComTurn || state.legResult || state.matchWinner !== null) return;
+    if (!isComTurn || state.legResult || state.matchWinner !== null || modal === 'confirm-exit') return;
     const timer = setTimeout(() => {
       const next = maybePlayComTurn(state);
       onChange(next);
       announceAward(next, state);
     }, 700);
     return () => clearTimeout(timer);
-  }, [announceAward, isComTurn, state, onChange]);
+  }, [announceAward, isComTurn, modal, state, onChange]);
 
   const submitScore = useCallback(
     (rawValue: string, finishDarts?: number) => {
