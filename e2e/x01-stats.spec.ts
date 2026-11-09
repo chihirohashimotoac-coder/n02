@@ -313,6 +313,8 @@ test.describe('PC 1366×900', () => {
 
     await statsButton(page).click();
     await page.keyboard.press('n');
+    // Something is on the board, so New asks first; Enter is YES.
+    await page.keyboard.press('Enter');
     await page.getByRole('button', { name: /ゲームを開始/ }).click();
     await expect(statsButton(page)).toHaveAttribute('aria-pressed', 'false');
   });

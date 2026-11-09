@@ -2,14 +2,17 @@ import {
   AWARD_KINDS,
   COUNT_UP_ROUNDS,
   emptyAwardCounts,
+  isFinished,
   isValidRoundScore,
   type AwardCounts,
   type AwardKind,
   type BullMode,
+  type CountUpState,
 } from '../domain/practice/countUp';
 
 /**
- * PRACTICE history lives under its own key. The pre-existing contracts (n02-current-v1,
+ * PRACTICE history lives under its own key (and a game saved part-way through under another one,
+ * COUNT_UP_PROGRESS_KEY below). The pre-existing contracts (n02-current-v1,
  * n02-history-v1, n02-theme-v1, n02-pentathlon-v1, n02-pentathlon-single-v1) are never read or
  * written from here, so a COUNT-UP result can never appear in - or corrupt - the 01 history.
  */
@@ -127,4 +130,75 @@ export function updateCountUpHistoryEntry(entry: CountUpHistoryEntry): CountUpHi
     // ignore
   }
   return next;
+}
+
+/**
+ * A COUNT-UP left part-way through with 「途中経過を保存する」. Its own key, next to the history one;
+ * written only by that choice (never automatically), and removed when the saved game is resumed and
+ * finished, when YES discards it, or when 「前回の途中から始めますか？」 is answered NO.
+ */
+export const COUNT_UP_PROGRESS_KEY = 'n02-practice-countup-progress-v1';
+
+function sanitizeProgress(value: unknown): CountUpState | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const settings = record.settings as Record<string, unknown> | undefined;
+  if (!settings || typeof settings !== 'object') return null;
+  if (settings.playerCount !== 1 && settings.playerCount !== 2) return null;
+  if (settings.bullMode !== 'fat' && settings.bullMode !== 'separate') return null;
+  const names = settings.names;
+  if (!Array.isArray(names) || names.length !== 2 || !names.every((name) => typeof name === 'string')) return null;
+  if (!Array.isArray(record.players) || record.players.length !== settings.playerCount) return null;
+
+  const players: CountUpState['players'] = [];
+  for (const entry of record.players as unknown[]) {
+    if (!entry || typeof entry !== 'object') return null;
+    const player = entry as Record<string, unknown>;
+    if (typeof player.name !== 'string' || !Array.isArray(player.scores)) return null;
+    if (player.scores.length > COUNT_UP_ROUNDS || !player.scores.every(isValidRoundScore)) return null;
+    players.push({ name: player.name, scores: [...(player.scores as number[])] });
+  }
+  // Player 1 throws first each round, so player 2 is level with player 1 or one round behind.
+  if (players.length === 2) {
+    const lead = players[0].scores.length - players[1].scores.length;
+    if (lead !== 0 && lead !== 1) return null;
+  }
+
+  const state: CountUpState = {
+    settings: {
+      playerCount: settings.playerCount,
+      names: [names[0], names[1]] as [string, string],
+      bullMode: settings.bullMode,
+    },
+    players,
+  };
+  // A finished game is a result, not progress to resume.
+  return isFinished(state) ? null : state;
+}
+
+export function saveCountUpProgress(state: CountUpState): void {
+  try {
+    localStorage.setItem(COUNT_UP_PROGRESS_KEY, JSON.stringify(state));
+  } catch {
+    // Storage can be unavailable (private mode, quota); the game then simply is not kept.
+  }
+}
+
+/** The saved game, or null when there is none or it cannot be read back as a playable game. */
+export function loadCountUpProgress(): CountUpState | null {
+  try {
+    const raw = localStorage.getItem(COUNT_UP_PROGRESS_KEY);
+    if (!raw) return null;
+    return sanitizeProgress(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export function clearCountUpProgress(): void {
+  try {
+    localStorage.removeItem(COUNT_UP_PROGRESS_KEY);
+  } catch {
+    // ignore
+  }
 }

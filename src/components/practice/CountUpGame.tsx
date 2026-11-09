@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CountUpEditDialog, { type EditTarget } from './CountUpEditDialog';
 import DialogShell from '../common/DialogShell';
+import ExitConfirmDialog from '../common/ExitConfirmDialog';
 import {
   COUNT_UP_ROUNDS,
   ROUND_SCORE_MESSAGE,
@@ -29,7 +30,10 @@ interface Props {
   onChange: (state: CountUpState) => void;
   /** Reports a freshly scored award so the flow can present it. Never fired by a past-round edit. */
   onAward: (award: { kind: AwardKind; score: number; playerName: string }) => void;
+  /** Leaves the game and discards it, including any copy saved by 「途中経過を保存する」. */
   onExit: () => void;
+  /** 「途中経過を保存する」: keeps the game so the next COUNT-UP start can resume it. */
+  onSaveAndExit: () => void;
 }
 
 type Modal = 'none' | 'menu' | 'edit' | 'confirm-exit';
@@ -45,7 +49,7 @@ const KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
  * of 01: the accumulating TOTAL is the headline number and the round progress runs 1/8 → 8/8, so a
  * bystander can tell at a glance that this is not an 01 leg counting down.
  */
-export default function CountUpGame({ state, onChange, onAward, onExit }: Props) {
+export default function CountUpGame({ state, onChange, onAward, onExit, onSaveAndExit }: Props) {
   const [entry, setEntry] = useState('');
   const [modal, setModal] = useState<Modal>('none');
   const [notice, setNotice] = useState<string | null>(null);
@@ -107,7 +111,7 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
   }, [onChange, state]);
 
   const requestExit = useCallback(() => {
-    // Nothing is persisted mid-game, so leaving with scores on the board discards them - ask once.
+    // Nothing entered yet means nothing to lose; otherwise ask 「ゲームを終了しますか？」 first.
     if (totalEntries(state) > 0) setModal('confirm-exit');
     else onExit();
   }, [onExit, state]);
@@ -445,22 +449,15 @@ export default function CountUpGame({ state, onChange, onAward, onExit }: Props)
       )}
 
       {modal === 'confirm-exit' && (
-        <DialogShell
-          label="COUNT-UPの終了確認"
+        <ExitConfirmDialog
           backdropClassName="countup-modal-backdrop"
+          cardClassName="countup-modal-card menu-list"
+          noteClassName="countup-modal-note"
           returnFocusTo={boardRef}
-          cardClassName="countup-modal-card"
-          onClose={() => setModal('none')}
-        >
-          <h2>現在のCOUNT-UPを終了しますか？</h2>
-          <p className="countup-modal-note">途中経過は保存されません。</p>
-          <button type="button" className="countup-modal-primary" onClick={onExit}>
-            終了してPRACTICEへ
-          </button>
-          <button type="button" className="countup-modal-cancel" onClick={() => setModal('none')}>
-            続ける
-          </button>
-        </DialogShell>
+          onYes={onExit}
+          onNo={() => setModal('none')}
+          onSave={onSaveAndExit}
+        />
       )}
 
       {modal === 'edit' && editTarget && (

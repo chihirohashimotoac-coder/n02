@@ -519,7 +519,7 @@ test.describe('COUNT-UP storage', () => {
     // An abandoned game is never stored.
     await enterRound(page, 60);
     await page.locator('.countup-menu button', { hasText: 'PRACTICE' }).click();
-    await page.getByRole('button', { name: '終了してPRACTICEへ' }).click();
+    await page.getByRole('dialog', { name: 'ゲームの終了確認' }).getByRole('button', { name: /YES/ }).click();
     await expect(page.locator('.practice-card[data-practice="count-up"]')).toBeVisible();
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('n02-practice-countup-history-v1')!).length)).toBe(9);
 

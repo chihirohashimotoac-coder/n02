@@ -508,8 +508,7 @@ test.describe('TOWER leaves the rest of n02 alone', () => {
     await towerClick(page, '.tower-menu button:has-text("1投戻す")');
     await towerClick(page, '.tower-menu button:has-text("PRACTICE")');
     // The undo left nothing to lose, so leaving does not stop to confirm.
-    const confirm = page.getByRole('button', { name: /終了して PRACTICE へ/ });
-    if (await confirm.isVisible()) await confirm.click();
+    await expect(page.getByRole('dialog', { name: 'ゲームの終了確認' })).toHaveCount(0);
     await expect(page.locator('.practice-card[data-practice="tower"]')).toBeVisible();
 
     const after = await page.evaluate(
@@ -543,7 +542,7 @@ test.describe('TOWER leaves the rest of n02 alone', () => {
     await startTower(page);
     await judgeTowerDarts(page, 'hit', 2);
     await towerClick(page, '.tower-menu button:has-text("PRACTICE")');
-    await page.getByRole('button', { name: /終了して PRACTICE へ/ }).click();
+    await page.getByRole('dialog', { name: 'ゲームの終了確認' }).getByRole('button', { name: /YES/ }).click();
     await expect(page.locator('.practice-card[data-practice="count-up"]')).toBeVisible();
 
     await page.locator('.practice-card[data-practice="count-up"]').click();
@@ -562,7 +561,7 @@ test.describe('TOWER leaves the rest of n02 alone', () => {
     await startTower(page);
     await judgeTowerDarts(page, 'hit', 2);
     await towerClick(page, '.tower-menu button:has-text("PRACTICE")');
-    await page.getByRole('button', { name: /終了して PRACTICE へ/ }).click();
+    await page.getByRole('dialog', { name: 'ゲームの終了確認' }).getByRole('button', { name: /YES/ }).click();
     await page.getByRole('button', { name: 'メニューへ戻る' }).click();
     await expect(page.locator('.mode-card').first()).toBeVisible();
 
@@ -590,7 +589,7 @@ test.describe('TOWER leaves the rest of n02 alone', () => {
     if (await help.isVisible()) await help.click();
     await judgeTowerDarts(page, 'hit', 2);
     await towerClick(page, '.tower-menu button:has-text("PRACTICE")');
-    await page.getByRole('button', { name: /終了して PRACTICE へ/ }).click();
+    await page.getByRole('dialog', { name: 'ゲームの終了確認' }).getByRole('button', { name: /YES/ }).click();
 
     await page.locator('.practice-card[data-practice="count-up"]').click();
     await page.getByRole('button', { name: /COUNT-UP を開始/ }).click();

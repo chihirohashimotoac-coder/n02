@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PentathlonModal from './PentathlonModal';
+import ExitConfirmDialog from '../common/ExitConfirmDialog';
 import { isFieldOwned, isInertKeystroke, isNativeActivation } from '../common/keyboardPolicy';
 import { getEngine } from '../../domain/pentathlon/presets';
 import {
@@ -26,6 +27,15 @@ interface Props {
   onEditVisit: (player: PlayerIndex, visitIndex: number, score: number, darts: number) => void;
   canUndoRound: boolean;
   onExit: () => void;
+  /**
+   * 個別練習 only. When given, 中断 (its N key and the menu's 中断してメニューへ) asks
+   * 「ゲームを終了しますか？」 before leaving, as soon as anything has been entered: YES leaves through
+   * `onDiscard` (the saved session is deleted), 途中経過を保存する through `onExit` (the session is
+   * already saved after every visit, so leaving keeps it). Nothing entered yet leaves through
+   * `onDiscard` without asking. Without it - the full five-discipline pentathlon - 中断 leaves at
+   * once and keeps the session, as before.
+   */
+  exitConfirm?: { onDiscard: () => void };
   error: string | null;
   onError: (message: string | null) => void;
   /** The shared アワード表示 setting, owned by PentathlonFlow so it survives a discipline change. */
@@ -35,7 +45,7 @@ interface Props {
   onAward: (award: Omit<AwardPresentation, 'id'>) => void;
 }
 
-type Modal = 'none' | 'finish-darts' | 'menu' | 'stats' | 'rules' | 'edit';
+type Modal = 'none' | 'finish-darts' | 'menu' | 'stats' | 'rules' | 'edit' | 'confirm-exit';
 
 /**
  * 301/501 in Pentathlon. Deliberately the same screen as 通常01・チェックアウト練習 (GameScreen): the
@@ -54,6 +64,7 @@ export default function PentathlonX01Play({
   onEditVisit,
   canUndoRound,
   onExit,
+  exitConfirm,
   error,
   onError,
   awardsEnabled,
@@ -119,6 +130,13 @@ export default function PentathlonX01Play({
    * visits can take the selected cell away underneath it; treating a stale pair as "nothing
    * selected" keeps every digit going to the keypad rather than to a cell that is no longer there.
    */
+  /** 中断 - see `exitConfirm`. Untouched means no visit in this discipline and none completed before it. */
+  const requestExit = useCallback(() => {
+    if (!exitConfirm) onExit();
+    else if (navCells.length === 0 && session.records.length === 0) exitConfirm.onDiscard();
+    else setModal('confirm-exit');
+  }, [exitConfirm, navCells.length, onExit, session.records.length]);
+
   const activeSelection = useMemo(() => {
     if (selected === null) return null;
     const state = current.progress[selected.player].state as X01SoloState;
@@ -350,10 +368,9 @@ export default function PentathlonX01Play({
               setModal('menu');
               break;
             case 'n':
-              // 通常01's N abandons the match outright. Here it is the footer's 中断: the session
-              // is saved and can be resumed from the menu, so a stray press costs nothing.
+              // The footer's 中断, by keyboard - including its 個別練習 confirmation.
               event.preventDefault();
-              onExit();
+              requestExit();
               break;
             case 's':
               event.preventDefault();
@@ -380,11 +397,11 @@ export default function PentathlonX01Play({
     modal,
     moveSelection,
     navCells,
-    onExit,
     onUndoRound,
     openEditor,
     openFinishModal,
     pressKey,
+    requestExit,
   ]);
 
   const rows = useMemo(() => buildRows(current.progress, active, solo), [current.progress, active, solo]);
@@ -536,7 +553,7 @@ export default function PentathlonX01Play({
         </div>
 
         <nav className="n01-menu-table" aria-label="ゲームメニュー">
-          <button type="button" onClick={onExit}>
+          <button type="button" onClick={requestExit}>
             中断
           </button>
           <button type="button" onClick={openFinishModal}>
@@ -601,6 +618,18 @@ export default function PentathlonX01Play({
         </PentathlonModal>
       )}
 
+      {modal === 'confirm-exit' && exitConfirm && (
+        <ExitConfirmDialog
+          guardKeys
+          backdropClassName="n01-modal-backdrop pent-modal-backdrop"
+          cardClassName="n01-modal-card pent-modal-card menu-list"
+          returnFocusTo={scrollRef}
+          onYes={exitConfirm.onDiscard}
+          onNo={() => setModal('none')}
+          onSave={onExit}
+        />
+      )}
+
       {modal === 'menu' && (
         <PentathlonModal
           guardKeys
@@ -619,7 +648,7 @@ export default function PentathlonX01Play({
             } else if (event.key === '3') {
               event.preventDefault();
               setModal('none');
-              onExit();
+              requestExit();
             } else if (event.key.toLowerCase() === 'a') {
               event.preventDefault();
               onToggleAwards();
@@ -658,7 +687,7 @@ export default function PentathlonX01Play({
             type="button"
             onClick={() => {
               setModal('none');
-              onExit();
+              requestExit();
             }}
           >
             <kbd>3</kbd>{'　'}中断してメニューへ

@@ -9,6 +9,7 @@ import TowerSetup from './TowerSetup';
 import TowerGame from './TowerGame';
 import TowerResult from './TowerResult';
 import AwardOverlay, { type AwardPresentation } from '../common/AwardOverlay';
+import ResumePromptDialog from '../common/ResumePromptDialog';
 import { useAwardPreload } from '../common/useAwardPreload';
 import {
   awardCounts,
@@ -30,10 +31,20 @@ import {
   type TowerSettings,
   type TowerState,
 } from '../../domain/practice/tower';
-import { appendCountUpHistory, updateCountUpHistoryEntry, type CountUpHistoryEntry } from '../../storage/practiceStorage';
+import {
+  appendCountUpHistory,
+  clearCountUpProgress,
+  loadCountUpProgress,
+  saveCountUpProgress,
+  updateCountUpHistoryEntry,
+  type CountUpHistoryEntry,
+} from '../../storage/practiceStorage';
 import {
   appendTowerHistory,
+  clearTowerProgress,
+  loadTowerProgress,
   removeTowerHistoryEntry,
+  saveTowerProgress,
   updateTowerHistoryEntry,
   type TowerHistoryEntry,
 } from '../../storage/towerStorage';
@@ -46,6 +57,21 @@ interface Props {
 }
 
 type Screen = 'hub' | 'countup-setup' | 'tower-setup';
+
+/** A start from a setup screen that found that game's saved progress, waiting on the resume prompt. */
+type PendingStart =
+  | { kind: 'countup'; settings: CountUpSettings; saved: CountUpState }
+  | { kind: 'tower'; settings: TowerSettings; saved: TowerState };
+
+function savedCountUpLabel(state: CountUpState): string {
+  const rounds = Math.max(...state.players.map((player) => player.scores.length));
+  return `COUNT-UP・${state.players.length}人・${rounds}ラウンド入力済み`;
+}
+
+function savedTowerLabel(state: TowerState): string {
+  const floors = state.players.map((player) => `${player.currentFloor}F`).join(' / ');
+  return `TOWER・${state.players.length}人・${floors}`;
+}
 
 function buildHistoryEntry(state: CountUpState, date: string): CountUpHistoryEntry {
   return {
@@ -94,8 +120,10 @@ function buildTowerHistoryEntry(state: TowerState, date: string): TowerHistoryEn
  * `null`-able game slots, two setup screens, two history keys. Starting one never touches the
  * other, and neither can be in play at the same time.
  *
- * Neither keeps mid-game persistence: an unfinished game lives only in this component's state, and
- * only a completed game is written to its own PRACTICE history key.
+ * Neither keeps automatic mid-game persistence: an unfinished game lives in this component's state,
+ * and only a completed game is written to its own PRACTICE history key. The exception is the
+ * player's own 「途中経過を保存する」 on the exit dialog, which keeps that one game under its own
+ * progress key until it is resumed and finished, discarded with YES, or declined at the next start.
  */
 export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
   const [screen, setScreen] = useState<Screen>('hub');
@@ -110,6 +138,8 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
   const [tower, setTower] = useState<TowerState | null>(null);
   /** Same idea as `recordedDate`, for the TOWER game that has reached RESULT. */
   const towerRecordedDate = useRef<string | null>(null);
+
+  const [pendingStart, setPendingStart] = useState<PendingStart | null>(null);
 
   const startGame = useCallback((next: CountUpSettings) => {
     setSettings(next);
@@ -127,6 +157,9 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
   // A completed game is recorded once; correcting a round afterwards rewrites that same entry.
   useEffect(() => {
     if (!game || !isFinished(game)) return;
+    // A finished game is a result, no longer progress to resume (this is the saved one, if any:
+    // a start with a save present always went through the resume prompt first).
+    clearCountUpProgress();
     if (recordedDate.current === null) {
       const date = new Date().toISOString();
       recordedDate.current = date;
@@ -136,7 +169,7 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
     }
   }, [game]);
 
-  /** Ends the current game and lands on the named screen - nothing about it is persisted. */
+  /** Ends the current game and lands on the named screen. Saving it, if wanted, is the caller's. */
   const leaveGame = useCallback((target: Screen) => {
     setGame(null);
     setAward(null);
@@ -158,6 +191,7 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
   useEffect(() => {
     if (!tower) return;
     if (tower.phase === 'result') {
+      clearTowerProgress();
       if (towerRecordedDate.current === null) {
         const date = new Date().toISOString();
         towerRecordedDate.current = date;
@@ -177,6 +211,51 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
     setScreen(target);
   }, []);
 
+  // 「開始」 on a setup screen: that game's saved progress is offered first rather than overwritten.
+  const requestCountUpStart = useCallback(
+    (next: CountUpSettings) => {
+      const saved = loadCountUpProgress();
+      if (saved) setPendingStart({ kind: 'countup', settings: next, saved });
+      else startGame(next);
+    },
+    [startGame],
+  );
+
+  const requestTowerStart = useCallback(
+    (next: TowerSettings) => {
+      const saved = loadTowerProgress();
+      if (saved) setPendingStart({ kind: 'tower', settings: next, saved });
+      else startTower(next);
+    },
+    [startTower],
+  );
+
+  const answerResume = useCallback(
+    (resume: boolean) => {
+      if (!pendingStart) return;
+      setPendingStart(null);
+      if (pendingStart.kind === 'countup') {
+        if (resume) {
+          setSettings(pendingStart.saved.settings);
+          recordedDate.current = null;
+          setAward(null);
+          setGame(pendingStart.saved);
+        } else {
+          clearCountUpProgress();
+          startGame(pendingStart.settings);
+        }
+      } else if (resume) {
+        setTowerSettings(pendingStart.saved.settings);
+        towerRecordedDate.current = null;
+        setTower(pendingStart.saved);
+      } else {
+        clearTowerProgress();
+        startTower(pendingStart.settings);
+      }
+    },
+    [pendingStart, startGame, startTower],
+  );
+
   // Stable identity: the overlay restarts its 3-second timer whenever this changes, so it must not
   // be recreated on every score entry.
   const clearAward = useCallback(() => setAward(null), []);
@@ -193,7 +272,14 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
           state={game}
           onChange={setGame}
           onAward={presentAward}
-          onExit={() => leaveGame('hub')}
+          onExit={() => {
+            clearCountUpProgress();
+            leaveGame('hub');
+          }}
+          onSaveAndExit={() => {
+            saveCountUpProgress(game);
+            leaveGame('hub');
+          }}
         />
         {overlay}
       </>
@@ -216,7 +302,20 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
   }
 
   if (tower && tower.phase !== 'result') {
-    return <TowerGame state={tower} onChange={setTower} onExit={() => leaveTower('hub')} />;
+    return (
+      <TowerGame
+        state={tower}
+        onChange={setTower}
+        onExit={() => {
+          clearTowerProgress();
+          leaveTower('hub');
+        }}
+        onSaveAndExit={() => {
+          saveTowerProgress(tower);
+          leaveTower('hub');
+        }}
+      />
+    );
   }
 
   if (tower) {
@@ -246,7 +345,7 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
           <CountUpSetup
             settings={settings}
             onChangeSettings={setSettings}
-            onStart={startGame}
+            onStart={requestCountUpStart}
             onBack={() => setScreen('hub')}
           />
         )}
@@ -254,7 +353,7 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
           <TowerSetup
             settings={towerSettings}
             onChangeSettings={setTowerSettings}
-            onStart={startTower}
+            onStart={requestTowerStart}
             onBack={() => setScreen('hub')}
           />
         )}
@@ -262,6 +361,23 @@ export default function PracticeFlow({ theme, onChangeTheme, onExit }: Props) {
           <ThemeSelect theme={theme} onChange={onChangeTheme} />
         </div>
       </section>
+      {pendingStart && (
+        <ResumePromptDialog
+          backdropClassName={pendingStart.kind === 'countup' ? 'countup-modal-backdrop' : 'tower-modal-backdrop'}
+          cardClassName={
+            pendingStart.kind === 'countup' ? 'countup-modal-card menu-list' : 'tower-modal-card menu-list'
+          }
+          noteClassName={pendingStart.kind === 'countup' ? 'countup-modal-note' : 'tower-modal-note'}
+          savedLabel={
+            pendingStart.kind === 'countup'
+              ? savedCountUpLabel(pendingStart.saved)
+              : savedTowerLabel(pendingStart.saved)
+          }
+          onYes={() => answerResume(true)}
+          onNo={() => answerResume(false)}
+          onCancel={() => setPendingStart(null)}
+        />
+      )}
     </div>
   );
 }
