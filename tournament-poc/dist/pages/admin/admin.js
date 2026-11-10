@@ -727,6 +727,17 @@
       mutationEpoch++;
       return sendFn()
         .then(
+          // 応答が届いた時点で進める（この後の読み直し（競合の後など）は、保存より後の読み込みとして扱う）
+          function (data) {
+            mutationEpoch++;
+            return data;
+          },
+          function (err) {
+            mutationEpoch++;
+            throw err;
+          }
+        )
+        .then(
           function (data) {
             return applyMutation(action, data, okMessage, sentFrom, section);
           },
@@ -747,8 +758,11 @@
           }
         )
         .then(function (data) {
-          mutationEpoch++;
           setBusy(false);
+          // 保存の前に始めた読み込みは使わない（loadDetail）。「更新中…」の表示だけ戻す
+          if (state.detailRefreshing && !detailFlight) state.detailRefreshing = false;
+          var fetchNote = doc.getElementById('detail-at');
+          if (fetchNote && !state.detailRefreshing && fetchNote.textContent === '更新中…') fetchNote.textContent = '取得 ' + formatDateTime(new Date(state.detailAt || Date.now()).toISOString());
           if (section) paintSections();
           return data;
         });
@@ -1660,9 +1674,20 @@
     function loadDetail(eventId) {
       var seq = ++detailSeq;
       var actor = actorKey();
+      var epoch = mutationEpoch;
       state.detailRefreshing = true;
+      /** 読み込みを始めた後に保存が走った: この応答は保存より前の内容かもしれないので使わない（保存の応答の内容を残す） */
+      var outdated = function () {
+        if (epoch === mutationEpoch) return false;
+        if (stillOn(eventId, actor, seq)) {
+          state.detailRefreshing = false;
+          if (state.detail && !state.busy) render();
+        }
+        return true;
+      };
       return fetchDetail(eventId)
         .then(function (detail) {
+          if (outdated()) return;
           // 読み込み中に別の大会へ移った・より新しい読み込みがあった: 古い応答で画面を戻さない（監査 PR-05）
           if (!stillOn(eventId, actor, seq)) return;
           state.detailRefreshing = false;
@@ -1672,6 +1697,7 @@
           render();
         })
         .catch(function (err) {
+          if (outdated()) return;
           if (!stillOn(eventId, actor, seq)) return;
           state.detailRefreshing = false;
           // まだ何も表示していない大会の読み込みが失敗した: 待ち続けずに「再読み込み」を出す。表示中の内容は残して知らせるだけ

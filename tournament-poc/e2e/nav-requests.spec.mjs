@@ -245,3 +245,36 @@ test('作成の送信中に別の画面へ移った: 遅れて届いた作成の
   await expect(page.locator('#event-list')).toBeVisible();
   await expect(page).not.toHaveURL(/#e=/);
 });
+
+test('「最新に更新」の読み込み中に保存した: 遅れて届いた読み込みの応答（保存より前の内容）で、保存した値を古い値に戻さない', async ({ page, request }) => {
+  await reset(request, { configured: true });
+  await adminCall(request, 'initializeStorage');
+  const { ids, auth } = await seed(request, ['更新と保存の順序']);
+  let hold = false;
+  let release;
+  let stale = null;
+  await home(page, request, async (p) => {
+    await interceptAction(p, request, 'eventDetail', async ({ forward, reply, pass }) => {
+      if (!hold) return pass();
+      hold = false;
+      stale = await forward(); // 保存より前の内容を読んでおき、保存の後に返す
+      await new Promise((r) => (release = r));
+      await reply(stale);
+    });
+  });
+  await openCard(page, '更新と保存の順序');
+  await openSettings(page);
+  hold = true;
+  await page.locator('#detail-refresh').click();
+  await expect(page.locator('#detail-at')).toHaveText('更新中…');
+  await expect.poll(() => stale !== null).toBe(true);
+  await page.locator('#set-name').fill('保存した新しい名前');
+  await page.getByRole('button', { name: '大会情報を保存' }).click();
+  await expect(page.locator('#settings-event .save-state')).toHaveText('保存済み');
+  release(); // 保存より前の内容が、保存の後に届く
+  await page.waitForTimeout(800);
+  await expect(page.locator('#set-name')).toHaveValue('保存した新しい名前');
+  await expect(page.getByRole('heading', { name: '保存した新しい名前' })).toBeVisible();
+  await expect(page.locator('#detail-at')).not.toHaveText('更新中…');
+  expect((await adminCall(request, 'eventDetail', { eventId: ids[0] }, auth)).data.event.name).toBe('保存した新しい名前');
+});
