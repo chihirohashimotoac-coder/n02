@@ -1,6 +1,6 @@
 // v0.9: Google アカウント（sub）との紐付け・承認、ログアウトの確認（サーバーでの無効化の成否を区別する）
 import { test, expect } from '@playwright/test';
-import { reset, adminCall, loginSession, routeAppsScript, fakeGoogle, googleLogin, publishedSample, ORGANIZER, ADMIN_ENDPOINT } from './helpers.mjs';
+import { reset, adminCall, loginSession, routeAppsScript, fakeGoogle, googleLogin, publishedSample, ORGANIZER, ADMIN_ENDPOINT, openTab, openSettings } from './helpers.mjs';
 
 const ADMIN_PAGE = '/pages/admin/index.html';
 const STAFF_PASSWORD = 'staff-pass-1234';
@@ -196,7 +196,7 @@ test('既存の大会の紐付け（Google が保証しないアドレス）: �
   await admin.getByRole('button', { name: '開く' }).click();
   await expect(admin.locator('.event-card')).toContainText('主催者の承認待ち 1');
   await admin.locator('.event-card').filter({ hasText: '確認が要る大会' }).getByRole('button', { name: '開く' }).click();
-  await admin.getByRole('button', { name: '大会設定', exact: true }).click();
+  await openSettings(admin, '権限');
   await expect(admin.getByText('確認待ちのログインがあります。')).toBeVisible();
   await admin.getByRole('button', { name: '承認' }).click();
   await admin.getByRole('button', { name: 'この人を主催者にする' }).click();
@@ -214,12 +214,12 @@ test('共同主催者: 招待中 → 相手のログイン（保証のないア�
   await fakeGoogle(page, request, ORGANIZER);
   await page.goto(ADMIN_PAGE + '#e=' + sample.event.id);
   await googleLogin(page);
-  await page.getByRole('button', { name: '大会設定', exact: true }).click();
+  await openSettings(page, '権限');
   await expect(page.getByText(/helper@external\.example（.* 追加） — 招待中（相手のログイン待ち）/)).toBeVisible();
   await ok(request, 'linkAccount', {}, helper);
   expect((await adminCall(request, 'eventDetail', { eventId: sample.event.id }, helper)).error.code).toBe('NOT_FOUND');
   await page.reload();
-  await page.getByRole('button', { name: '大会設定', exact: true }).click();
+  await openSettings(page, '権限');
   await expect(page.getByText(/— 承認待ち/)).toBeVisible();
   await page.getByRole('button', { name: '承認' }).click();
   await page.getByRole('button', { name: 'この人を承認' }).click();

@@ -445,7 +445,7 @@ function seedV08(a, b, c, setEvent, jump) {
   setEvent(b, lg, { isPublic: true, status: 'running', dateLabel: '2026/11/04〜' });
 
   // 8. 主催者 B: リーグ→プレーオフ。リーグ戦が終わり、上位 4 名のプレーオフへの進出を確認できる
-  const lp = c('createEvent', { name: 'サンプル: リーグ→プレーオフ', template: 'league_playoff', divisions: 1, playoff: 4, rule: { format: 'legs', bestOf: 3 } }, b).eventId;
+  const lp = c('createEvent', { name: 'サンプル: リーグ→トーナメント', template: 'league_playoff', divisions: 1, playoff: 4, rule: { format: 'legs', bestOf: 3 } }, b).eventId;
   c('addPlayers', { eventId: lp, names: ['LP1', 'LP2', 'LP3', 'LP4', 'LP5', 'LP6'] }, b);
   d = detail(b, lp);
   c('autoAssign', { eventId: lp, stageId: d.stages[0].id }, b);

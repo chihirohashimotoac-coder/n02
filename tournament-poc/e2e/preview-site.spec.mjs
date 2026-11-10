@@ -2,6 +2,7 @@
 // 説明ページ（プレビューの表示・コミット）→ ポータルにサンプル → 主催者 A でログインして結果を入力 → 読み直しても残る →
 // 主催者 B に切り替えると A の大会は運営できない → 「最初の状態に戻す」で元に戻る
 import { test, expect } from '@playwright/test';
+import { openTab } from './helpers.mjs';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -62,7 +63,7 @@ test('プレビューサイト: 説明ページ → サンプル → 主催者�
   await page.locator('.fake-gsi').first().click();
   await page.locator('.fake-gsi-account', { hasText: 'organizer@example.org' }).click();
   await page.locator('.event-card').filter({ hasText: 'サンプル期制リーグ 第2期' }).last().getByRole('button', { name: '開く' }).click();
-  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await openTab(page, '期・昇降格');
   await expect(page.getByText('期制リーグ「サンプル期制リーグ」 第2期')).toBeVisible();
   await expect(page.locator('table', { hasText: '1部・2部' }).first()).toContainText('未開始');
   await page.getByRole('button', { name: '← あなたの大会' }).click();

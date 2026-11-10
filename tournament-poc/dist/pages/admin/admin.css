@@ -64,17 +64,17 @@ p { margin: 0 0 8px; }
 .error { color: var(--danger); }
 
 .topbar { background: var(--brand); color: var(--brand-ink); padding: 12px 16px; }
-.topbar__inner { max-width: 1100px; margin: 0 auto; display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
+.topbar__inner { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
 .brand { margin: 0; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; opacity: .8; }
 .topbar__title { margin: 0; font-size: 20px; }
 .topbar__who { margin: 0; font-size: 13px; opacity: .9; overflow-wrap: anywhere; }
 
-.content { max-width: 1100px; margin: 0 auto; padding: 16px 16px 64px; }
+.content { max-width: 1200px; margin: 0 auto; padding: 16px 16px 64px; }
 .stack { display: grid; gap: 14px; }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; min-width: 0; }
 .panel--tight { padding: 10px 12px; display: grid; gap: 8px; }
 
-.form { display: grid; gap: 12px; max-width: 560px; }
+.form { display: grid; gap: 12px; max-width: 760px; }
 .field { display: grid; gap: 4px; }
 .field__label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .check { display: flex; align-items: center; gap: 8px; }
@@ -84,7 +84,7 @@ p { margin: 0 0 8px; }
 
 .input {
   font: inherit;
-  min-height: 42px;
+  min-height: 44px;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -100,7 +100,7 @@ textarea.input { min-height: 110px; }
   font: inherit;
   font-size: 15px;
   font-weight: 600;
-  min-height: 42px;
+  min-height: 44px;
   padding: 8px 14px;
   border-radius: 8px;
   border: 1px solid var(--line);
@@ -125,12 +125,12 @@ textarea.input { min-height: 110px; }
 .event-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .event-head__title { margin: 0; overflow-wrap: anywhere; }
 
-.tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
-.tab { font: inherit; font-size: 15px; padding: 10px 14px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
-.tab[aria-current='page'] { color: var(--ink); border-bottom-color: var(--brand); font-weight: 700; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+.tab { font: inherit; font-size: 15px; min-height: 44px; padding: 10px 14px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.tab[aria-current] { color: var(--ink); border-bottom-color: var(--brand); font-weight: 700; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { font: inherit; font-size: 14px; min-height: 36px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.chip { font: inherit; font-size: 14px; min-height: 44px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
 .chip[aria-pressed='true'] { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
 
 .meter { height: 10px; border-radius: 999px; background: var(--sched-bg); overflow: hidden; margin-bottom: 8px; }
@@ -305,3 +305,113 @@ h4 { margin: 8px 0 4px; font-size: 15px; }
   .print-table__title { background: #eee; font-size: 10.5pt; }
   .print-table tr { break-inside: avoid; page-break-inside: avoid; }
 }
+
+/* ---------- UX 改善（2026-11）: 下書きと保存状態・作成画面・大会メニュー ---------- */
+
+/* 欄（section）ごとの入力の枠と保存状態。状態は欄の中に出し、失敗・確認できない・競合は消さずに残す */
+.section-fields { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 12px; }
+.section-fields:disabled { opacity: .75; }
+.save-footer { display: grid; gap: 8px; }
+.save-state { margin: 0; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.save-state:empty { display: none; }
+.save-state--dirty { color: var(--live); }
+.save-state--saving { color: var(--ink-2); }
+.save-state--saved { color: var(--final); }
+.save-state--failed, .save-state--unconfirmed, .save-state--conflict, .save-state--unpublished { padding: 8px 10px; border-radius: 8px; background: var(--check-bg); color: var(--check); }
+.save-extra { display: grid; gap: 8px; }
+.save-extra:empty { display: none; }
+.save-extra p { margin: 0; }
+.badge--draft { background: var(--live-bg); color: var(--live); }
+.busy-indicator:empty { display: none !important; }
+
+.details > summary { cursor: pointer; padding: 10px 0; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.details[open] > summary { margin-bottom: 8px; }
+.form-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); align-items: end; }
+.form-grid--tight { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
+.form-grid .input--short { width: 100%; }
+.field--full { grid-column: 1 / -1; }
+.summary { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 0 0 10px; font-size: 14px; }
+.summary dt { color: var(--ink-2); }
+.summary dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+/* 大会の一覧: 作成の入口・検索・状態の絞り込み */
+.list-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.list-head h2 { margin: 0; }
+.list-tools { display: grid; gap: 8px; margin: 8px 0; }
+.menu { position: relative; }
+.menu > summary { list-style: none; display: inline-flex; align-items: center; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu__items { position: absolute; left: 0; top: calc(100% + 4px); z-index: 6; display: grid; gap: 4px; min-width: 220px; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+.menu__items .btn { text-align: left; border-color: transparent; }
+
+/* 大会の作成: 入力（左）と作成内容のまとめ（右）。狭い画面では 1 列で、まとめは作成ボタンの上 */
+.create-layout { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+.create-main { gap: 14px; }
+.create-section { display: grid; gap: 12px; }
+.create-section h3, .create-summary h3 { margin: 0; }
+.create-summary { display: grid; gap: 10px; }
+.format-choices { display: grid; gap: 6px; grid-template-columns: minmax(0, 1fr); }
+.format-choice { display: flex; gap: 10px; align-items: flex-start; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.format-choice input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--brand); }
+.format-choice:has(input:checked) { border-color: var(--brand); background: var(--final-bg); }
+.format-choice:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+.format-choice__body { display: grid; gap: 2px; min-width: 0; }
+.format-choice__label { font-weight: 600; overflow-wrap: anywhere; }
+.format-choice__flow { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.estimate__warn { margin: 0; color: var(--live); }
+.flow { overflow-wrap: anywhere; }
+
+/* 大会の運営画面: スマートフォンは「進行状況・試合結果・選手・その他」、PC は左のメニュー */
+.event-head__fetch { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.event-layout { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+.event-body { min-width: 0; }
+.tabs__more { display: none; flex: 1 1 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 8px 0; }
+.tabs__more.is-open { display: grid; }
+.tabs__more .tab { text-align: left; white-space: normal; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.tabs__more .tab[aria-current] { border-color: var(--brand); }
+.event-body__title { margin: 0 0 10px; font-size: 17px; font-weight: 700; }
+.next-step { display: grid; gap: 8px; justify-items: start; padding: 12px; margin-bottom: 12px; border: 1px solid var(--brand); border-radius: 10px; background: var(--final-bg); }
+.next-step p { margin: 0; }
+.conflict-list li { margin: 4px 0; }
+
+@media (min-width: 768px) {
+  .format-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .list-tools { grid-template-columns: minmax(0, 320px) minmax(0, 1fr); align-items: center; }
+  .menu__items { left: auto; right: 0; }
+}
+
+@media (min-width: 1024px) {
+  .create-layout { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+  .create-summary { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
+  .event-layout { grid-template-columns: 200px minmax(0, 1fr); align-items: start; }
+  .tabs { flex-direction: column; flex-wrap: nowrap; border-bottom: 0; border-right: 1px solid var(--line); padding-right: 8px; position: sticky; top: 12px; }
+  .tab--more, .event-body__title { display: none; }
+  .tabs__more, .tabs__more.is-open { display: contents; }
+  .tab, .tabs__more .tab { text-align: left; border: 0; border-left: 3px solid transparent; border-radius: 0 8px 8px 0; background: transparent; }
+  .tab[aria-current], .tabs__more .tab[aria-current] { border-left-color: var(--brand); background: var(--surface); }
+  .settings-grid { grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); align-items: start; }
+}
+/* 低い画面（横向き・拡大表示）では、追従する枠を通常の流れに戻す（入力と保存ボタンに届くように） */
+@media (min-width: 1024px) and (max-height: 620px) {
+  .create-summary, .tabs { position: static; max-height: none; overflow: visible; }
+}
+@media print {
+  body:not(.is-printing) .tabs, body:not(.is-printing) .save-footer { display: none !important; }
+}
+
+/* 作成内容の図解: 段階（箱）と、次へ進む人（矢印）。幅が足りなければ折り返す */
+.flow-diagram { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+.flow-box { flex: 1 1 84px; min-width: 0; display: grid; gap: 2px; align-content: center; justify-items: center; text-align: center; padding: 8px 6px; border: 1px solid var(--brand); border-radius: 8px; background: var(--final-bg); }
+.flow-box__name { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.flow-box__sub { font-size: 12px; overflow-wrap: anywhere; }
+.flow-box__count { font-size: 12px; color: var(--ink-2); }
+.flow-link { flex: 0 1 64px; min-width: 0; display: grid; align-content: center; justify-items: center; text-align: center; gap: 2px; }
+.flow-link__label { font-size: 11px; color: var(--ink-2); overflow-wrap: anywhere; }
+.flow-link__arrow { font-size: 18px; font-weight: 700; color: var(--brand); line-height: 1; }
+.flow-branch { flex: 1 1 96px; min-width: 0; display: grid; }
+.flow-branch__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.flow-diagram--stack { flex-direction: column; flex-wrap: nowrap; }
+.flow-diagram--stack .flow-box, .flow-diagram--stack .flow-link { flex: 0 0 auto; }
+.flow-diagram--stack .flow-link { display: flex; justify-content: center; align-items: center; gap: 6px; }
+.season-hint { display: grid; gap: 8px; justify-items: start; }
+.season-hint p { margin: 0; font-size: 14px; }

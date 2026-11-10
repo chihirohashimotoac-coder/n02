@@ -1,7 +1,7 @@
 // 運営画面（GitHub Pages の /admin/）: 管理者の初期設定 → Google でログインして大会を作成・運営 → 公開 → 閲覧ページに反映 → 管理パスワードでスタッフが運営
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { reset, routeAppsScript, expectNoHorizontalOverflow, publishedSample, ADMIN_KEY, fakeGoogle, googleLogin, ORGANIZER } from './helpers.mjs';
+import { reset, routeAppsScript, expectNoHorizontalOverflow, publishedSample, ADMIN_KEY, fakeGoogle, googleLogin, ORGANIZER, openTab, openSettings, openCreate, chooseFormat } from './helpers.mjs';
 
 const SHEET_LINK = 'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcd/edit?usp=sharing';
 const ADMIN_PAGE = '/pages/admin/index.html';
@@ -36,12 +36,13 @@ test('管理者の初期設定 → Google でログインして大会作成 → 
   await googleLogin(org);
   await expect(org.getByRole('heading', { name: 'あなたの大会' })).toBeVisible();
   await expect(org.locator('#actor')).toContainText(ORGANIZER);
+  await openCreate(org);
   await org.getByLabel('大会名').fill('E2E 検証大会');
-  await org.getByLabel('開催日（表示用の文字列）').fill('2026/11/03');
+  await org.getByLabel('開催日').fill('2026/11/03');
   // v0.8 から新しい大会の初期選択は「予選ロビン → 決勝トーナメント」。この確認はロビンのみで行う
-  await org.getByLabel(/大会の形式/).selectOption('robin');
-  await org.getByLabel('ロビンのグループ数').fill('2');
-  await org.getByRole('button', { name: '大会を作成', exact: true }).click();
+  await chooseFormat(org, 'robin');
+  await org.locator('#new-groups').fill('2');
+  await org.getByRole('button', { name: 'この内容で大会を作成' }).click();
 
   // 3. 作った大会の運営画面が開く。URL には大会 ID だけが入る（秘密の鍵は入らない）
   await expect(org.getByRole('heading', { name: 'E2E 検証大会' })).toBeVisible();
@@ -55,7 +56,7 @@ test('管理者の初期設定 → Google でログインして大会作成 → 
   await expect(org.getByText('登録選手（8 名）')).toBeVisible();
 
   // 5. グループと対戦カード
-  await org.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(org, '組み合わせ');
   await org.getByRole('button', { name: '登録順に自動割当' }).click();
   await expect(org.getByText('割り当てました。').last()).toBeVisible();
   await org.getByRole('button', { name: '全グループの対戦カードを作成' }).click();
@@ -87,12 +88,12 @@ test('管理者の初期設定 → Google でログインして大会作成 → 
   await expect(corrected.locator('.match-editor__winner')).toContainText(`勝者: ${p2name}`);
 
   // 7. 公開（既定表示は管理者だけの設定なので、主催者には出さない）
-  await org.getByRole('button', { name: '大会設定' }).click();
+  await openTab(org, '大会設定');
   await expect(org.getByText(/閲覧画面の既定表示にする/)).toHaveCount(0);
   await org.getByLabel('閲覧画面に公開する').check();
   await org.getByLabel('状態').selectOption('running');
-  await org.getByRole('button', { name: '保存', exact: true }).click();
-  await expect(org.locator('.event-head .badge')).toHaveText('公開中');
+  await org.getByRole('button', { name: '大会情報を保存' }).click();
+  await expect(org.locator('.event-head .badge--on')).toHaveText('公開中');
   await org.getByRole('button', { name: '進行状況' }).click();
   await expect(org.getByText('確定 1 / 12 試合')).toBeVisible();
   const viewerLink = org.getByRole('link', { name: '閲覧画面を開く' });
@@ -117,7 +118,7 @@ test('管理者の初期設定 → Google でログインして大会作成 → 
   await expect(vm.locator('.match__player--2 .match__name')).toHaveText(p2name);
 
   // 9. 管理パスワード: 主催者が設定し、店舗スタッフは別の端末で URL とパスワードから運営できる
-  await org.getByRole('button', { name: '大会設定' }).click();
+  await openSettings(org, '権限');
   await expect(org.locator('#event-url')).toHaveText(url);
   await org.getByLabel('管理パスワード（8〜64 文字・空白なし）').fill('short');
   await org.getByRole('button', { name: '設定する' }).click();
@@ -138,7 +139,7 @@ test('管理者の初期設定 → Google でログインして大会作成 → 
   await staff.getByRole('button', { name: '開く' }).click();
   await expect(staff.getByRole('heading', { name: 'E2E 検証大会' })).toBeVisible();
   await expect(staff.locator('#actor')).toContainText('スタッフ');
-  await staff.getByRole('button', { name: '大会設定' }).click();
+  await openSettings(staff, '権限');
   await expect(staff.getByText('管理パスワードの変更は、大会を作った主催者だけが行えます。')).toBeVisible();
   // 再読み込みしてもログインを覚えている（大会当日に店舗の端末で開き直せる）
   await staff.reload();
@@ -172,10 +173,13 @@ test('運営画面: スマートフォン幅でも横スクロールなしで操
   await expectNoHorizontalOverflow(page);
   await googleLogin(page);
   await expectNoHorizontalOverflow(page);
+  await page.locator('#create-more summary').click();
+  await page.getByRole('button', { name: '検証用サンプル' }).click();
+  await expectNoHorizontalOverflow(page);
   await page.getByRole('button', { name: 'サンプル大会を作成' }).click();
   await expect(page.getByRole('heading', { name: 'サンプル大会（PoC 検証用）' })).toBeVisible();
   for (const tab of ['進行状況', '試合結果', '選手', '形式', '組み合わせ', '大会設定', '履歴']) {
-    await page.getByRole('button', { name: tab, exact: true }).click();
+    await openTab(page, tab);
     await expectNoHorizontalOverflow(page);
   }
   await page.getByRole('button', { name: '試合結果', exact: true }).click();
@@ -219,11 +223,12 @@ test('トーナメントのみ: 5 名・シード・不戦勝・3 位決定戦 �
   await fakeGoogle(page, request, ORGANIZER);
   await page.goto(ADMIN_PAGE);
   await googleLogin(page);
+  await openCreate(page);
   await page.getByLabel('大会名').fill('E2E トーナメント');
-  await page.getByLabel(/大会の形式/).selectOption('elimination');
+  await chooseFormat(page, 'elimination');
   await page.getByLabel('試合の長さ').selectOption('3');
-  await page.getByLabel('トーナメントに 3 位決定戦を入れる').check();
-  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
+  await page.locator('#new-third').check();
+  await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
   await expect(page.getByRole('heading', { name: 'E2E トーナメント' })).toBeVisible();
 
   await page.getByRole('button', { name: '選手', exact: true }).click();
@@ -232,10 +237,10 @@ test('トーナメントのみ: 5 名・シード・不戦勝・3 位決定戦 �
   await expect(page.getByText('登録選手（5 名）')).toBeVisible();
 
   // 形式タブ: 決勝だけ Best of 5 にする
-  await page.getByRole('button', { name: '形式', exact: true }).click();
+  await openTab(page, '形式');
   await expectNoHorizontalOverflow(page);
 
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByRole('button', { name: '登録選手を全員追加' }).click();
   await page.getByRole('button', { name: '出場者とシードを保存' }).click();
   await expect(page.getByText('保存しました。').last()).toBeVisible();
@@ -256,11 +261,11 @@ test('トーナメントのみ: 5 名・シード・不戦勝・3 位決定戦 �
   }
 
   // v0.8: 新しい大会は「すべての段階が終わったら自動で終了」が有効。最後の結果で「終了」になり、案内のボタンは出ない
-  await page.getByRole('button', { name: '大会設定' }).click();
+  await openTab(page, '大会設定');
   await expect(page.getByLabel('状態')).toHaveValue('finished');
   await page.getByLabel('閲覧画面に公開する').check();
-  await page.getByRole('button', { name: '保存', exact: true }).click();
-  await expect(page.locator('.event-head .badge')).toHaveText('公開中');
+  await page.getByRole('button', { name: '大会情報を保存' }).click();
+  await expect(page.locator('.event-head .badge--on')).toHaveText('公開中');
   await page.getByRole('button', { name: '進行状況' }).click();
   await expect(page.getByRole('button', { name: '大会を「終了」にする' })).toHaveCount(0);
 
@@ -295,23 +300,24 @@ test('ロビン → A / B トーナメント: 順位を確定して進出 → �
   await fakeGoogle(page, request, ORGANIZER);
   await page.goto(ADMIN_PAGE);
   await googleLogin(page);
+  await openCreate(page);
   await page.getByLabel('大会名').fill('E2E ロビンAB');
-  await page.getByLabel(/大会の形式/).selectOption('robin_ab');
-  await page.getByLabel('ロビンのグループ数').fill('2');
+  await chooseFormat(page, 'robin_ab');
+  await page.locator('#new-groups').fill('2');
   await page.getByLabel(/A トーナメントへ進む順位/).fill('1');
-  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
+  await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
 
   await page.getByRole('button', { name: '選手', exact: true }).click();
   await page.getByPlaceholder('1 行に 1 名ずつ入力').fill(['A1', 'A2', 'A3', 'B1', 'B2', 'B3'].join('\n'));
   await page.getByRole('button', { name: '追加', exact: true }).click();
   await expect(page.getByText('登録選手（6 名）')).toBeVisible();
 
-  await page.getByRole('button', { name: '形式', exact: true }).click();
+  await openTab(page, '形式');
   await expect(page.locator('.stage-editor')).toHaveCount(3);
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: testInfo.outputPath('admin-format.png'), fullPage: true });
 
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByRole('button', { name: '登録順に自動割当' }).click();
   await expect(page.getByText('割り当てました。').last()).toBeVisible();
   await page.getByRole('button', { name: '全グループの対戦カードを作成' }).click();
@@ -323,7 +329,7 @@ test('ロビン → A / B トーナメント: 順位を確定して進出 → �
     await confirmMatch(page, page.locator('.match-editor:not(.match-editor--final):not(.match-editor--pending)').first(), '3', '0');
   }
 
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   // 3 名の総当たりで全試合「上の選手」が勝つと 3 すくみ（全員 1 勝 1 敗・同 Leg 差）になる → 進出できない
   await page.getByRole('button', { name: '進出を確認' }).click();
   await expect(page.getByText(/同順位（1位）の選手がいて進出者が決まりません/).last()).toBeVisible();
@@ -394,7 +400,7 @@ test('大会の削除: データを JSON で保存し、大会名を入力する
   await fakeGoogle(page, request, ORGANIZER);
   await page.goto(`${ADMIN_PAGE}#e=${sample.event.id}`);
   await googleLogin(page);
-  await page.getByRole('button', { name: '大会設定' }).click();
+  await openSettings(page, 'その他');
   const del = page.getByRole('button', { name: 'この大会を削除する' });
   await expect(del).toBeDisabled();
   // ① 保存: ファイル名に大会 ID、中身は全シートの行と結果

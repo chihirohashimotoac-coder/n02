@@ -186,3 +186,55 @@ test('保存後に応答が消え、二重実行防止のキャッシュも消�
   const after = p.ok('eventDetail', { eventId: d.event.id }).groups[3].matches.find((x) => x.id === m.id);
   assert.equal(after.status, 'final', '実際には 1 回目で保存されている（読み直すと分かる）');
 });
+
+/* ---------- UX 改善 S1: 要求を先に作り、同じ要求として送り直せる（結果が分からないまま再読み込みした後の確認） ---------- */
+
+test('prepare / send: 要求を先に作って送る。mutate と同じ結果の分け方で、requestId は prepare で決まる', async () => {
+  const s = scripted([{ data: { eventId: 'EVT-AAAA' } }]);
+  const api = createApi(s.runner, { timeouts: T, wait: noWait });
+  const request = api.prepare('updateEvent', { x: 1 });
+  assert.match(request.requestId, /^[0-9a-f]{32}$/);
+  assert.equal(request.timeoutMs, 1000);
+  assert.equal(s.calls.length, 0, 'prepare は送らない');
+  const data = await api.send(request);
+  assert.equal(data.eventId, 'EVT-AAAA');
+  assert.equal(s.calls[0].requestId, request.requestId);
+  assert.equal(api.prepare('restoreEvent', {}).timeoutMs, 3000);
+  assert.notEqual(api.prepare('updateEvent', {}).requestId, request.requestId, 'requestId を渡さなければ新しい操作');
+});
+
+test('prepare に前の requestId を渡すと同じ操作になる。send(…, true) は「結果が分からない要求の確認」として送る', async () => {
+  // 保存済みだった: 確かめられたもの（recovered）として返る
+  const s = scripted([{ data: { eventId: 'EVT-AAAA' } }]);
+  const api = createApi(s.runner, { timeouts: T, wait: noWait });
+  const data = await api.send(api.prepare('createEvent', { name: 'x' }, 'a'.repeat(32)), true);
+  assert.equal(s.calls[0].requestId, 'a'.repeat(32));
+  assert.equal(data.recovered, true);
+  // まだ分からない（通信できない）: 自動では繰り返さず、同じ requestId のまま「確認できない」
+  const s2 = scripted(['network']);
+  const err = await createApi(s2.runner, { timeouts: T, wait: noWait })
+    .send(api.prepare('createEvent', { name: 'x' }, 'b'.repeat(32)), true)
+    .then(() => null, (e) => e);
+  assert.equal(err.code, 'UNCONFIRMED');
+  assert.equal(s2.calls.length, 1);
+  assert.equal(s2.calls[0].requestId, 'b'.repeat(32));
+  // 版の不一致（1 回目で保存済みの可能性が高い）は、保存されなかったと決めつけず「確認できない」
+  const s3 = scripted([{ error: { code: 'CONFLICT', message: '別の画面で更新されています。' } }]);
+  const err3 = await createApi(s3.runner, { timeouts: T, wait: noWait })
+    .send(api.prepare('updateEvent', {}, 'c'.repeat(32)), true)
+    .then(() => null, (e) => e);
+  assert.equal(err3.code, 'UNCONFIRMED');
+  // サーバーがはっきり拒否した（入力の誤り）: 保存されなかった
+  const s4 = scripted([{ error: { code: 'VALIDATION', message: '名前を入力してください。' } }]);
+  await assert.rejects(createApi(s4.runner, { timeouts: T, wait: noWait }).send(api.prepare('updateEvent', {}, 'd'.repeat(32)), true), (e) => e.code === 'VALIDATION');
+});
+
+test('URL: #new は作成画面、#new-season・#restore・#sample は別の入口（秘密の情報は入れない）', () => {
+  const { parseHash } = ctx.TPAdmin;
+  assert.deepEqual({ ...parseHash('#new') }, { mode: 'home', create: true, view: 'new' });
+  assert.deepEqual({ ...parseHash('#new-season') }, { mode: 'home', view: 'season' });
+  assert.deepEqual({ ...parseHash('#restore') }, { mode: 'home', view: 'restore' });
+  assert.deepEqual({ ...parseHash('#sample') }, { mode: 'home', view: 'sample' });
+  assert.deepEqual({ ...parseHash('') }, { mode: 'home' });
+  assert.equal(parseHash('#e=EVT-ABCD1234').mode, 'event');
+});

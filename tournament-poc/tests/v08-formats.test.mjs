@@ -93,7 +93,7 @@ test('見積もり: 予定試合数と成り立たない条件', () => {
   assert.match(est('robin', { players: 5, groups: 3 }).problems.join(), /2 人未満/);
   assert.match(est('swiss', { players: 6, swissRounds: 6 }).problems.join(), /5 回戦まで/);
   assert.equal(est('series_playoff', { players: 8, nights: 16, playoff: 4 }).total, 16 * 7 + 3);
-  assert.match(est('series_playoff', { players: 3, nights: 2, playoff: 4 }).problems.join(), /プレーオフの人数/);
+  assert.match(est('series_playoff', { players: 3, nights: 2, playoff: 4 }).problems.join(), /決勝トーナメントの人数/);
 });
 
 /* ---------- 総当たり ---------- */

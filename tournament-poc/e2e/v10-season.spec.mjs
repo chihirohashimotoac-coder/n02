@@ -2,7 +2,7 @@
 // と、50 人のリーグ（分割した公開データ）の閲覧ページでの表示の計測
 import { test, expect } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { reset, routeAppsScript, expectNoHorizontalOverflow, ADMIN_KEY, fakeGoogle, googleLogin, ORGANIZER, adminCall, loginSession } from './helpers.mjs';
+import { reset, routeAppsScript, expectNoHorizontalOverflow, ADMIN_KEY, fakeGoogle, googleLogin, ORGANIZER, adminCall, loginSession, openTab } from './helpers.mjs';
 
 const ADMIN_PAGE = '/pages/admin/index.html';
 let initSeq = 0;
@@ -43,8 +43,9 @@ async function publish(request, eventId) {
 test('主催者: 期制リーグを作り、1 期目の順位から 2 期目の配置をプレビュー・修正・確定。2 期目の入替戦の後に 3 期目を作る。閲覧ページで前期・次期をたどれる', async ({ page, context, request }) => {
   const seen = await start(page, request);
   // 作成（境目は主催者が入力。6 人以上で 2 部制）
+  await page.locator('#create-more summary').click();
+  await page.getByRole('button', { name: '期制リーグを作成' }).click();
   const panel = page.locator('#season-create');
-  await panel.getByRole('button', { name: '期制リーグの作成欄を開く' }).click();
   await panel.getByLabel('期制リーグの名前（各期は「名前 第n期」として作ります）').fill('水曜リーグ');
   await panel.getByLabel(/ディビジョン数の境目/).fill('6');
   await panel.getByRole('button', { name: '期制リーグを作成' }).click();
@@ -55,14 +56,14 @@ test('主催者: 期制リーグを作り、1 期目の順位から 2 期目の�
   await page.getByPlaceholder('1 行に 1 名ずつ入力').fill(['選手1', '選手2', '選手3', '選手4', '選手5', '選手6', '選手7', '選手8'].join('\n'));
   await page.getByRole('button', { name: '追加', exact: true }).click();
   await expect(page.getByText('登録選手（8 名）')).toBeVisible();
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByRole('button', { name: '登録選手を全員参加させる' }).click();
   await page.getByRole('button', { name: '対戦カードを作成' }).first().click();
   await expect(page.getByText('28 試合を作成しました。')).toBeVisible();
   await playLeague(request, e1);
   await page.reload();
   // 期・昇降格タブ: プレビュー（何位なので、どのディビジョンか）
-  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await openTab(page, '期・昇降格');
   await expect(page.getByText('期制リーグ「水曜リーグ」 第1期')).toBeVisible();
   await page.getByRole('button', { name: '次期の配置をプレビュー' }).click();
   const result = page.locator('#season-preview-result');
@@ -91,15 +92,15 @@ test('主催者: 期制リーグを作り、1 期目の順位から 2 期目の�
   await expect(page.locator('.event-head__title')).toHaveText('水曜リーグ 第2期');
   const e2 = eventIdOf(page);
   expect(e2).not.toBe(e1);
-  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await openTab(page, '期・昇降格');
   await expect(page.getByText('この期の配置の根拠（第1期から確定）')).toBeVisible();
   await expect(page.locator('tr', { hasText: '選手5' }).first()).toContainText('手動で 1部');
   // 2 期目: 1 部 4 人・2 部 4 人 → 対戦カード → 結果 → 入替戦（1 部の下から 2 位 vs 2 部の 2 位）
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByRole('button', { name: '全ディビジョンの対戦カードを作成' }).click();
   await playLeague(request, e2);
   await page.reload();
-  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await openTab(page, '期・昇降格');
   await page.getByRole('button', { name: '入替戦を組む' }).click();
   await expect(page.getByText('入替戦を 1 試合組みました。')).toBeVisible();
   // 入替戦の結果は「試合結果」タブで入力（下位の部の選手の勝ち）
@@ -110,7 +111,7 @@ test('主催者: 期制リーグを作り、1 期目の順位から 2 期目の�
   await card.locator('input').nth(1).fill('3');
   await card.getByRole('button', { name: '確定', exact: true }).click();
   await expect(page.locator('.match-editor:not(.match-editor--final)')).toHaveCount(0);
-  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await openTab(page, '期・昇降格');
   await page.getByRole('button', { name: '次期の配置をプレビュー' }).click();
   await expect(page.locator('table.season-plan')).toContainText('入替戦に勝って昇格');
   await expect(page.locator('table.season-plan')).toContainText('自動降格');
@@ -164,7 +165,7 @@ test('主催者: 次期を作った後に前期の結果を訂正すると、次
   await adminCall(request, 'saveMatchResult', { matchId: m.id, rev: m.rev, status: 'final', correction: true, p1Legs: p4First ? 0 : 3, p2Legs: p4First ? 3 : 0 });
   // 次期の所属の主催者の画面（期・昇降格）
   await page.goto(`${ADMIN_PAGE}#e=${e2}`);
-  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await openTab(page, '期・昇降格');
   const drift = page.locator('#season-drift');
   await expect(drift).toContainText('前期の結果が、この期を作った後に変わりました');
   await expect(drift.locator('tr', { hasText: '選手05' })).toContainText('2部');
@@ -188,7 +189,7 @@ test('次期の作成が途中で止まった（監査 PR-06）: 画面に跡と
   await adminCall(request, 'generateMatches', { eventId: e1, stageId: d.stages[0].id });
   await playLeague(request, e1);
   await page.goto(`${ADMIN_PAGE}#e=${e1}`);
-  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await openTab(page, '期・昇降格');
   await page.getByRole('button', { name: '次期の配置をプレビュー' }).click();
   await page.locator('#season-join').fill('新人A');
   await page.getByRole('button', { name: 'プレビューを更新（修正を反映）' }).first().click();
@@ -200,7 +201,7 @@ test('次期の作成が途中で止まった（監査 PR-06）: 画面に跡と
   await expect(page.getByText('処理中にエラーが発生しました', { exact: false })).toBeVisible();
   // 読み直すと、跡と片づける内容を示す
   await page.reload();
-  await page.getByRole('button', { name: '期・昇降格', exact: true }).click();
+  await openTab(page, '期・昇降格');
   const next = page.locator('#season-next');
   await expect(next).toContainText('第2期の作成が、前回は途中で止まりました');
   await expect(page.getByText('第2期: （作成が途中で止まりました）')).toBeVisible();

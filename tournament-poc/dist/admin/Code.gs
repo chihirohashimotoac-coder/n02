@@ -69,9 +69,10 @@ var TOURNAMENT_FORMATS = [
   {
     id: 'league_playoff',
     group: 'advanced',
-    label: 'リーグ → プレーオフ',
-    flow: 'リーグ → プレーオフ（勝ち抜き）',
-    description: 'リーグ（ディビジョンごと）の上位がプレーオフの勝ち抜き戦へ進みます。',
+    // 表示名は「トーナメント」（勝ち抜き戦）。昇格・降格を決める入替戦（期制リーグ）と区別する。ID と作る段階は変えない
+    label: 'リーグ → トーナメント',
+    flow: 'リーグ → 決勝トーナメント（勝ち抜き）',
+    description: 'リーグ（ディビジョンごと）の上位が、決勝トーナメント（勝ち抜き戦）へ進みます。昇格・降格を決める入替戦とは別です（入替戦は期制リーグで行います）。',
     fields: ['divisions', 'cycles', 'points', 'playoff', 'thirdPlace'],
     category: 'mixed',
   },
@@ -87,9 +88,9 @@ var TOURNAMENT_FORMATS = [
   {
     id: 'series_playoff',
     group: 'advanced',
-    label: 'ポイントシリーズ → プレーオフ',
-    flow: '各節の小トーナメント × 節数 → 累計ポイント上位のプレーオフ',
-    description: '節ごとに小さなトーナメントを行い、到達した順位に応じたポイントを累計します。全節が終わったら累計上位がプレーオフへ進みます。',
+    label: 'ポイントシリーズ → トーナメント',
+    flow: '各節の小トーナメント × 節数 → 累計ポイント上位の決勝トーナメント',
+    description: '節ごとに小さなトーナメントを行い、到達した順位に応じたポイントを累計します。全節が終わったら累計上位が決勝トーナメント（勝ち抜き戦）へ進みます。',
     fields: ['nights', 'nightPoints', 'playoff', 'thirdPlace'],
     category: 'series',
   },
@@ -245,8 +246,8 @@ function estimateFormat_(id, params) {
       // 人数の少ないディビジョンは全員。合計がプレーオフの人数と違うことがある（監査 PR-07）
       var perDivision = Math.max(1, Math.ceil(po / D));
       var reach = advancing(ds, perDivision);
-      ko('プレーオフ', reach);
-      if (D > 1) notes.push('プレーオフへは各ディビジョンの上位 ' + perDivision + ' 人が進みます（' + D + ' ディビジョン × ' + perDivision + ' 人 = ' + reach + ' 人' + (reach !== po ? '。入力したプレーオフの人数 ' + po + ' 人とは異なります' : '') + '）。');
+      ko('決勝トーナメント', reach);
+      if (D > 1) notes.push('決勝トーナメントへは各ディビジョンの上位 ' + perDivision + ' 人が進みます（' + D + ' ディビジョン × ' + perDivision + ' 人 = ' + reach + ' 人' + (reach !== po ? '。入力した決勝トーナメントの人数 ' + po + ' 人とは異なります' : '') + '）。');
     }
   } else if (id === 'multi_robin_ko') {
     var s1 = robin('予選ロビン', n, G);
@@ -260,8 +261,8 @@ function estimateFormat_(id, params) {
     var N = Math.max(1, Math.floor(Number(p.nights) || 1));
     stages.push({ name: 'ポイントシリーズ', matches: N * knockoutMatchCount_(n, false), note: N + ' 節 × ' + knockoutMatchCount_(n, false) + ' 試合（全員が毎節出場する場合）' });
     var po2 = Math.max(2, Math.floor(Number(p.playoff) || 2));
-    if (po2 > n) problems.push('プレーオフの人数（' + po2 + '）が参加人数より多くなっています。');
-    ko('プレーオフ', Math.min(po2, n));
+    if (po2 > n) problems.push('決勝トーナメントの人数（' + po2 + '）が参加人数より多くなっています。');
+    ko('決勝トーナメント', Math.min(po2, n));
     notes.push('各節の得点は到達した順位に対する総点です（準決勝・決勝の点を足し合わせません）。');
   } else if (id === 'swiss') {
     var R = Math.max(1, Math.floor(Number(p.swissRounds) || 1));
@@ -5668,7 +5669,8 @@ function createEventRecords_(ctx, input) {
     var league = addStage('リーグ', STAGE_TYPE.LEAGUE, lc);
     addGroups(league, D);
     if (template === 'league_playoff') {
-      var po = addStage('プレーオフ', STAGE_TYPE.SINGLE_ELIMINATION, koConfig());
+      // 段階の名前は「決勝トーナメント」（2026-11 までに作った大会は「プレーオフ」のまま。名前は表示だけで、処理は段階の種類と ID で行う）
+      var po = addStage('決勝トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, koConfig());
       lc.advancement = [{ fromRank: 1, toRank: Math.max(1, Math.ceil((input.playoff || 4) / D)), targetStageId: po.stage_id }];
       setConfig(league, lc);
     }
@@ -5687,7 +5689,7 @@ function createEventRecords_(ctx, input) {
   } else if (template === 'series_playoff') {
     var series = addStage('ポイントシリーズ', STAGE_TYPE.SERIES, { nights: input.nights || 16, nightPoints: input.nightPoints || [5, 3, 2, 0], tiebreakers: DEFAULT_SERIES_TIEBREAKERS_.slice() });
     addGroups(series, input.nights || 16);
-    var spo = addStage('プレーオフ', STAGE_TYPE.SINGLE_ELIMINATION, { thirdPlace: !!input.thirdPlace });
+    var spo = addStage('決勝トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, { thirdPlace: !!input.thirdPlace });
     setConfig(series, { nights: input.nights || 16, nightPoints: input.nightPoints || [5, 3, 2, 0], tiebreakers: DEFAULT_SERIES_TIEBREAKERS_.slice(), advancement: [{ fromRank: 1, toRank: input.playoff || 4, targetStageId: spo.stage_id }] });
   } else if (template === 'swiss') {
     var sc = { rounds: input.swissRounds || 5, points: input.points, tiebreakers: DEFAULT_SWISS_TIEBREAKERS_.slice() };
@@ -5839,7 +5841,7 @@ function actionCreateEvent_(ctx, payload) {
     thirdPlace: payload.thirdPlace === true,
     cycles: payload.cycles === 2 ? 2 : 1,
     divisions: template === 'league' || template === 'league_playoff' ? parseSmallInt_(payload.divisions, 'ディビジョン数', 1, ADMIN_CONFIG.MAX_GROUPS, 1) : 1,
-    playoff: hasPlayoff ? parseSmallInt_(payload.playoff, 'プレーオフの人数', 2, 64, 4) : template === 'swiss' ? parseSmallInt_(payload.playoff, '決勝トーナメントの人数', 0, 64, 0) : 0,
+    playoff: hasPlayoff ? parseSmallInt_(payload.playoff, '決勝トーナメントの人数', 2, 64, 4) : template === 'swiss' ? parseSmallInt_(payload.playoff, '決勝トーナメントの人数', 0, 64, 0) : 0,
     points: parsePoints_(payload.points, { win: 2, draw: 1, loss: 0 }),
     nights: template === 'series_playoff' ? parseSmallInt_(payload.nights, '節の数', 1, ADMIN_CONFIG.MAX_SERIES_NIGHTS, 16) : 0,
     nightPoints: template === 'series_playoff' ? parseNightPoints_(payload.nightPoints, [5, 3, 2, 0]) : null,
@@ -10175,7 +10177,7 @@ function actionConvertToSeasonLeague_(ctx, payload) {
   }
   var bundle = collectEvent_(ctx, eventId);
   if (bundle.stages.length !== 1 || bundle.stages[0].type !== STAGE_TYPE.LEAGUE) {
-    throw appError_('VALIDATION', '期制リーグにできるのは、リーグの段階だけの大会です（プレーオフなど他の段階がある大会は移行できません）。');
+    throw appError_('VALIDATION', '期制リーグにできるのは、リーグの段階だけの大会です（決勝トーナメントなど他の段階がある大会は移行できません）。');
   }
   var stage = bundle.stages[0];
   var stageCfg = stageConfig_(stage);

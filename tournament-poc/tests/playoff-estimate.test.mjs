@@ -6,7 +6,8 @@ import { loadProject, setupPair } from './gas-mock.mjs';
 
 const admin = loadProject('admin');
 const est = (params) => JSON.parse(JSON.stringify(admin.fn('estimateFormat_')('league_playoff', params)));
-const playoffOf = (e) => e.stages.find((s) => s.name === 'プレーオフ');
+// 見積もりの表示名と、作成される段階の名前は、どちらも「決勝トーナメント」
+const playoffOf = (e) => e.stages.find((s) => s.name === '決勝トーナメント');
 
 /** 実際に作成し、全試合を確定してから進出させ、プレーオフの人数と試合数を返す */
 function actual({ players, divisions, playoff, thirdPlace = false }) {
