@@ -3,7 +3,7 @@
 // ダブルエリミネーション・スイス式・ポイントシリーズ: 作成 → 組み合わせ → 結果 → 閲覧ページ
 import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { reset, routeAppsScript, expectNoHorizontalOverflow, ADMIN_KEY, fakeGoogle, googleLogin, ORGANIZER } from './helpers.mjs';
+import { reset, routeAppsScript, expectNoHorizontalOverflow, ADMIN_KEY, fakeGoogle, googleLogin, ORGANIZER, openTab, openSettings, openCreate, chooseFormat } from './helpers.mjs';
 
 const ADMIN_PAGE = '/pages/admin/index.html';
 let initSeq = 0;
@@ -51,10 +51,10 @@ async function addPlayers(page, names) {
 }
 
 async function publishAndOpenViewer(page, context, request, seen) {
-  await page.getByRole('button', { name: '大会設定' }).click();
+  await openTab(page, '大会設定');
   await page.getByLabel('閲覧画面に公開する').check();
-  await page.getByRole('button', { name: '保存', exact: true }).click();
-  await expect(page.locator('.event-head .badge')).toHaveText('公開中');
+  await page.getByRole('button', { name: '大会情報を保存' }).click();
+  await expect(page.locator('.event-head .badge--on')).toHaveText('公開中');
   const eventId = page.url().match(/#e=(EVT-[A-Z0-9]+)/)[1];
   const viewer = await context.newPage();
   await routeAppsScript(viewer, request, seen);
@@ -66,13 +66,14 @@ test('予選ロビン→決勝トーナメント: CSV 取込 → 組分け → �
   test.setTimeout(120000);
   const seen = await start(page, request);
   // 作成: 既定の形式は「予選ロビン→決勝トーナメント」。形式の説明と予定試合数を出す
-  await expect(page.getByLabel(/大会の形式/)).toHaveValue('robin_ko');
-  await expect(page.locator('.format-info__flow')).toContainText('ロビン');
+  await openCreate(page);
+  await expect(page.locator('#new-template-robin_ko')).toBeChecked();
+  await expect(page.locator('#new-summary')).toContainText('ロビン');
   await page.getByLabel('大会名').fill('E2E v0.8 ロビン KO');
-  await page.getByLabel('ロビンのグループ数').fill('2');
-  await page.getByLabel(/通過順位/).fill('2');
-  await expect(page.locator('.estimate__total')).toContainText('予定試合数');
-  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
+  await page.locator('#new-groups').fill('2');
+  await page.locator('#new-advance').fill('2');
+  await expect(page.locator('.estimate__total')).toContainText('予定');
+  await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
   await expect(page.getByRole('heading', { name: 'E2E v0.8 ロビン KO' })).toBeVisible();
 
   // F11: CSV で 8 名を登録（見出し付き・所属・Rt。プレビューで確認してから登録）
@@ -85,7 +86,7 @@ test('予選ロビン→決勝トーナメント: CSV 取込 → 組分け → �
   await expect(page.getByText('登録選手（8 名）')).toBeVisible();
 
   // F16・F17: 組分け（Rt を蛇行で・同じ所属を別の組へ）→ 対戦カード
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByLabel('割り当ての方法').selectOption('balanced');
   await page.getByRole('button', { name: '組分けする' }).click();
   await expect(page.getByText('8 名を割り当てました。').last()).toBeVisible();
@@ -115,7 +116,7 @@ test('予選ロビン→決勝トーナメント: CSV 取込 → 組分け → �
   await expect(second).toContainText('延期');
 
   // F06: 次戦・予定の一覧に予定が出る
-  await page.getByRole('button', { name: '次戦・予定', exact: true }).click();
+  await openTab(page, '次戦・予定');
   await expect(page.getByText('2026/11/03 19:30').first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
@@ -137,7 +138,7 @@ test('予選ロビン→決勝トーナメント: CSV 取込 → 組分け → �
   expect(await confirmAll(page)).toBe(11);
 
   // 進出: 確認してから確定
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByRole('button', { name: '進出を確認' }).click();
   await expect(page.getByRole('heading', { name: /→ 決勝トーナメント（4 人）/ })).toBeVisible();
   await page.getByRole('button', { name: 'この内容で順位を確定して進出させる' }).click();
@@ -150,15 +151,16 @@ test('予選ロビン→決勝トーナメント: CSV 取込 → 組分け → �
   expect(await confirmAll(page)).toBe(3);
 
   // F05: すべて終わったので自動で「終了」
-  await page.getByRole('button', { name: '大会設定' }).click();
+  await openTab(page, '大会設定');
   await expect(page.getByLabel('状態')).toHaveValue('finished');
   // F09: お知らせ
+  await openSettings(page, '公開・表示');
   await page.getByLabel(/閲覧ページのお知らせ/).fill('表彰式は 21:00 から');
   await page.getByRole('button', { name: '表示の設定を保存' }).click();
-  await expect(page.getByText('保存しました。').last()).toBeVisible();
+  await expect(page.locator('#settings-display .save-state')).toHaveText('保存済み');
 
   // F02: CSV（BOM 付き・数式にならない）
-  await page.getByRole('button', { name: '出力・印刷', exact: true }).click();
+  await openTab(page, '出力・印刷');
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '対戦・結果・予定' }).click()]);
   const csvOut = readFileSync(await download.path(), 'utf8');
   expect(csvOut.charCodeAt(0)).toBe(0xfeff);
@@ -209,12 +211,13 @@ test('予選ロビン→決勝トーナメント: CSV 取込 → 組分け → �
 test('ダブルエリミネーション 4 名: 表の作成 → 勝者側・敗者側・グランドファイナル → 閲覧ページに優勝者と準優勝', async ({ page, context, request }, testInfo) => {
   test.setTimeout(90000);
   const seen = await start(page, request);
+  await openCreate(page);
   await page.getByLabel('大会名').fill('E2E ダブルエリミ');
-  await page.getByLabel(/大会の形式/).selectOption('double_elimination');
+  await chooseFormat(page, 'double_elimination');
   await expect(page.locator('.estimate__total')).toContainText('試合');
-  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
+  await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
   await addPlayers(page, ['D1', 'D2', 'D3', 'D4']);
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByRole('button', { name: '登録選手を全員追加' }).click();
   await page.getByRole('button', { name: '出場者とシードを保存' }).click();
   await expect(page.getByText('保存しました。').last()).toBeVisible();
@@ -232,22 +235,23 @@ test('ダブルエリミネーション 4 名: 表の作成 → 勝者側・敗�
 test('スイス式 5 名: 回戦ごとに組む（不戦は 1 人ずつ）→ 順位に Buchholz → 閲覧ページ', async ({ page, context, request }, testInfo) => {
   test.setTimeout(90000);
   const seen = await start(page, request);
+  await openCreate(page);
   await page.getByLabel('大会名').fill('E2E スイス');
-  await page.getByLabel(/大会の形式/).selectOption('swiss');
-  await page.getByLabel('スイス式の回戦数').fill('3');
+  await chooseFormat(page, 'swiss');
+  await page.locator('#new-swiss-rounds').fill('3');
   await page.getByLabel(/決勝トーナメントに進む人数/).fill('0');
-  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
+  await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
   await addPlayers(page, ['S1', 'S2', 'S3', 'S4', 'S5']);
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByRole('button', { name: '登録選手を全員参加させる' }).click();
   await expect(page.getByText('5 名を割り当てました。').last()).toBeVisible();
   for (let r = 1; r <= 3; r++) {
-    await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+    await openTab(page, '組み合わせ');
     await page.getByRole('button', { name: `第${r}回戦を組む` }).click();
     await expect(page.getByText(new RegExp(`第${r}回戦を組みました（2 試合・不戦 `)).last()).toBeVisible();
     expect(await confirmAll(page)).toBe(2);
   }
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await expect(page.getByText('3 / 3 回戦を組みました。')).toBeVisible();
   await page.getByText(/組み合わせの記録（3 回戦）/).click();
   const viewer = await publishAndOpenViewer(page, context, request, seen);
@@ -259,23 +263,24 @@ test('スイス式 5 名: 回戦ごとに組む（不戦は 1 人ずつ）→ �
 test('ポイントシリーズ 4 名・2 節: 節ごとの小トーナメント → 中止の節 → 累計ポイント → プレーオフ → 閲覧ページ', async ({ page, context, request }, testInfo) => {
   test.setTimeout(120000);
   const seen = await start(page, request);
+  await openCreate(page);
   await page.getByLabel('大会名').fill('E2E シリーズ');
-  await page.getByLabel(/大会の形式/).selectOption('series_playoff');
-  await page.getByLabel(/節の数/).fill('3');
-  await page.getByLabel(/プレーオフ（決勝）に進む人数/).fill('2');
-  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
+  await chooseFormat(page, 'series_playoff');
+  await page.locator('#new-nights').fill('3');
+  await page.locator('#new-playoff').fill('2');
+  await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
   await addPlayers(page, ['P1', 'P2', 'P3', 'P4']);
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByRole('button', { name: /登録順に自動割当|登録選手を全員参加させる/ }).click();
   await expect(page.getByText('4 名を割り当てました。').last()).toBeVisible();
   // 第 1 節・第 2 節を行い、第 3 節は中止（点なし）
   for (let n = 0; n < 2; n++) {
-    await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+    await openTab(page, '組み合わせ');
     await page.locator('.night-card').nth(n).getByRole('button', { name: 'この節の組み合わせを作る' }).click();
     await expect(page.getByText(/試合の組み合わせを作りました。/).last()).toBeVisible();
     expect(await confirmAll(page)).toBe(3);
   }
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   const third = page.locator('.night-card').nth(2);
   await third.getByRole('textbox', { name: /中止の理由/ }).fill('台風');
   await third.getByRole('button', { name: 'この節を中止' }).click();
@@ -303,17 +308,18 @@ test('ポイントシリーズ 4 名・2 節: 節ごとの小トーナメント 
 test('印刷（PDF）: 複数ページの表は行の途中で切らず、各ページに見出しの行を出す（A4 縦・16 名の総当たり 120 試合）', async ({ page, request, browserName }, testInfo) => {
   test.skip(browserName !== 'chromium' || testInfo.project.name !== 'desktop', 'PDF 出力は Chromium のデスクトップで確かめる');
   await start(page, request);
+  await openCreate(page);
   await page.getByLabel('大会名').fill('E2E 印刷');
-  await page.getByLabel(/大会の形式/).selectOption('robin');
-  await page.getByLabel('ロビンのグループ数').fill('1');
-  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
+  await chooseFormat(page, 'robin');
+  await page.locator('#new-groups').fill('1');
+  await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
   await addPlayers(page, Array.from({ length: 16 }, (_, i) => '選手' + String(i + 1).padStart(2, '0')));
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await page.getByRole('button', { name: '登録順に自動割当' }).click();
   await expect(page.getByText('16 名を割り当てました。').last()).toBeVisible();
   await page.getByRole('button', { name: '全グループの対戦カードを作成' }).click();
   await expect(page.getByText('120 試合を作成しました。').last()).toBeVisible();
-  await page.getByRole('button', { name: '出力・印刷', exact: true }).click();
+  await openTab(page, '出力・印刷');
   await page.evaluate(() => {
     window.print = () => {};
   });
@@ -330,11 +336,12 @@ test('印刷（PDF）: 複数ページの表は行の途中で切らず、各ペ
 
 test('作成欄の見積もり（監査 PR-07）: リーグ → プレーオフ 12 人・3 ディビジョン・プレーオフ 4 人は、各ディビジョン 2 人・合計 6 人・5 試合と表示する', async ({ page, request }) => {
   await start(page, request);
-  await page.getByLabel(/大会の形式/).selectOption('league_playoff');
-  await page.getByLabel(/想定の参加人数/).fill('12');
-  await page.getByLabel(/ディビジョン数/).fill('3');
-  await page.getByLabel(/プレーオフ（決勝）に進む人数/).fill('4');
-  const box = page.locator('.estimate-panel');
+  await openCreate(page);
+  await chooseFormat(page, 'league_playoff');
+  await page.locator('#new-expected').fill('12');
+  await page.locator('#new-divisions').fill('3');
+  await page.locator('#new-playoff').fill('4');
+  const box = page.locator('#new-estimate');
   await expect(box).toContainText('プレーオフ: 5 試合（6 人）');
   await expect(box).toContainText('各ディビジョンの上位 2 人');
   await expect(box).toContainText('3 ディビジョン × 2 人 = 6 人');

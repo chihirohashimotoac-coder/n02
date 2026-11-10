@@ -1,6 +1,6 @@
 // ポータル「トーナメント・リーグ」（dist/pages/events/）の画面テスト
 import { test, expect } from '@playwright/test';
-import { reset, adminCall, loginSession, routeAppsScript, fakeGoogle, setFault, expectNoHorizontalOverflow, ORGANIZER } from './helpers.mjs';
+import { reset, adminCall, loginSession, routeAppsScript, fakeGoogle, setFault, expectNoHorizontalOverflow, ORGANIZER, chooseFormat } from './helpers.mjs';
 
 const OTHER = 'other@example.net';
 
@@ -272,8 +272,8 @@ test('作成ボタン: 未ログインならログインを案内し、ログイ
   await expect(page).toHaveURL(/\/pages\/admin\/#new$/);
   await expect(page.locator('#new-name')).toBeFocused();
   await page.locator('#new-name').fill('新しいリーグ戦');
-  await page.locator('#new-template').selectOption('league');
-  await page.getByRole('button', { name: '大会を作成', exact: true }).click();
+  await chooseFormat(page, 'league');
+  await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
   await expect(page.locator('.event-head__title')).toHaveText('新しいリーグ戦');
   await page.goto('/pages/events/?tab=mine');
   await expect(page.getByRole('tab', { name: /作成した大会/ })).toHaveAttribute('aria-selected', 'true');

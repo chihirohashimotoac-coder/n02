@@ -1,7 +1,7 @@
 // 監査 PR-14（W-004）: トーナメントの出場者・シードの編集中の並び（下書き）は、保存できなかったとき（通信エラー・
 // 検証で拒否・ログイン切れ）には残し、保存できたとき・「変更を取り消す」を押したときだけ消す。別の大会の画面に混ざらない。
 import { test, expect } from '@playwright/test';
-import { reset, adminCall, loginSession, routeAppsScript, fakeGoogle, googleLogin, ORGANIZER, ADMIN_ENDPOINT, expectNoHorizontalOverflow } from './helpers.mjs';
+import { reset, adminCall, loginSession, routeAppsScript, fakeGoogle, googleLogin, ORGANIZER, ADMIN_ENDPOINT, expectNoHorizontalOverflow, openTab } from './helpers.mjs';
 
 const ADMIN_PAGE = '/pages/admin/index.html';
 const NAMES = ['選手A', '選手B', '選手C', '選手D', '選手E'];
@@ -42,7 +42,7 @@ const fulfillError = (route, code, message) => route.fulfill({ status: 200, cont
 
 async function openBracketTab(page, eventId) {
   await page.goto(`${ADMIN_PAGE}#e=${eventId}`);
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
 }
 
 /** 下書き: 全員を追加し、選手A を一番下へ（B C D E A） */
@@ -66,7 +66,7 @@ test('検証で拒否・通信エラー（確認できない）: 下書きを残
   await fakeGoogle(page, request, ORGANIZER);
   await page.goto(`${ADMIN_PAGE}#e=${s.a}`);
   await googleLogin(page);
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await makeDraft(page);
   expect(await order(page)).toEqual(DRAFT);
   // 検証で拒否
@@ -107,12 +107,12 @@ test('ログイン切れ: 下書きを残し、ログインし直すと同じ下
   await fakeGoogle(page, request, ORGANIZER);
   await page.goto(`${ADMIN_PAGE}#e=${s.a}`);
   await googleLogin(page);
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await makeDraft(page);
   await page.getByRole('button', { name: '出場者とシードを保存' }).click();
   await expect(page.getByText('ログインの有効期限が切れました').first()).toBeVisible();
   await googleLogin(page);
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   expect(await order(page), 'ログインし直した後も下書きが続く').toEqual(DRAFT);
   await page.getByRole('button', { name: '出場者とシードを保存' }).click();
   await expect(page.getByText('保存しました。').last()).toBeVisible();
@@ -125,7 +125,7 @@ test('保存できた・「変更を取り消す」: 下書きを消す。別の
   await fakeGoogle(page, request, ORGANIZER);
   await page.goto(`${ADMIN_PAGE}#e=${s.a}`);
   await googleLogin(page);
-  await page.getByRole('button', { name: '組み合わせ', exact: true }).click();
+  await openTab(page, '組み合わせ');
   await makeDraft(page);
   // 別の大会を開く → その大会の保存済みの並び（空）。戻ると A の下書きが続く
   await openBracketTab(page, s.b);

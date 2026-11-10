@@ -100,3 +100,90 @@ export async function googleLogin(page) {
   await page.locator('.fake-gsi').first().click();
 }
 
+
+/**
+ * 大会の運営画面のメニューを開く。PC は左のメニュー、スマートフォンは「進行状況・試合結果・選手」以外を「その他」から開く
+ */
+export async function openTab(page, label) {
+  const tabs = page.locator('.tabs');
+  await tabs.waitFor();
+  const tab = tabs.getByRole('button', { name: label, exact: true });
+  if (!(await tab.isVisible())) await page.locator('#tab-more').click();
+  await tab.click();
+}
+
+/** 大会設定の分類（基本情報・公開・表示・権限・その他）を開く */
+export async function openSettings(page, group) {
+  await openTab(page, '大会設定');
+  if (group) await page.locator('.subtabs').getByRole('button', { name: group }).first().click();
+}
+
+/** 主催者のホームから大会の作成画面を開く */
+export async function openCreate(page) {
+  await page.locator('#open-create').click();
+  await page.locator('#new-name').waitFor();
+}
+
+/** 作成画面で大会の形式を選ぶ（「その他の形式」は開いてから） */
+export async function chooseFormat(page, id) {
+  const radio = page.locator('#new-template-' + id);
+  if (!(await radio.isVisible())) await page.locator('#new-format-more > summary').click();
+  await radio.check();
+}
+
+/** admin/config.js の値に通信の期限（短く）を足す（期限切れ・確認できない結果の試験用） */
+export async function shortTimeouts(page, ms) {
+  await page.addInitScript((t) => {
+    let value;
+    Object.defineProperty(window, 'TPOC_ADMIN_CONFIG', {
+      configurable: true,
+      get: () => value,
+      set: (v) => {
+        value = Object.assign({}, v, { timeouts: { query: t, mutate: t, long: t } });
+      },
+    });
+  }, ms);
+}
+
+/**
+ * 運営用 API の指定した操作だけ振る舞いを変える（それ以外は通常の模擬サーバーへ）。routeAppsScript の後に呼ぶ。
+ * 戻り値: 送られた要求の一覧（{ requestId, payload }）。handler({ route, body, forward, pass, n })
+ */
+export async function interceptAction(page, request, action, handler) {
+  const seen = [];
+  await page.route(ADMIN_ENDPOINT, async (route) => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    if (body.action !== action) return route.fallback();
+    seen.push({ requestId: body.requestId, payload: body.payload });
+    const forward = async () => {
+      const r = await request.post('/admin-post', { headers: { 'content-type': 'text/plain;charset=utf-8' }, data: route.request().postData() || '' });
+      return r.text();
+    };
+    const reply = (text) => route.fulfill({ status: 200, contentType: 'application/json', body: text, headers: { 'access-control-allow-origin': '*' } });
+    await handler({ route, body, forward, reply, pass: async () => reply(await forward()), n: seen.length });
+  });
+  return seen;
+}
+
+/** 運営用 API へ送られた操作名を、送った順に記録する（通信回数の確認用）。routeAppsScript の後に呼ぶ */
+export async function recordActions(page) {
+  const actions = [];
+  await page.route(ADMIN_ENDPOINT, async (route) => {
+    try {
+      actions.push(JSON.parse(route.request().postData() || '{}').action);
+    } catch (e) {
+      actions.push('?');
+    }
+    return route.fallback();
+  });
+  return actions;
+}
+
+/** 初期化済みの空の環境で、主催者としてログインしたホームを開く */
+export async function organizerHome(page, request, email = ORGANIZER) {
+  await routeAppsScript(page, request);
+  await fakeGoogle(page, request, email);
+  await page.goto('/pages/admin/index.html');
+  await googleLogin(page);
+  await page.locator('#event-list').waitFor();
+}

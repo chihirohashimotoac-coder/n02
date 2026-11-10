@@ -13,10 +13,11 @@
   var EVENT_STATUS_LABEL = { draft: '準備中', running: '開催中', finished: '終了' };
   var BEST_OF_CHOICES = [1, 3, 5, 7, 9, 11, 13];
   var TABS = [
-    { id: 'progress', label: '進行状況' },
-    { id: 'matches', label: '試合結果' },
+    // primary: スマートフォンで常に出すメニュー（進行・結果・選手）。それ以外は「その他」から開く。PC は左のメニューに全部を並べる
+    { id: 'progress', label: '進行状況', primary: true },
+    { id: 'matches', label: '試合結果', primary: true },
     { id: 'schedule', label: '次戦・予定' },
-    { id: 'players', label: '選手' },
+    { id: 'players', label: '選手', primary: true },
     { id: 'format', label: '形式' },
     { id: 'pairing', label: '組み合わせ' },
     { id: 'settings', label: '大会設定' },
@@ -156,24 +157,30 @@
 
   /**
    * 対戦形式の入力欄（Leg 制 / セット制、Best of、1 セットの Best of、暫定ルール）。
-   * 戻り値 { node, value() }。value() はサーバーの rule 入力形式
+   * 戻り値 { node, value(), raw(), setFixedAllowed(ok), valid() }。value() はサーバーの rule 入力形式
+   * opts.noFixed: 固定 Leg 数を選択肢に出さない（勝ち抜き戦の段階）
+   * opts.detailed: 暫定ルールの欄を「詳細設定」に入れる（作成欄）
    */
   function ruleInputs(prefix, initial, opts) {
     var noFixed = opts && opts.noFixed;
-    var format = el('select', { className: 'input', id: prefix + '-format' }, [
+    var fixedOption = noFixed && initial.format !== 'fixed' ? null : el('option', { value: 'fixed', text: '固定 Leg 数（N Legs をすべて投げる・引き分けあり）', selected: initial.format === 'fixed' ? true : null });
+    var format = el('select', { className: 'input', id: prefix + '-format', 'aria-describedby': prefix + '-format-error' }, [
       el('option', { value: 'legs', text: 'Leg 制（Best of N Legs）', selected: initial.format === 'legs' || !initial.format ? true : null }),
       el('option', { value: 'sets', text: 'セット制（Best of N セット）', selected: initial.format === 'sets' ? true : null }),
-      noFixed ? null : el('option', { value: 'fixed', text: '固定 Leg 数（N Legs をすべて投げる・引き分けあり）', selected: initial.format === 'fixed' ? true : null }),
+      fixedOption,
     ]);
     var bestOf = el('select', { className: 'input', id: prefix + '-bestof' });
     var setBestOf = el('select', { className: 'input', id: prefix + '-setbestof' }, BEST_OF_CHOICES.map(function (n) {
-      return el('option', { value: String(n), text: '各セット Best of ' + n + ' Legs（先に ' + legsToWin(n) + ' Leg）', selected: n === initial.setBestOf ? true : null });
+      return el('option', { value: String(n), text: '各セット Best of ' + n + ' Legs（先に ' + legsToWin(n) + ' Leg）', selected: n === Number(initial.setBestOf) ? true : null });
     }));
     var provisional = el('input', { type: 'checkbox', id: prefix + '-provisional', checked: initial.provisional !== false });
     var setField = el('label', { className: 'field', for: prefix + '-setbestof' }, [el('span', { className: 'field__label', text: '1 セットの長さ' }), setBestOf]);
+    var fixedNote = el('p', { className: 'muted small', text: '固定 Leg 数は引き分けがありうる方式です（リーグ・ロビン・スイス式向け）。勝ち抜き戦の段階では使えません。' });
+    var fixedError = el('p', { className: 'error small', id: prefix + '-format-error', role: 'alert', hidden: true });
+    var fixedAllowed = !noFixed;
     var drawBestOf = function () {
       var unit = format.value === 'sets' ? 'セット' : 'Legs';
-      var current = Number(bestOf.value) || initial.bestOf;
+      var current = Number(bestOf.value) || Number(initial.bestOf);
       bestOf.textContent = '';
       if (format.value === 'fixed') {
         for (var n = 1; n <= 21; n++) bestOf.appendChild(el('option', { value: String(n), text: '固定 ' + n + ' Legs' + (n % 2 === 0 ? '（' + n / 2 + '-' + n / 2 + ' は引き分け）' : ''), selected: n === current ? true : null }));
@@ -184,24 +191,54 @@
         if (!bestOf.value) bestOf.value = '5';
       }
       setField.hidden = format.value !== 'sets';
+      setBestOf.disabled = format.value !== 'sets';
       fixedNote.hidden = format.value !== 'fixed';
+      checkFixedAllowed();
     };
-    var fixedNote = el('p', { className: 'muted small', text: '固定 Leg 数は引き分けがありうる方式です（リーグ・ロビン・スイス式向け）。勝ち抜き戦の段階では使えません。' });
+    /** 固定 Leg 数を選べない形式で選ばれたままなら、送信を止めて選び直してもらう（勝手に別の方式へ変えない） */
+    var checkFixedAllowed = function () {
+      var bad = format.value === 'fixed' && !fixedAllowed;
+      if (fixedOption) fixedOption.disabled = !fixedAllowed;
+      fixedError.hidden = !bad;
+      fixedError.textContent = bad ? 'この形式（勝ち抜き戦を含む）では固定 Leg 数は使えません。Leg 制またはセット制を選び直してください。' : '';
+      if (typeof format.setCustomValidity === 'function') format.setCustomValidity(bad ? '固定 Leg 数は使えません。Leg 制またはセット制を選んでください。' : '');
+    };
     format.addEventListener('change', drawBestOf);
     drawBestOf();
+    var provisionalLabel = el('label', { className: 'check' }, [provisional, ' 暫定ルールとして扱う（確定した大会ルールではない）']);
     var node = el('div', { className: 'stack stack--tight' }, [
       el('label', { className: 'field', for: prefix + '-format' }, [el('span', { className: 'field__label', text: '対戦形式' }), format]),
+      fixedError,
       el('label', { className: 'field', for: prefix + '-bestof' }, [el('span', { className: 'field__label', text: '試合の長さ' }), bestOf]),
       setField,
       fixedNote,
-      el('label', { className: 'check' }, [provisional, ' 暫定ルールとして扱う（確定した大会ルールではない）']),
+      opts && opts.detailed ? el('details', { className: 'details', id: prefix + '-rule-details', open: initial.provisional === false ? true : null }, [el('summary', { text: '詳細設定' }), provisionalLabel]) : provisionalLabel,
     ]);
     return {
       node: node,
       value: function () {
         return { format: format.value, bestOf: Number(bestOf.value), setBestOf: format.value === 'sets' ? Number(setBestOf.value) : undefined, provisional: provisional.checked };
       },
+      /** 下書き用: 見えていない欄（1 セットの長さ）も含めた今の入力値 */
+      raw: function () {
+        return { format: format.value, bestOf: Number(bestOf.value), setBestOf: Number(setBestOf.value), provisional: provisional.checked };
+      },
+      setFixedAllowed: function (ok) {
+        fixedAllowed = !!ok && !noFixed;
+        checkFixedAllowed();
+      },
+      valid: function () {
+        return !(format.value === 'fixed' && !fixedAllowed);
+      },
+      focus: function () {
+        format.focus();
+      },
     };
+  }
+
+  /** ruleInputs の raw() の値を、サーバーへ送る rule の形にする */
+  function ruleValue(raw) {
+    return { format: raw.format, bestOf: Number(raw.bestOf), setBestOf: raw.format === 'sets' ? Number(raw.setBestOf) : undefined, provisional: !!raw.provisional };
   }
 
   /* ---------- サーバー呼び出し ---------- */
@@ -301,14 +338,25 @@
       };
       return attempt(!!uncertain);
     }
+    function prepare(action, payload, requestId) {
+      return { action: action, payload: payload || {}, requestId: requestId || newRequestId(), timeoutMs: LONG_ACTIONS[action] ? timeouts.long : timeouts.mutate };
+    }
     return {
       query: function (action, payload) {
         return callOnce({ action: action, payload: payload || {}, timeoutMs: timeouts.query });
       },
+      /**
+       * 書き込みの要求を作る（送らない）。requestId を渡すと、前に送った要求と同じ操作として組み立てる
+       * （結果が分からないまま再読み込みした後の確認用。新しい requestId を発行しない）
+       */
+      prepare: prepare,
+      /** prepare した要求を送る。uncertain = true は「前に送ったが結果が分からない」要求の送り直し */
+      send: function (request, uncertain) {
+        return send(request, !!uncertain);
+      },
       /** 書き込み。結果は上の 3 つのどれか。保存済みのとき data.recovered = true なら、送り直しで確かめられたもの */
       mutate: function (action, payload) {
-        var request = { action: action, payload: payload || {}, requestId: newRequestId(), timeoutMs: LONG_ACTIONS[action] ? timeouts.long : timeouts.mutate };
-        return send(request, false);
+        return send(prepare(action, payload), false);
       },
     };
   }
@@ -324,13 +372,17 @@
    *   #e=EVT-…  … その大会の運営画面（作った本人の Google ログイン、または管理パスワード）
    *   #admin    … 管理者
    *   なし      … 主催者のホーム（Google でログインして、自分の大会の一覧・新しい大会の作成）
-   *   #new      … 主催者のホームを開き、大会の作成欄へ移る（ポータル「トーナメント・リーグ」の作成ボタンから）
+   *   #new      … 大会の作成画面（ポータル「トーナメント・リーグ」の作成ボタンから。ログイン後に開く）
+   *   #new-season / #restore / #sample … 期制リーグの作成・ファイルからの復元・検証用サンプル（ホームの「その他の作成」から）
    * v0.4 までの運営用 URL（#e=…&k=…）の鍵の部分は使わない。
    */
   function parseHash(hash) {
     var h = String(hash || '').replace(/^#/, '');
     if (h === 'admin') return { mode: 'admin' };
-    if (h === 'new') return { mode: 'home', create: true };
+    if (h === 'new') return { mode: 'home', create: true, view: 'new' };
+    if (h === 'new-season') return { mode: 'home', view: 'season' };
+    if (h === 'restore') return { mode: 'home', view: 'restore' };
+    if (h === 'sample') return { mode: 'home', view: 'sample' };
     var out = {};
     h.split('&').forEach(function (pair) {
       var i = pair.indexOf('=');
@@ -506,6 +558,9 @@
     function setBusy(busy) {
       state.busy = busy;
       doc.body.classList.toggle('is-busy', busy);
+      // 保存中の表示は読み上げにも伝える（設定の欄は、その欄の中にも状態を出す）
+      var indicator = doc.getElementById('busy-indicator');
+      if (indicator) indicator.textContent = busy ? '保存中…' : '';
       Array.prototype.forEach.call(root.querySelectorAll('[data-mut]'), function (b) {
         b.disabled = busy || b.getAttribute('data-locked') === '1';
       });
@@ -530,6 +585,8 @@
         if (err.code !== 'AUTH_NOT_CONFIGURED') dropLogin();
         state.authError = err.message;
         state.boot = null;
+        state.bootActor = '';
+        handoff = null;
         render();
         return;
       }
@@ -547,13 +604,17 @@
 
     /** 今の画面（どの大会・どのモード）。応答が届いたときに、送ったときと同じ画面かを確かめる（監査 PR-05） */
     function viewKey() {
-      return state.route.mode + ':' + (state.route.mode === 'event' ? state.route.eventId : state.eventId || '');
+      var eventId = state.route.mode === 'event' ? state.route.eventId : state.eventId || '';
+      // ホームでは、一覧・作成などのどの画面かも含める（作成を送った後に一覧へ戻ったら、遅れて届いた応答で大会の画面へ移らない）
+      return state.route.mode + ':' + eventId + (eventId ? '' : ':' + homeView());
     }
 
     var CREATE_ACTIONS = { createEvent: true, createSampleEvent: true, duplicateEvent: true, restoreEvent: true, createSeasonLeague: true, confirmNextSeason: true };
 
     /** 保存済みの応答を画面に反映する。送った後に別の画面へ移っていたら、その画面は書き換えない */
-    function applyMutation(action, data, okMessage, sentFrom) {
+    function applyMutation(action, data, okMessage, sentFrom, section) {
+      // 保存できた欄（section）だけを確定する。ほかの欄の下書きは残す
+      if (section) sectionSaved(section);
       var moved = viewKey() !== sentFrom;
       var message = okMessage ? (typeof okMessage === 'function' ? okMessage(data) : okMessage) : '';
       if (data && data.recovered) message = (message || '保存しました。') + '（通信が途切れたため送り直して確かめました）';
@@ -568,6 +629,10 @@
         if (message && !data.duplicate) toast('ok', message);
         else if (data.duplicate) toast('ok', '前の送信で保存されていました。');
         warnPublication(data);
+        // 作成の応答に大会の内容が入っていれば、そのまま運営画面に使う（一覧・大会を読み直さない）。
+        // 前の送信で作成済み（duplicate）のときは内容がないので、移った先で大会を 1 回読む
+        if (data.detail && !data.duplicate && state.route.mode !== 'admin') handoff = { eventId: data.eventId, detail: data.detail, actor: actorKey() };
+        if (data.detail) rememberEventSummary(data.detail);
         goTo('#e=' + encodeURIComponent(data.eventId));
         return data;
       }
@@ -581,10 +646,13 @@
         });
       }
       if (data && data.detail) {
-        state.detail = data.detail;
+        setDetail(data.detail);
         state.eventId = data.detail.event.id;
       }
-      if (data && data.storage) state.boot = data;
+      if (data && data.storage) {
+        state.boot = data;
+        state.bootActor = actorKey();
+      }
       if (message) toast('ok', message);
       warnPublication(data);
       render();
@@ -649,19 +717,23 @@
       return Promise.resolve();
     }
 
-    function runMutation(action, sendFn, okMessage, sentFrom) {
+    function runMutation(action, sendFn, okMessage, sentFrom, section) {
       if (state.busy) return Promise.resolve(null);
       setBusy(true);
+      mutationEpoch++;
       return sendFn()
         .then(
           function (data) {
-            return applyMutation(action, data, okMessage, sentFrom);
+            return applyMutation(action, data, okMessage, sentFrom, section);
           },
           function (err) {
             if (err && err.code === 'UNCONFIRMED') {
-              showUnconfirmed(action, err, okMessage, sentFrom);
+              // 欄ごとに保存する設定（S1）: 案内はその欄に出し続ける。送った内容と requestId は残す
+              if (section) sectionUnconfirmed(section, err, sentFrom);
+              else showUnconfirmed(action, err, okMessage, sentFrom);
               return null;
             }
+            if (section) sectionFailed(section, err);
             // 前の画面の操作の失敗は、今の画面を読み直さずに知らせるだけ
             if (viewKey() !== sentFrom && !(err && AUTH_ERRORS[err.code])) {
               toast('error', ((err && err.message) || 'エラーが発生しました。') + '（前の画面の操作）');
@@ -671,7 +743,9 @@
           }
         )
         .then(function (data) {
+          mutationEpoch++;
           setBusy(false);
+          if (section) paintSections();
           return data;
         });
     }
@@ -685,6 +759,509 @@
       return runMutation(action, function () {
         return api.mutate(action, payload);
       }, okMessage, sentFrom);
+    }
+
+    /* ---------- 下書きと保存状態（S1） ----------
+       設定の欄（section）ごとに「サーバーの確定値（baseValues・baseRev）」と「編集中の下書き（values）」を分けて持つ。
+       画面を描き直しても・別の欄を保存しても・読み込み直しても、下書きは消さない。
+       キーは 操作している人（actor）× 大会 × 欄 × 対象。別の人の下書きは表示しない。
+       試合結果（state.drafts）・出場者の並び（state.entrantDraft）・次期の配置（state.ui.seasonDraft）の下書きとは別に持つ。
+       同じタブの再読み込み用に sessionStorage へ写す（パスワード・管理者の鍵・ログインの情報・復元ファイルの中身は入れない） */
+
+    var DRAFT_STORE_KEY = 'tpoc-drafts:v1';
+    var draftMem = {}; // { key: 下書き }。保存していない変更がある欄・結果を確認できていない欄だけ
+    var savedMarks = {}; // この画面を開いてから保存できた欄（「保存済み」の表示用）
+    var sectionPainters = []; // 今の画面に出ている欄の表示を更新する関数（描き直しのたびに作り直す）
+    var persistTimer = null;
+
+    function cloneValue(v) {
+      return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+    }
+
+    /** 入力値の比較用: 文字列は前後の空白と改行コードの違いを無視し、数と数字の文字列は同じとみなす。空の項目は「なし」と同じ */
+    function normValue(v) {
+      if (v === null || v === undefined) return '';
+      if (typeof v === 'string') return v.replace(/\r\n?/g, '\n').trim();
+      if (typeof v === 'number') return String(v);
+      if (Array.isArray(v)) return v.map(normValue);
+      if (typeof v === 'object') {
+        var o = {};
+        Object.keys(v)
+          .sort()
+          .forEach(function (k) {
+            var n = normValue(v[k]);
+            if (n !== '') o[k] = n;
+          });
+        return o;
+      }
+      return v;
+    }
+
+    function sameValue(a, b) {
+      return JSON.stringify(normValue(a)) === JSON.stringify(normValue(b));
+    }
+
+    /** 今この画面を操作している人。下書き・画面用の記憶を分ける単位（ログインしていなければ空） */
+    function actorKey() {
+      if (state.route.mode === 'admin') return state.adminKey ? 'admin' : '';
+      if (state.route.mode === 'event' && staffLogin(state.route.eventId)) return 'staff:' + state.route.eventId;
+      if (state.google) return 'g:' + (String(state.google.email || '').toLowerCase() || 'session-' + String(state.google.session).slice(0, 12));
+      return '';
+    }
+
+    function draftKey(eventId, section, entityId) {
+      return [actorKey(), eventId || 'new', section, entityId || ''].join('|');
+    }
+
+    function persistDrafts(now) {
+      if (persistTimer) {
+        clearTimeout(persistTimer);
+        persistTimer = null;
+      }
+      var write = function () {
+        persistTimer = null;
+        var out = {};
+        Object.keys(draftMem).forEach(function (key) {
+          var d = draftMem[key];
+          out[key] = { actor: d.actor, eventId: d.eventId, section: d.section, entityId: d.entityId, values: d.values, baseValues: d.baseValues, baseRev: d.baseRev === undefined ? null : d.baseRev, pending: d.pending || null, sent: d.pending ? d.sent : null };
+        });
+        storageSet('sessionStorage', DRAFT_STORE_KEY, Object.keys(out).length ? JSON.stringify({ v: 1, drafts: out }) : null);
+      };
+      if (now) write();
+      else persistTimer = setTimeout(write, 250);
+    }
+
+    (function loadDrafts() {
+      var raw = null;
+      try {
+        raw = JSON.parse(storageGet('sessionStorage', DRAFT_STORE_KEY) || 'null');
+      } catch (e) {
+        raw = null;
+      }
+      if (!raw || raw.v !== 1 || !raw.drafts || typeof raw.drafts !== 'object') return;
+      Object.keys(raw.drafts).forEach(function (key) {
+        var d = raw.drafts[key];
+        if (!d || typeof d !== 'object' || !d.values || !d.baseValues || typeof d.actor !== 'string' || !d.actor) return;
+        var p = d.pending && typeof d.pending.action === 'string' && typeof d.pending.requestId === 'string' && d.pending.payload ? d.pending : null;
+        draftMem[key] = {
+          key: key,
+          actor: d.actor,
+          eventId: String(d.eventId || 'new'),
+          section: String(d.section || ''),
+          entityId: String(d.entityId || ''),
+          values: d.values,
+          baseValues: d.baseValues,
+          baseRev: d.baseRev === null ? undefined : d.baseRev,
+          pending: p,
+          sent: p ? d.sent || d.values : null,
+          // 送った後に再読み込みした: 保存できたか分からない。自動では送り直さず、同じ操作（同じ requestId）での確認を案内する
+          saveState: p ? 'unconfirmed' : 'dirty',
+          message: p ? 'ページを読み込み直す前に送った内容が保存されたか、確認できていません。' : '',
+        };
+      });
+    })();
+
+    win.addEventListener('pagehide', function () {
+      persistDrafts(true);
+    });
+
+    function dropDraftsWhere(test) {
+      Object.keys(draftMem).forEach(function (k) {
+        if (test(draftMem[k])) delete draftMem[k];
+      });
+      persistDrafts(true);
+    }
+
+    /** この大会（作成欄は 'new'）の、保存していない変更がある欄の数 */
+    function draftCount(eventId) {
+      var actor = actorKey();
+      return Object.keys(draftMem).filter(function (k) {
+        return draftMem[k].actor === actor && draftMem[k].eventId === eventId;
+      }).length;
+    }
+
+    function paintSections() {
+      sectionPainters.forEach(function (f) {
+        f();
+      });
+      var badge = doc.getElementById('draft-count');
+      if (badge) {
+        var n = state.eventId ? draftCount(state.eventId) : 0;
+        badge.hidden = !n;
+        badge.textContent = n ? '未保存 ' + n : '';
+      }
+    }
+
+    function eventInfoValues(ev) {
+      return { name: ev.name, dateLabel: ev.dateLabel || '', status: ev.status, isPublic: !!ev.isPublic, isFeatured: !!ev.isFeatured, notes: ev.notes || '' };
+    }
+
+    function displayValues(ev) {
+      var cfg = ev.config || {};
+      var rd = cfg.ruleDisplay || {};
+      var str = function (v) {
+        return v === null || v === undefined ? '' : String(v);
+      };
+      return {
+        announcement: cfg.announcement ? cfg.announcement.text : '',
+        category: str(rd.category),
+        startScore: str(rd.startScore),
+        inMode: str(rd.inMode),
+        outMode: str(rd.outMode),
+        bull: str(rd.bull),
+        roundLimit: rd.roundLimit ? String(rd.roundLimit) : '',
+        ruleNote: rd.note || '',
+        pubAffiliation: !!(cfg.publicFields && cfg.publicFields.affiliation),
+        pubRating: !!(cfg.publicFields && cfg.publicFields.rating),
+        autoFinish: !!cfg.autoFinish,
+        timezone: cfg.timezone || 'Asia/Tokyo',
+      };
+    }
+
+    /** 段階の設定の入力値（「形式」タブの 1 段階ぶん）。サーバーの確定値から作る */
+    function stageRaw(st) {
+      var cfg = st.config || {};
+      var type = st.type;
+      var group = type === 'round_robin' || type === 'league' || type === 'swiss';
+      var str = function (v) {
+        return v === null || v === undefined ? '' : String(v);
+      };
+      var v = { name: st.name, rule: { format: st.rule.format || 'legs', bestOf: st.rule.bestOf, setBestOf: st.rule.setBestOf || 5, provisional: st.ruleProvisional !== false } };
+      if (type === 'round_robin' || type === 'league') {
+        v.cycles = cfg.cycles === 2 ? '2' : '1';
+        if (st.feeds && st.feeds.length) v.distribution = cfg.distribution === 'rank' ? 'rank' : 'snake';
+      }
+      if (group) {
+        v.tiebreakers = (cfg.tiebreakers || []).slice();
+        v.usePoints = !!cfg.points;
+        v.pWin = str(cfg.points ? cfg.points.win : 2);
+        v.pDraw = str(cfg.points ? cfg.points.draw : 1);
+        v.pLoss = str(cfg.points ? cfg.points.loss : 0);
+        v.walkoverLegs = cfg.walkoverLegs === 'award' ? 'award' : 'exclude';
+        v.labelsText = Object.keys(cfg.roundLabels || {})
+          .map(function (k) {
+            return k + ': ' + cfg.roundLabels[k];
+          })
+          .join('\n');
+      }
+      if (type === 'swiss') {
+        v.rounds = str(cfg.rounds);
+        v.firstRound = cfg.firstRound === 'random' ? 'random' : 'seed';
+        v.byePoints = str(cfg.byePoints);
+      }
+      if (group || type === 'series') {
+        v.advancement = (cfg.advancement || []).map(function (r) {
+          return { fromRank: r.fromRank, toRank: r.toRank, targetStageId: r.targetStageId };
+        });
+      }
+      if (type === 'series') {
+        v.nights = str(cfg.nights);
+        v.nightPointsText = (cfg.nightPoints || []).join(', ');
+        v.nightDraw = cfg.nightDraw === 'standing' || cfg.nightDraw === 'seed' ? cfg.nightDraw : 'random';
+        v.tiebreakers = (cfg.tiebreakers || []).slice();
+      }
+      if (type === 'single_elimination') {
+        v.thirdPlace = !!cfg.thirdPlace;
+        v.drawMode = cfg.drawMode === 'redraw' ? 'redraw' : 'fixed';
+        v.fixedRounds = str(cfg.fixedRounds);
+        v.avoidSameGroup = !!cfg.avoidSameGroup;
+        v.maxEntrants = cfg.maxEntrants ? String(cfg.maxEntrants) : '';
+        v.roundBestOf = {};
+        eliminationRounds(st).forEach(function (r) {
+          var n = (cfg.roundBestOf || {})[String(r.round)];
+          v.roundBestOf[String(r.round)] = n ? String(n) : '';
+        });
+      }
+      if (type === 'double_elimination') v.grandFinal = cfg.grandFinal === 'single' ? 'single' : 'reset';
+      return v;
+    }
+
+    /** 読み込んだ大会の確定値と、この大会の下書きを突き合わせる（読み込み・保存の応答のたび） */
+    function serverSection(detail, dr) {
+      if (dr.section === 'event') return { values: eventInfoValues(detail.event), rev: detail.event.rev };
+      if (dr.section === 'display') return { values: displayValues(detail.event), rev: detail.event.rev };
+      if (dr.section === 'stage') {
+        var st = detail.stages.filter(function (s) {
+          return s.id === dr.entityId;
+        })[0];
+        return st ? { values: stageRaw(st), rev: st.rev } : null;
+      }
+      return undefined;
+    }
+
+    function reconcileDrafts(detail) {
+      var actor = actorKey();
+      var changed = false;
+      Object.keys(draftMem).forEach(function (key) {
+        var dr = draftMem[key];
+        if (dr.actor !== actor || dr.eventId !== detail.event.id || dr.saveState === 'saving') return;
+        var sv = serverSection(detail, dr);
+        if (sv === undefined) return;
+        changed = true;
+        if (sv === null) {
+          // 対象（段階）がなくなった
+          delete draftMem[key];
+          return;
+        }
+        if (dr.pending) {
+          // 結果を確認できていない送信: 版が進んでいなければまだ分からない（サーバーが処理中のこともある）。同じ操作での確認を待つ
+          if (sv.rev === dr.baseRev) return;
+          if (sameValue(sv.values, dr.sent)) {
+            delete draftMem[key];
+            savedMarks[key] = true;
+            return;
+          }
+          dr.pending = null;
+          dr.sent = null;
+        }
+        if (sameValue(sv.values, dr.values)) {
+          // サーバーの値が下書きと同じになった（保存されていた・別の画面で同じ値にした）
+          delete draftMem[key];
+          savedMarks[key] = true;
+          return;
+        }
+        if (sameValue(sv.values, dr.baseValues)) {
+          // この欄はサーバー側で変わっていない（別の欄の保存で版だけ進んだ）: 下書きの基準の版を進めてよい
+          dr.baseRev = sv.rev;
+          if (dr.saveState === 'conflict' || dr.saveState === 'unconfirmed') dr.saveState = 'dirty';
+          dr.serverValues = null;
+          return;
+        }
+        // この欄が別の画面で変わった: 最新の値と下書きの両方を残して示す。下書きの版だけを進めて上書きはしない
+        dr.serverValues = cloneValue(sv.values);
+        dr.serverRev = sv.rev;
+        dr.saveState = 'conflict';
+        dr.message = '';
+      });
+      if (changed) persistDrafts(true);
+    }
+
+    function setDetail(detail) {
+      state.detail = detail;
+      state.detailAt = Date.now();
+      reconcileDrafts(detail);
+      rememberEventSummary(detail);
+    }
+
+    function sectionSaved(dr) {
+      delete draftMem[dr.key];
+      dr.pending = null;
+      dr.sent = null;
+      dr.saveState = 'idle';
+      dr.message = '';
+      savedMarks[dr.key] = true;
+      persistDrafts(true);
+    }
+
+    /** サーバーが「保存しなかった」と答えた: 入力は残し、理由をその欄に出し続ける */
+    function sectionFailed(dr, err) {
+      dr.pending = null;
+      dr.sent = null;
+      dr.saveState = 'failed';
+      dr.message = (err && err.message) || 'エラーが発生しました。';
+      draftMem[dr.key] = dr;
+      persistDrafts(true);
+    }
+
+    /** 保存できたか確認できない: 入力・送った内容・requestId を残す。元の欄から新しい要求としては送らせない */
+    function sectionUnconfirmed(dr, err, sentFrom) {
+      dr.saveState = 'unconfirmed';
+      dr.message = (err && err.message) || '保存できたか確認できませんでした。';
+      draftMem[dr.key] = dr;
+      persistDrafts(true);
+      toast('error', '保存できたか確認できませんでした。入力した内容は残しています。欄の案内から、同じ操作として確認できます。');
+      if (viewKey() !== sentFrom) return;
+      if (dr.eventId !== 'new' && state.eventId) loadDetail(state.eventId);
+      else render();
+    }
+
+    function sendSection(dr, req) {
+      if (state.busy) return;
+      var request = api.prepare(req.action, req.payload);
+      draftMem[dr.key] = dr;
+      dr.sent = cloneValue(dr.values);
+      // 送った内容と requestId を先に記録する（途中でページを読み込み直しても、同じ操作として確認できるように）
+      dr.pending = { action: req.action, payload: req.payload, requestId: request.requestId, okMessage: typeof req.okMessage === 'string' ? req.okMessage : '' };
+      dr.saveState = 'saving';
+      dr.message = '';
+      delete savedMarks[dr.key];
+      persistDrafts(true);
+      paintSections();
+      runMutation(req.action, function () {
+        return api.send(request, false);
+      }, req.okMessage, viewKey(), dr);
+    }
+
+    /** 結果を確認できていない送信を、同じ操作（同じ requestId）として確かめる */
+    function confirmSection(dr) {
+      if (state.busy || !dr.pending) return;
+      var p = dr.pending;
+      var request = api.prepare(p.action, p.payload, p.requestId);
+      dr.saveState = 'saving';
+      paintSections();
+      runMutation(p.action, function () {
+        return api.send(request, true);
+      }, p.okMessage || '保存しました。', viewKey(), dr);
+    }
+
+    function displayDraftValue(v) {
+      if (v === true) return 'オン';
+      if (v === false) return 'オフ';
+      if (v === null || v === undefined || v === '') return '（空欄）';
+      if (typeof v === 'object') return JSON.stringify(v);
+      return String(v);
+    }
+
+    /**
+     * 設定の 1 つの欄（section）を開く。下書きがあればその値、なければサーバーの確定値（opts.base）で入力欄を作る。
+     * opts: { eventId, section, entityId, base, baseRev, saveLabel, labels: { 項目: 表示名 }, format(key, value) → 表示用の文字列 }
+     * 使い方: sec.values で入力欄を作る → sec.wire(read, build) → sec.fieldset（入力欄の枠）・sec.footer()（状態・保存・取消）を置く
+     */
+    function openSection(opts) {
+      var key = draftKey(opts.eventId, opts.section, opts.entityId);
+      var dr = draftMem[key];
+      if (!dr) {
+        dr = { key: key, actor: actorKey(), eventId: opts.eventId || 'new', section: opts.section, entityId: opts.entityId || '', values: cloneValue(opts.base), baseValues: cloneValue(opts.base), baseRev: opts.baseRev, saveState: 'idle', message: '', pending: null, sent: null };
+      } else {
+        // 後から増えた項目は確定値で補う（下書きにある値は変えない）
+        Object.keys(opts.base).forEach(function (k) {
+          if (dr.values[k] === undefined) dr.values[k] = cloneValue(opts.base[k]);
+          if (dr.baseValues[k] === undefined) dr.baseValues[k] = cloneValue(opts.base[k]);
+        });
+      }
+      var read = null;
+      var build = null;
+      var idBase = 'sec-' + (opts.section + '-' + (opts.entityId || opts.eventId || 'new')).replace(/[^A-Za-z0-9_-]/g, '');
+      var fieldset = el('fieldset', { className: 'section-fields', 'aria-describedby': idBase + '-state' });
+      var status = el('p', { className: 'save-state', id: idBase + '-state', role: 'status', 'aria-live': 'polite' });
+      var extra = el('div', { className: 'save-extra' });
+      var save = el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, id: idBase + '-save', text: opts.saveLabel || '保存' });
+      var cancel = el('button', { className: 'btn btn--ghost', type: 'button', id: idBase + '-cancel', text: '変更を取り消す' });
+      var locked = function () {
+        return dr.saveState === 'saving' || !!dr.pending;
+      };
+      var isDirty = function () {
+        return !sameValue(dr.values, dr.baseValues);
+      };
+      var discard = function () {
+        delete draftMem[key];
+        delete savedMarks[key];
+        persistDrafts(true);
+        render();
+      };
+      var paint = function () {
+        var st = dr.saveState;
+        var dirty = isDirty();
+        var kind = st === 'saving' ? 'saving' : dr.pending ? 'unconfirmed' : st === 'conflict' ? 'conflict' : st === 'failed' && dirty ? 'failed' : dirty ? 'dirty' : savedMarks[key] ? 'saved' : 'idle';
+        fieldset.disabled = locked();
+        status.className = 'save-state save-state--' + kind;
+        status.textContent = {
+          saving: '保存中…',
+          unconfirmed: '保存できたか確認できていません',
+          conflict: '別の画面で更新されました。最新の内容と下書きを確認してください',
+          failed: '保存されませんでした（入力は残しています）: ' + dr.message,
+          dirty: '未保存の変更',
+          saved: '保存済み',
+          idle: '',
+        }[kind];
+        var canSave = dirty && kind !== 'saving' && kind !== 'unconfirmed' && kind !== 'conflict';
+        save.setAttribute('data-locked', canSave ? '0' : '1');
+        save.disabled = state.busy || !canSave;
+        cancel.hidden = !(dirty && (kind === 'dirty' || kind === 'failed'));
+        extra.textContent = '';
+        if (kind === 'unconfirmed') {
+          extra.appendChild(el('p', { className: 'small', text: dr.message + ' 入力欄は、結果が分かるまで変更できません。「同じ操作として確認する」は前の送信と同じ操作として送るので、二重には保存されません。' }));
+          extra.appendChild(
+            el('div', { className: 'btn-row' }, [
+              el('button', { className: 'btn btn--primary', type: 'button', 'data-mut': true, text: '同じ操作として確認する', onClick: function () { confirmSection(dr); } }),
+              dr.eventId !== 'new' ? el('button', { className: 'btn', type: 'button', text: '最新の状態を読み込む', onClick: function () { reloadCurrent(); } }) : null,
+              dr.eventId === 'new' ? confirmButton('下書きを破棄する', '本当に破棄（作成済みかは一覧で確認）', discard) : null,
+            ])
+          );
+        } else if (kind === 'conflict') {
+          var sv = dr.serverValues || {};
+          var keys = Object.keys(dr.values).filter(function (k) {
+            return !sameValue(dr.values[k], sv[k]);
+          });
+          var fmt = function (k, v) {
+            return opts.format ? opts.format(k, v) : displayDraftValue(v);
+          };
+          extra.appendChild(
+            el('ul', { className: 'plain-list conflict-list' }, keys.map(function (k) {
+              return el('li', { text: ((opts.labels || {})[k] || k) + ' — 最新: ' + fmt(k, sv[k]) + ' ／ 下書き: ' + fmt(k, dr.values[k]) });
+            }))
+          );
+          extra.appendChild(
+            el('div', { className: 'btn-row' }, [
+              el('button', { className: 'btn', type: 'button', text: '最新の内容を使う（下書きを破棄）', onClick: discard }),
+              el('button', {
+                className: 'btn',
+                type: 'button',
+                text: '下書きを残して編集を続ける',
+                onClick: function () {
+                  // 最新の値を確かめたうえで、下書きを最新の版の上の変更として扱う（保存は、あらためて保存ボタンを押したときだけ）
+                  dr.baseValues = cloneValue(dr.serverValues);
+                  dr.baseRev = dr.serverRev;
+                  dr.serverValues = null;
+                  dr.saveState = 'dirty';
+                  persistDrafts(true);
+                  render();
+                },
+              }),
+            ])
+          );
+        }
+      };
+      var touch = function () {
+        if (locked() || !read) return;
+        dr.values = read();
+        sec.values = dr.values;
+        delete savedMarks[key];
+        if (isDirty()) {
+          draftMem[key] = dr;
+          if (dr.saveState !== 'conflict') dr.saveState = 'dirty';
+        } else if (dr.saveState !== 'conflict') {
+          delete draftMem[key];
+          dr.saveState = 'idle';
+        }
+        dr.message = '';
+        persistDrafts(false);
+        paintSections();
+      };
+      fieldset.addEventListener('input', touch);
+      fieldset.addEventListener('change', touch);
+      cancel.addEventListener('click', discard);
+      sectionPainters.push(paint);
+      var sec = {
+        draft: dr,
+        values: dr.values,
+        fieldset: fieldset,
+        status: status,
+        extra: extra,
+        save: save,
+        cancel: cancel,
+        touch: touch,
+        paint: paint,
+        /** read() → 今の入力値。build(values, draft) → { action, payload, okMessage }（送れないときは null） */
+        wire: function (readFn, buildFn) {
+          read = readFn;
+          build = buildFn;
+          paint();
+        },
+        submit: function (e) {
+          if (e) e.preventDefault();
+          if (state.busy || locked() || dr.saveState === 'conflict' || !read) return;
+          dr.values = read();
+          sec.values = dr.values;
+          if (!isDirty()) return paint();
+          var req = build(dr.values, dr);
+          if (req) sendSection(dr, req);
+        },
+        footer: function () {
+          return el('div', { className: 'save-footer' }, [status, extra, el('div', { className: 'btn-row' }, [save, cancel])]);
+        },
+      };
+      return sec;
     }
 
     /* ---------- ログイン ---------- */
@@ -771,6 +1348,11 @@
         .query('login', { idToken: token })
         .then(function (data) {
           setGoogle({ session: data.session, email: data.email || claims.email || '', expiresAt: data.expiresAt });
+          // 別の Google アカウントの下書きは、この端末に残さない（同じアカウントの再ログインでは残す）
+          var me = actorKey();
+          dropDraftsWhere(function (d) {
+            return d.actor.indexOf('g:') === 0 && d.actor !== me;
+          });
           state.authError = '';
           state.noAccess = false;
           toast('ok', (data.email || 'Google') + ' でログインしました。');
@@ -820,6 +1402,11 @@
     function logout() {
       var isStaff = state.route.mode === 'event' && !!staffLogin(state.route.eventId);
       var login = isStaff ? staffLogin(state.route.eventId) : state.google;
+      // ログアウトした人の下書きは、この端末に残さない
+      var leaving = actorKey();
+      dropDraftsWhere(function (d) {
+        return d.actor === leaving;
+      });
       if (isStaff) setStaff(state.route.eventId, null);
       else setGoogle(null);
       try {
@@ -828,6 +1415,9 @@
         /* Google のライブラリがなくてもログアウトできる */
       }
       state.boot = null;
+      state.bootActor = '';
+      state.bootStale = false;
+      handoff = null;
       state.detail = null;
       state.eventId = '';
       state.noAccess = false;
@@ -893,31 +1483,73 @@
       loadBoot();
     });
 
-    /* ---------- 読み込み ---------- */
+    /* ---------- 読み込み（S3: 受け取り済みの内容を使い、画面の移動での待ちを減らす） ----------
+       画面用の記憶（一覧 state.boot・開いている大会 state.detail）は、操作している人（actor）ごと。
+       サーバーへの保存の元にはしない（保存は毎回サーバーが権限と版を確かめる）。ログアウト・権限のエラーで捨てる */
+
+    var bootFlight = null; // 読み込み中の一覧（同じ人の読み込みが重なったら 1 回にまとめる）
+    var detailFlight = null; // 読み込み中の大会
+    var mutationEpoch = 0; // 保存のたびに進める（保存の前に始めた読み込みを、保存後の読み込みに使い回さない）
+    var handoff = null; // 作成の応答で受け取った大会の内容（運営画面へ移るときに 1 回だけ使う）
 
     function loggedIn() {
       return !!currentAuth();
     }
 
+    /** 同じ人（Google でログインした主催者）の一覧を読み込み済み: 画面を移るたびに一覧を読み直さなくてよい */
+    function isWarm() {
+      var b = state.boot;
+      if (!b || !state.bootActor || state.bootActor !== actorKey()) return false;
+      if (state.route.mode !== 'home' && state.route.mode !== 'event') return false;
+      var st = b.storage || {};
+      return !!(b.role && b.role.kind === 'google' && st.configured && st.accessible && st.initialized && !needsLink(b));
+    }
+
     function loadBoot() {
+      if (state.route.mode === 'invalid') {
+        // URL が正しくない: 案内を出すだけ（サーバーには問い合わせない）
+        render();
+        return Promise.resolve();
+      }
       if (!loggedIn() && state.route.mode !== 'home') {
         // 管理者の鍵・ログインがまだない: 入力・ログインの画面を出す（大会の存在はサーバーに問い合わせない）
         render();
         return Promise.resolve();
       }
-      return api
+      var actor = actorKey();
+      if (bootFlight && bootFlight.actor === actor) return bootFlight.promise;
+      var flight = { actor: actor };
+      var done = function () {
+        if (bootFlight === flight) bootFlight = null;
+        // 読み込み中にログインが変わった: 前の人の一覧で今の画面を書き換えない
+        return actorKey() === actor;
+      };
+      flight.promise = api
         .query('bootstrap')
         .then(function (data) {
+          if (!done()) return;
           if (needsLink(data)) return linkAccount().then(loadBoot);
           state.boot = data;
+          state.bootActor = actor;
+          state.bootStale = false;
           state.authError = '';
           if (state.route.mode === 'event') return loadEventFirst(state.route.eventId);
           render();
         })
         .catch(function (err) {
+          if (!done()) return;
           if (err && AUTH_ERRORS[err.code]) return handleError(err);
+          if (state.boot && state.bootStale) {
+            // 前回取得した一覧は残す（取得できなかったことを知らせる）
+            state.bootStale = false;
+            toast('error', '一覧を更新できませんでした（' + ((err && err.message) || '通信エラー') + '）。前回取得した一覧を表示しています。');
+            render();
+            return;
+          }
           showLoadFailure(err, loadBoot);
         });
+      bootFlight = flight;
+      return flight.promise;
     }
 
     /** 最初の読み込みに失敗した・応答がなかったとき: 待ち続けずに理由と「再読み込み」を出す（監査 PR-05） */
@@ -956,25 +1588,59 @@
         });
     }
 
+    /** 大会の内容を読む。同じ人・同じ大会の読み込みが重なったら 1 回にまとめる（保存をまたいでは使い回さない） */
+    function fetchDetail(eventId) {
+      var key = actorKey() + '|' + eventId;
+      if (detailFlight && detailFlight.key === key && detailFlight.epoch === mutationEpoch) return detailFlight.promise;
+      var flight = { key: key, epoch: mutationEpoch };
+      var clear = function () {
+        if (detailFlight === flight) detailFlight = null;
+      };
+      flight.promise = api.query('eventDetail', { eventId: eventId }).then(
+        function (detail) {
+          clear();
+          return detail;
+        },
+        function (err) {
+          clear();
+          throw err;
+        }
+      );
+      detailFlight = flight;
+      return flight.promise;
+    }
+
+    var detailSeq = 0;
+
+    /** 応答が届いたとき、送ったときと同じ大会・同じ人の画面のままか（別の大会へ移った後の遅い応答で画面を戻さない） */
+    function stillOn(eventId, actor, seq) {
+      var current = state.route.mode === 'event' ? state.route.eventId : state.eventId;
+      return seq === detailSeq && current === eventId && actorKey() === actor;
+    }
+
     /** 大会の運営画面を開く（ログインしているが権限がない場合は、管理パスワードの入力を案内する） */
     function loadEventFirst(eventId) {
+      var seq = ++detailSeq;
+      var actor = actorKey();
       state.eventId = eventId;
-      return api
-        .query('eventDetail', { eventId: eventId })
+      return fetchDetail(eventId)
         .then(function (detail) {
-          state.detail = detail;
+          if (!stillOn(eventId, actor, seq)) return;
+          setDetail(detail);
           state.noAccess = false;
           state.editing = {};
           render();
         })
         .catch(function (err) {
+          if (!stillOn(eventId, actor, seq)) return;
           if (err && err.code === 'NOT_FOUND') {
             state.noAccess = true;
             state.detail = null;
+            forgetEventSummary(eventId);
             render();
             return;
           }
-          if (err && !AUTH_ERRORS[err.code] && !state.detail && state.eventId === eventId) {
+          if (err && !AUTH_ERRORS[err.code] && !state.detail) {
             return showLoadFailure(err, function () {
               return loadEventFirst(eventId);
             });
@@ -983,31 +1649,77 @@
         });
     }
 
-    var detailSeq = 0;
     function loadDetail(eventId) {
       var seq = ++detailSeq;
-      return api
-        .query('eventDetail', { eventId: eventId })
+      var actor = actorKey();
+      state.detailRefreshing = true;
+      return fetchDetail(eventId)
         .then(function (detail) {
           // 読み込み中に別の大会へ移った・より新しい読み込みがあった: 古い応答で画面を戻さない（監査 PR-05）
-          var current = state.route.mode === 'event' ? state.route.eventId : state.eventId;
-          if (seq !== detailSeq || (current && current !== eventId)) return;
-          state.detail = detail;
+          if (!stillOn(eventId, actor, seq)) return;
+          state.detailRefreshing = false;
+          setDetail(detail);
           state.eventId = eventId;
           state.editing = {};
           render();
         })
         .catch(function (err) {
-          var current = state.route.mode === 'event' ? state.route.eventId : state.eventId;
-          if (seq !== detailSeq || (current && current !== eventId)) return;
+          if (!stillOn(eventId, actor, seq)) return;
+          state.detailRefreshing = false;
           // まだ何も表示していない大会の読み込みが失敗した: 待ち続けずに「再読み込み」を出す。表示中の内容は残して知らせるだけ
           if (err && !AUTH_ERRORS[err.code] && !state.detail) {
             return showLoadFailure(err, function () {
               return loadDetail(eventId);
             });
           }
+          if (state.detail) render();
           return handleError(err);
         });
+    }
+
+    /** 一覧の記憶（state.boot.events）に、開いた・保存した大会の今の内容を写す（次に一覧へ戻ったときにすぐ見せる分。戻ったら読み直す） */
+    function rememberEventSummary(d) {
+      var b = state.boot;
+      if (!b || !b.events || state.bootActor !== actorKey() || !d || !d.event) return;
+      var ev = d.event;
+      var prev = b.events.filter(function (x) {
+        return x.id === ev.id;
+      })[0];
+      var next = {
+        id: ev.id,
+        name: ev.name,
+        dateLabel: ev.dateLabel,
+        status: ev.status,
+        isPublic: ev.isPublic,
+        isFeatured: ev.isFeatured,
+        isSample: prev ? prev.isSample : !!ev.isSample,
+        playerCount: d.players ? d.players.length : prev ? prev.playerCount : 0,
+        matchCount: d.progress ? d.progress.total : prev ? prev.matchCount : 0,
+        finalCount: d.progress ? d.progress.final : prev ? prev.finalCount : 0,
+        updatedAt: new Date().toISOString(),
+        staffPasswordSet: ev.staffPasswordSet,
+        role: ev.role,
+      };
+      if (prev) {
+        // 開いただけでは並び（更新の新しい順）を変えない
+        var changed = ['name', 'dateLabel', 'status', 'isPublic', 'isFeatured', 'playerCount', 'matchCount', 'finalCount'].some(function (k) {
+          return prev[k] !== next[k];
+        });
+        if (!changed) next.updatedAt = prev.updatedAt;
+        Object.keys(next).forEach(function (k) {
+          if (next[k] !== undefined) prev[k] = next[k];
+        });
+      } else {
+        b.events.unshift(next);
+      }
+    }
+
+    function forgetEventSummary(eventId) {
+      var b = state.boot;
+      if (!b || !b.events) return;
+      b.events = b.events.filter(function (x) {
+        return x.id !== eventId;
+      });
     }
 
     /** 管理者はその場で開く（URL は #admin のまま）。主催者はその大会の運営画面の URL へ */
@@ -1030,41 +1742,90 @@
       }
       state.eventId = '';
       state.detail = null;
+      state.ui.adminView = 'list';
+      state.bootStale = !!state.boot;
       render();
       loadBoot();
     }
 
     function goTo(hash) {
-      if (win.location.hash === hash || (!hash && !win.location.hash)) {
-        state.route = parseHash(hash);
-        resetView();
-        render();
-        loadBoot();
+      var same = win.location.hash === hash || (!hash && !win.location.hash);
+      if (!same && hash) {
+        // hashchange で applyRoute が呼ばれる
+        win.location.hash = hash;
         return;
       }
-      if (hash) win.location.hash = hash;
-      else win.history.pushState(null, '', win.location.pathname + win.location.search);
-      if (!hash) {
-        state.route = parseHash('');
-        resetView();
-        render();
-        loadBoot();
-      }
+      if (!same) win.history.pushState(null, '', win.location.pathname + win.location.search);
+      applyRoute(parseHash(hash));
     }
 
     function resetView() {
       state.boot = null;
+      state.bootActor = '';
+      state.bootStale = false;
       state.detail = null;
       state.eventId = '';
       state.noAccess = false;
       state.authError = '';
       state.tab = 'progress';
+      state.ui.moreOpen = false;
+      savedMarks = {};
+      detailSeq++;
+    }
+
+    /**
+     * 画面を移る。同じ人の一覧を読み込み済みなら、一覧を読み直さずに移る:
+     *   一覧 → 大会   … 大会の内容だけを読む（権限はその読み込みでサーバーが確かめる）
+     *   作成 → 大会   … 作成の応答で受け取った内容をそのまま使う（追加の読み込みなし）
+     *   大会 → 一覧   … 手元の一覧をすぐに出し、裏で 1 回読み直す
+     * ログイン前・ログインが変わった・管理者・スタッフ・紐付けが必要なときは、従来どおり一覧から確かめ直す
+     */
+    function applyRoute(route) {
+      state.route = route;
+      var take = handoff;
+      handoff = null;
+      if (!isWarm()) {
+        resetView();
+        render();
+        loadBoot();
+        return;
+      }
+      detailSeq++;
+      state.noAccess = false;
+      state.authError = '';
+      state.tab = 'progress';
+      state.ui.moreOpen = false;
+      state.detailRefreshing = false;
+      savedMarks = {};
+      if (route.mode === 'event') {
+        state.eventId = route.eventId;
+        state.editing = {};
+        if (take && take.eventId === route.eventId && take.actor === actorKey()) {
+          setDetail(take.detail);
+          render();
+          return;
+        }
+        state.detail = null;
+        render();
+        loadEventFirst(route.eventId);
+        return;
+      }
+      state.eventId = '';
+      state.detail = null;
+      var list = homeView() === 'list';
+      state.bootStale = list;
+      render();
+      if (list) loadBoot();
     }
 
     win.addEventListener('hashchange', function () {
-      state.route = parseHash(win.location.hash);
-      resetView();
-      render();
+      applyRoute(parseHash(win.location.hash));
+    });
+
+    /* ページに戻ってきたとき（別のタブ・アプリから）: 一覧を表示中なら読み直す。入力中の画面は書き換えない */
+    doc.addEventListener('visibilitychange', function () {
+      if (doc.visibilityState !== 'visible' || state.busy || state.eventId || !isWarm() || homeView() !== 'list') return;
+      state.bootStale = true;
       loadBoot();
     });
 
@@ -1072,8 +1833,17 @@
 
     function render() {
       // 描き直しで入力中の欄のフォーカスが外れないよう、id のある要素は描き直し後に戻す
-      var active = doc.activeElement && doc.activeElement.id && root.contains(doc.activeElement) ? doc.activeElement.id : '';
+      var activeNode = doc.activeElement && doc.activeElement.id && root.contains(doc.activeElement) ? doc.activeElement : null;
+      var active = activeNode ? activeNode.id : '';
+      var caret = null;
+      try {
+        if (activeNode && typeof activeNode.selectionStart === 'number') caret = [activeNode.selectionStart, activeNode.selectionEnd];
+      } catch (e) {
+        caret = null;
+      }
+      var scrollY = win.pageYOffset || 0;
       renderInner();
+      if (win.pageYOffset !== scrollY && typeof win.scrollTo === 'function') win.scrollTo(win.pageXOffset || 0, scrollY);
       // #new: 作成欄を 1 回だけ見せる（ログイン後の最初の表示で）
       if (state.route.create && !state.createShown && state.boot && state.boot.role.kind === 'google' && !state.eventId) {
         var nameInput = doc.getElementById('new-name');
@@ -1086,12 +1856,20 @@
       }
       if (active) {
         var again = doc.getElementById(active);
-        if (again && !again.disabled) again.focus();
+        if (again && !again.disabled) {
+          again.focus();
+          try {
+            if (caret && typeof again.setSelectionRange === 'function') again.setSelectionRange(caret[0], caret[1]);
+          } catch (e) {
+            /* 数値・日付などの欄は入力位置を戻せない */
+          }
+        }
       }
     }
 
     function renderInner() {
       batchUi = null;
+      sectionPainters = [];
       root.textContent = '';
       renderWho();
       var revoke = renderRevokeNotice();
@@ -1263,189 +2041,319 @@
       return panel;
     }
 
-    /** 大会作成フォーム（Google でログインした主催者と管理者） */
+    /** 作成欄の初期値（アプリの既定値。shared/formats.js の FORMAT_DEFAULTS） */
+    function createDefaults() {
+      var D = global.FORMAT_DEFAULTS || {};
+      return {
+        name: '',
+        date: '',
+        organizer: '',
+        template: global.DEFAULT_FORMAT_ID || (FORMATS[0] && FORMATS[0].id) || 'robin',
+        rule: { format: 'legs', bestOf: 5, setBestOf: 5, provisional: true },
+        groups: String(D.groups || 4),
+        advance: String(D.advance || 2),
+        groups2: String(D.groups2 || 2),
+        advance2: String(D.advance2 || 2),
+        divisions: String(D.divisions || 1),
+        playoff: String(D.playoff || 4),
+        playoffOptional: '0',
+        nights: String(D.nights || 16),
+        swissRounds: String(D.swissRounds || 5),
+        nightPoints: (D.nightPoints || [5, 3, 2, 0]).join(', '),
+        pWin: '2',
+        pDraw: '1',
+        pLoss: '0',
+        thirdPlace: false,
+        cycles: '1',
+        grandFinal: 'reset',
+        expected: '16',
+      };
+    }
+
+    /** 固定 Leg 数（引き分けあり）で作れる形式か。勝ち抜き戦の段階を含む形式は作成時にサーバーが拒否する */
+    function fixedLegsAllowed(x) {
+      if (x.template === 'robin' || x.template === 'league') return true;
+      return x.template === 'swiss' && Number(x.playoffOptional) === 0;
+    }
+
+    /** 3 位決定戦を選べるか（スイス式で決勝トーナメントを行わないときは、入れる先がない） */
+    function thirdPlaceAllowed(x) {
+      var f = formatById(x.template);
+      if (!f || f.fields.indexOf('thirdPlace') === -1) return false;
+      return !(x.template === 'swiss' && Number(x.playoffOptional) === 0);
+    }
+
+    /** 作成欄の入力値を createEvent へ送る形にする。選んだ形式で使う項目だけを入れる（前に選んでいた形式の値は送らない） */
+    function createPayload(x) {
+      var f = formatById(x.template) || { fields: [] };
+      var has = function (k) {
+        return f.fields.indexOf(k) !== -1;
+      };
+      var p = { name: x.name, dateLabel: x.date, organizerName: x.organizer, template: x.template, rule: ruleValue(x.rule), thirdPlace: thirdPlaceAllowed(x) ? !!x.thirdPlace : false };
+      if (has('groups')) p.groupCount = Number(x.groups);
+      if (has('advance')) p.advanceCount = Number(x.advance);
+      if (has('groups2')) p.groupCount2 = Number(x.groups2);
+      if (has('advance2')) p.advanceCount2 = Number(x.advance2);
+      if (has('cycles')) p.cycles = Number(x.cycles);
+      if (has('divisions')) p.divisions = Number(x.divisions);
+      if (has('points')) p.points = { win: Number(x.pWin), draw: Number(x.pDraw), loss: Number(x.pLoss) };
+      if (has('playoff')) p.playoff = Number(x.playoff);
+      else if (has('playoffOptional')) p.playoff = Number(x.playoffOptional);
+      if (has('nights')) p.nights = Number(x.nights);
+      if (has('nightPoints')) p.nightPoints = String(x.nightPoints).split(/[,、\s]+/).filter(Boolean).map(Number);
+      if (has('swissRounds')) p.swissRounds = Number(x.swissRounds);
+      if (has('grandFinal')) p.grandFinal = x.grandFinal;
+      return p;
+    }
+
+    function ruleSummaryText(r) {
+      var n = Number(r.bestOf);
+      var text = r.format === 'fixed' ? '固定 ' + n + ' Legs（引き分けあり）' : r.format === 'sets' ? 'セット制・先に ' + legsToWin(n) + ' セット（各セット先に ' + legsToWin(Number(r.setBestOf)) + ' Leg）' : '先に ' + legsToWin(n) + ' Leg（Best of ' + n + '）';
+      return text + (r.provisional ? '・暫定' : '');
+    }
+
+    /**
+     * 大会の作成画面（Google でログインした主催者と管理者）。入力は下書きとして残し、確認用のまとめを同じ画面に出す。
+     * 基本情報 → 形式 → 人数・進行 → 1 試合のルール → 作成内容（まとめ）→ 作成
+     */
     function createForms() {
-      var wrap = el('div', { className: 'stack' });
-      var name = el('input', { className: 'input', id: 'new-name', required: true, maxlength: 80 });
-      var date = el('input', { className: 'input', id: 'new-date', maxlength: 40, placeholder: '例: 2026/11/03' });
-      var organizer = el('input', { className: 'input', id: 'new-organizer', maxlength: 40, placeholder: '例: 〇〇ダーツ部（任意・非公開）' });
-      // 形式のプルダウン: 基本 → 上級の順（shared/formats.js の並び。新しい大会の初期選択は「予選ロビン → 決勝トーナメント」）
-      var template = el('select', { className: 'input', id: 'new-template' }, [
-        el('optgroup', { label: '基本' }, FORMATS.filter(function (f) { return f.group === 'basic'; }).map(function (f) {
-          return el('option', { value: f.id, text: f.label, selected: f.id === global.DEFAULT_FORMAT_ID ? true : null });
-        })),
-        el('optgroup', { label: '上級' }, FORMATS.filter(function (f) { return f.group === 'advanced'; }).map(function (f) {
-          return el('option', { value: f.id, text: f.label });
-        })),
-      ]);
-      var formatInfo = el('div', { className: 'format-info', 'aria-live': 'polite' });
-      var rule = ruleInputs('new', { format: 'legs', bestOf: 5, setBestOf: 5, provisional: true });
+      var sec = openSection({ eventId: 'new', section: 'create', base: createDefaults(), saveLabel: 'この内容で大会を作成' });
+      var v = sec.values;
+      var name = el('input', { className: 'input', id: 'new-name', required: true, maxlength: 80, value: v.name });
+      var date = el('input', { className: 'input', id: 'new-date', maxlength: 40, placeholder: '例: 2026/11/03', value: v.date });
+      var organizer = el('input', { className: 'input', id: 'new-organizer', maxlength: 40, placeholder: '例: 〇〇ダーツ部', value: v.organizer });
+      // 形式: 基本 → その他の順（shared/formats.js の並び）。新しい大会の初期選択は「予選ロビン → 決勝トーナメント」
+      var radios = [];
+      var choice = function (f) {
+        var input = el('input', { type: 'radio', name: 'new-template', id: 'new-template-' + f.id, value: f.id, checked: f.id === v.template });
+        radios.push(input);
+        return el('label', { className: 'format-choice', for: 'new-template-' + f.id }, [
+          input,
+          el('span', { className: 'format-choice__body' }, [el('span', { className: 'format-choice__label', text: f.label }), f.flow !== f.label ? el('span', { className: 'format-choice__flow', text: f.flow }) : null]),
+        ]);
+      };
+      var basic = FORMATS.filter(function (f) { return f.group === 'basic'; });
+      var advanced = FORMATS.filter(function (f) { return f.group !== 'basic'; });
+      var templateValue = function () {
+        var on = radios.filter(function (r) { return r.checked; })[0];
+        return on ? on.value : v.template;
+      };
+      var advancedChosen = advanced.some(function (f) { return f.id === v.template; });
+      var moreFormats = advanced.length
+        ? el('details', { className: 'details', id: 'new-format-more', open: advancedChosen || state.ui.createMoreOpen ? true : null }, [el('summary', { text: 'その他の形式（' + advanced.length + '）' }), el('div', { className: 'format-choices' }, advanced.map(choice))])
+        : null;
+      if (moreFormats) {
+        moreFormats.addEventListener('toggle', function () {
+          state.ui.createMoreOpen = moreFormats.open;
+        });
+      }
+      var basicChoices = el('div', { className: 'format-choices', role: 'radiogroup', 'aria-label': '大会の形式' }, basic.map(choice));
+      var formatInfo = el('p', { className: 'muted small', id: 'new-format-info', 'aria-live': 'polite' });
+      var rule = ruleInputs('new', v.rule, { detailed: true });
       var num = function (id, value, min, max) {
         return el('input', { className: 'input input--short', id: id, type: 'number', min: min, max: max, value: String(value), inputmode: 'numeric' });
       };
-      var D = global.FORMAT_DEFAULTS || {};
+      var cyclesSel = el('select', { className: 'input input--short', id: 'new-cycles' }, [el('option', { value: '1', text: '1 回', selected: String(v.cycles) !== '2' ? true : null }), el('option', { value: '2', text: '2 回', selected: String(v.cycles) === '2' ? true : null })]);
       var inputs = {
-        groups: num('new-groups', D.groups || 4, 1, 16),
-        advance: num('new-advance', D.advance || 2, 1, 16),
-        groups2: num('new-groups2', D.groups2 || 2, 1, 16),
-        advance2: num('new-advance2', D.advance2 || 2, 1, 16),
-        divisions: num('new-divisions', D.divisions || 1, 1, 16),
-        playoff: num('new-playoff', D.playoff || 4, 2, 64),
-        playoffOptional: num('new-playoff-opt', 0, 0, 64),
-        nights: num('new-nights', D.nights || 16, 1, 30),
-        swissRounds: num('new-swiss-rounds', D.swissRounds || 5, 1, 15),
-        nightPoints: el('input', { className: 'input', id: 'new-night-points', value: (D.nightPoints || [5, 3, 2, 0]).join(', '), 'aria-describedby': 'new-night-points-help' }),
-        pWin: num('new-p-win', 2, -99, 99),
-        pDraw: num('new-p-draw', 1, -99, 99),
-        pLoss: num('new-p-loss', 0, -99, 99),
-        thirdPlace: el('input', { type: 'checkbox', id: 'new-third' }),
-        cycles: el('select', { className: 'input input--short', id: 'new-cycles' }, [el('option', { value: '1', text: '1 回' }), el('option', { value: '2', text: '2 回' })]),
+        groups: num('new-groups', v.groups, 1, 16),
+        advance: num('new-advance', v.advance, 1, 16),
+        groups2: num('new-groups2', v.groups2, 1, 16),
+        advance2: num('new-advance2', v.advance2, 1, 16),
+        divisions: num('new-divisions', v.divisions, 1, 16),
+        playoff: num('new-playoff', v.playoff, 2, 64),
+        playoffOptional: num('new-playoff-opt', v.playoffOptional, 0, 64),
+        nights: num('new-nights', v.nights, 1, 30),
+        swissRounds: num('new-swiss-rounds', v.swissRounds, 1, 15),
+        nightPoints: el('input', { className: 'input', id: 'new-night-points', value: v.nightPoints, 'aria-describedby': 'new-night-points-help' }),
+        pWin: num('new-p-win', v.pWin, -99, 99),
+        pDraw: num('new-p-draw', v.pDraw, -99, 99),
+        pLoss: num('new-p-loss', v.pLoss, -99, 99),
+        thirdPlace: el('input', { type: 'checkbox', id: 'new-third', checked: !!v.thirdPlace }),
+        cycles: cyclesSel,
         grandFinal: el('select', { className: 'input', id: 'new-gf' }, [
-          el('option', { value: 'reset', text: '敗者側の選手が勝ったら、もう 1 試合（リセット）' }),
-          el('option', { value: 'single', text: '1 試合のみ（勝者側の選手もここで負けたら 1 敗で敗退）' }),
+          el('option', { value: 'reset', text: '敗者側の選手が勝ったら、もう 1 試合（リセット）', selected: v.grandFinal !== 'single' ? true : null }),
+          el('option', { value: 'single', text: '1 試合のみ（勝者側の選手もここで負けたら 1 敗で敗退）', selected: v.grandFinal === 'single' ? true : null }),
         ]),
       };
-      var expected = num('new-expected', 16, 2, 128);
+      var expected = num('new-expected', v.expected, 2, 128);
+      var pointField = function (label, input) {
+        return el('label', { className: 'field field--inline', for: input.id }, [el('span', { className: 'field__label', text: label }), input]);
+      };
+      var advanceLabel = el('span', { className: 'field__label', text: '各組の通過順位' });
+      // 形式ごとの設定。使わない欄は隠したうえで無効にする（隠れた欄の値が送信の検査や送る内容に混ざらないように）
       var fields = {
-        groups: field('ロビンのグループ数', inputs.groups),
-        advance: field('各組の何位までが次へ進むか（通過順位）', inputs.advance),
-        groups2: field('2 次ロビンの組の数', inputs.groups2),
-        advance2: field('2 次ロビンの各組から決勝へ進む順位', inputs.advance2),
-        cycles: field('総当たりの回数', inputs.cycles),
-        divisions: field('ディビジョン数（リーグの組）', inputs.divisions),
-        points: el('div', { className: 'field' }, [
-          el('span', { className: 'field__label', text: '勝ち点（勝ち・引き分け・負け。アプリの既定値は 2・1・0）' }),
-          el('div', { className: 'row row--tight' }, [el('span', { text: '勝ち' }), inputs.pWin, el('span', { text: '引き分け' }), inputs.pDraw, el('span', { text: '負け' }), inputs.pLoss]),
-        ]),
-        playoff: field('プレーオフ（決勝）に進む人数', inputs.playoff),
-        playoffOptional: field('決勝トーナメントに進む人数（0 = 行わない）', inputs.playoffOptional),
-        nights: field('節の数（各節で小トーナメント）', inputs.nights),
-        nightPoints: el('div', { className: 'field' }, [
-          el('span', { className: 'field__label', text: '各節の順位ポイント（優勝, 準優勝, 準決勝敗退, 準々決勝敗退 …）' }),
-          inputs.nightPoints,
-          el('span', { className: 'muted small', id: 'new-night-points-help', text: '例は 8 人の節: 優勝 5・準優勝 3・準決勝敗退 2・初戦敗退 0。到達した順位の総点で、勝った回戦の点を足し合わせません。' }),
-        ]),
-        swissRounds: field('スイス式の回戦数', inputs.swissRounds),
-        grandFinal: field('グランドファイナルの方式', inputs.grandFinal),
-        thirdPlace: el('label', { className: 'check' }, [inputs.thirdPlace, ' トーナメントに 3 位決定戦を入れる']),
+        groups: { node: field('グループ数', inputs.groups), controls: [inputs.groups] },
+        advance: { node: el('label', { className: 'field' }, [advanceLabel, inputs.advance]), controls: [inputs.advance] },
+        groups2: { node: field('2 次ロビンの組の数', inputs.groups2), controls: [inputs.groups2] },
+        advance2: { node: field('2 次ロビンの通過順位', inputs.advance2), controls: [inputs.advance2] },
+        cycles: { node: field('総当たり', inputs.cycles), controls: [inputs.cycles] },
+        divisions: { node: field('ディビジョン数', inputs.divisions), controls: [inputs.divisions] },
+        points: {
+          node: el('fieldset', { className: 'fieldset' }, [el('legend', { text: '勝ち点' }), el('div', { className: 'row row--tight' }, [pointField('勝ち', inputs.pWin), pointField('引き分け', inputs.pDraw), pointField('負け', inputs.pLoss)])]),
+          controls: [inputs.pWin, inputs.pDraw, inputs.pLoss],
+        },
+        playoff: { node: field('プレーオフに進む人数', inputs.playoff), controls: [inputs.playoff] },
+        playoffOptional: { node: field('決勝トーナメントに進む人数（0 = 行わない）', inputs.playoffOptional), controls: [inputs.playoffOptional] },
+        nights: { node: field('節の数', inputs.nights), controls: [inputs.nights] },
+        nightPoints: {
+          node: el('div', { className: 'field field--full' }, [
+            el('label', { className: 'field__label', for: 'new-night-points', text: '各節の順位ポイント（優勝, 準優勝, 準決勝敗退 …）' }),
+            inputs.nightPoints,
+            el('span', { className: 'muted small', id: 'new-night-points-help', text: '到達した順位の総点です（勝った回戦の点を足し合わせません）。' }),
+          ]),
+          controls: [inputs.nightPoints],
+        },
+        swissRounds: { node: field('回戦数', inputs.swissRounds), controls: [inputs.swissRounds] },
+        grandFinal: { node: el('div', { className: 'field field--full' }, [el('label', { className: 'field__label', for: 'new-gf', text: 'グランドファイナル' }), inputs.grandFinal]), controls: [inputs.grandFinal] },
+        thirdPlace: { node: el('label', { className: 'check' }, [inputs.thirdPlace, ' 3 位決定戦']), controls: [inputs.thirdPlace] },
       };
-      var estimateBox = el('div', { className: 'estimate', 'aria-live': 'polite' });
-      var paramsOf = function () {
-        var f = formatById(template.value);
+      var read = function () {
         return {
-          players: Number(expected.value),
-          groups: Number(inputs.groups.value),
-          advance: Number(inputs.advance.value),
-          groups2: Number(inputs.groups2.value),
-          advance2: Number(inputs.advance2.value),
-          cycles: Number(inputs.cycles.value),
-          divisions: Number(inputs.divisions.value),
-          playoff: f && f.fields.indexOf('playoffOptional') !== -1 ? Number(inputs.playoffOptional.value) : Number(inputs.playoff.value),
-          nights: Number(inputs.nights.value),
-          swissRounds: Number(inputs.swissRounds.value),
+          name: name.value,
+          date: date.value,
+          organizer: organizer.value,
+          template: templateValue(),
+          rule: rule.raw(),
+          groups: inputs.groups.value,
+          advance: inputs.advance.value,
+          groups2: inputs.groups2.value,
+          advance2: inputs.advance2.value,
+          divisions: inputs.divisions.value,
+          playoff: inputs.playoff.value,
+          playoffOptional: inputs.playoffOptional.value,
+          nights: inputs.nights.value,
+          swissRounds: inputs.swissRounds.value,
+          nightPoints: inputs.nightPoints.value,
+          pWin: inputs.pWin.value,
+          pDraw: inputs.pDraw.value,
+          pLoss: inputs.pLoss.value,
           thirdPlace: inputs.thirdPlace.checked,
+          cycles: inputs.cycles.value,
           grandFinal: inputs.grandFinal.value,
+          expected: expected.value,
         };
       };
+      var summary = el('dl', { className: 'summary', id: 'new-summary' });
+      var estimateBox = el('div', { className: 'estimate', id: 'new-estimate', 'aria-live': 'polite' });
       var sync = function () {
-        var f = formatById(template.value);
-        formatInfo.textContent = '';
-        if (f) {
-          formatInfo.appendChild(el('p', { className: 'format-info__flow', text: '流れ: ' + f.flow }));
-          formatInfo.appendChild(el('p', { className: 'muted small', text: f.description }));
-        }
+        var x = read();
+        var f = formatById(x.template);
+        var has = function (k) {
+          return !!f && f.fields.indexOf(k) !== -1;
+        };
+        formatInfo.textContent = f ? f.description : '';
         Object.keys(fields).forEach(function (k) {
-          fields[k].hidden = !f || f.fields.indexOf(k) === -1;
+          var show = k === 'thirdPlace' ? thirdPlaceAllowed(x) : has(k);
+          fields[k].node.hidden = !show;
+          fields[k].controls.forEach(function (c) {
+            c.disabled = !show;
+          });
         });
-        fields.advance.firstChild.textContent = f && f.id === 'robin_ab' ? 'A トーナメントへ進む順位（各組の上位何位まで。残りは B へ）' : '各組の何位までが次へ進むか（通過順位）';
+        advanceLabel.textContent = f && f.id === 'robin_ab' ? 'A トーナメントへ進む順位（残りは B へ）' : '各組の通過順位';
+        rule.setFixedAllowed(fixedLegsAllowed(x));
+        var est = f && typeof global.estimateFormat_ === 'function'
+          ? global.estimateFormat_(f.id, {
+              players: Number(x.expected),
+              groups: Number(x.groups),
+              advance: Number(x.advance),
+              groups2: Number(x.groups2),
+              advance2: Number(x.advance2),
+              cycles: Number(x.cycles),
+              divisions: Number(x.divisions),
+              playoff: has('playoffOptional') ? Number(x.playoffOptional) : Number(x.playoff),
+              nights: Number(x.nights),
+              swissRounds: Number(x.swissRounds),
+              thirdPlace: thirdPlaceAllowed(x) && x.thirdPlace,
+              grandFinal: x.grandFinal,
+            })
+          : null;
+        summary.textContent = '';
+        var row = function (label, node) {
+          summary.appendChild(el('dt', { text: label }));
+          summary.appendChild(el('dd', null, [node]));
+        };
+        row('大会名', el('span', { className: x.name.trim() ? '' : 'muted', text: x.name.trim() || '（未入力）' }));
+        if (x.date.trim()) row('開催日', el('span', { text: x.date.trim() }));
+        row('大会の構成', el('span', { className: 'flow', text: f ? f.flow : '' }));
+        row('1 試合のルール', el('span', { text: ruleSummaryText(x.rule) }));
+        row('作成時の公開設定', el('span', { text: '非公開・準備中' }));
         estimateBox.textContent = '';
-        if (!f || typeof global.estimateFormat_ !== 'function') return;
-        var est = global.estimateFormat_(f.id, paramsOf());
-        estimateBox.appendChild(el('p', { className: 'estimate__total', text: '予定試合数: ' + est.total + (est.max !== est.total ? '〜' + est.max : '') + ' 試合（' + expected.value + ' 人の場合）' }));
-        estimateBox.appendChild(el('ul', { className: 'plain-list' }, est.stages.map(function (st) {
-          return el('li', { text: st.name + ': ' + st.matches + ' 試合' + (st.note ? '（' + st.note + '）' : '') });
-        })));
-        est.problems.forEach(function (msg) {
-          estimateBox.appendChild(el('p', { className: 'error small', text: '成り立たない条件: ' + msg }));
-        });
-        est.notes.forEach(function (msg) {
-          estimateBox.appendChild(el('p', { className: 'muted small', text: msg }));
-        });
+        if (est) {
+          estimateBox.appendChild(el('p', { className: 'estimate__total', text: '予定 ' + est.total + (est.max !== est.total ? '〜' + est.max : '') + ' 試合（' + x.expected + ' 人の場合）' }));
+          estimateBox.appendChild(el('ul', { className: 'plain-list' }, est.stages.map(function (st) {
+            return el('li', { text: st.name + ': ' + st.matches + ' 試合' + (st.note ? '（' + st.note + '）' : '') });
+          })));
+          // 想定人数は見積もり専用。この人数で成り立たなくても、人数が未確定の大会として作成はできる
+          est.problems.forEach(function (msg) {
+            estimateBox.appendChild(el('p', { className: 'estimate__warn small', text: 'この人数では成り立ちません: ' + msg }));
+          });
+          est.notes.forEach(function (msg) {
+            estimateBox.appendChild(el('p', { className: 'muted small', text: msg }));
+          });
+        }
       };
-      [template, expected].concat(Object.keys(inputs).map(function (k) { return inputs[k]; })).forEach(function (x) {
-        x.addEventListener('change', sync);
-        x.addEventListener('input', sync);
+      sec.fieldset.addEventListener('input', sync);
+      sec.fieldset.addEventListener('change', sync);
+      var section = function (title, id, children) {
+        return el('section', { className: 'panel create-section', 'aria-labelledby': id }, [el('h3', { id: id, text: title })].concat(children));
+      };
+      [
+        section('基本情報', 'new-h-basic', [
+          el('div', { className: 'form-grid' }, [field('大会名', name), field('開催日', date)]),
+          el('details', { className: 'details', id: 'new-basic-details', open: v.organizer ? true : null }, [el('summary', { text: '詳細' }), field('主催者名（任意・非公開）', organizer)]),
+        ]),
+        section('大会の形式', 'new-h-format', [basicChoices, moreFormats, formatInfo]),
+        section('人数・進行', 'new-h-flow', [
+          el('div', { className: 'form-grid form-grid--tight' }, [
+            field('想定人数（見積もり用）', expected),
+            fields.groups.node,
+            fields.advance.node,
+            fields.groups2.node,
+            fields.advance2.node,
+            fields.divisions.node,
+            fields.cycles.node,
+            fields.swissRounds.node,
+            fields.playoff.node,
+            fields.playoffOptional.node,
+            fields.nights.node,
+            fields.nightPoints.node,
+            fields.grandFinal.node,
+          ]),
+          fields.points.node,
+          fields.thirdPlace.node,
+        ]),
+        section('1 試合のルール', 'new-h-rule', [rule.node]),
+      ].forEach(function (n) {
+        sec.fieldset.appendChild(n);
+      });
+      sec.fieldset.className += ' create-main';
+      sec.cancel.textContent = '入力をリセット';
+      sec.wire(read, function (x) {
+        if (!rule.valid()) {
+          rule.focus();
+          toast('error', 'この形式では固定 Leg 数は使えません。Leg 制またはセット制を選び直してください。');
+          return null;
+        }
+        return { action: 'createEvent', payload: createPayload(x), okMessage: '大会を作成しました。' };
       });
       sync();
-      var parseNightPoints = function () {
-        return inputs.nightPoints.value.split(/[,、\s]+/).filter(Boolean).map(Number);
-      };
-      wrap.appendChild(
-        el('section', { className: 'panel' }, [
-          el('h2', { text: '大会を作成' }),
-          el('form', {
-            className: 'form',
-            onSubmit: function (e) {
-              e.preventDefault();
-              var f = formatById(template.value) || { fields: [] };
-              var has = function (k) {
-                return f.fields.indexOf(k) !== -1;
-              };
-              mutate('createEvent', {
-                name: name.value,
-                dateLabel: date.value,
-                organizerName: organizer.value,
-                template: template.value,
-                rule: rule.value(),
-                groupCount: Number(inputs.groups.value),
-                advanceCount: Number(inputs.advance.value),
-                groupCount2: has('groups2') ? Number(inputs.groups2.value) : undefined,
-                advanceCount2: has('advance2') ? Number(inputs.advance2.value) : undefined,
-                thirdPlace: inputs.thirdPlace.checked,
-                cycles: Number(inputs.cycles.value),
-                divisions: has('divisions') ? Number(inputs.divisions.value) : undefined,
-                points: has('points') ? { win: Number(inputs.pWin.value), draw: Number(inputs.pDraw.value), loss: Number(inputs.pLoss.value) } : undefined,
-                playoff: has('playoff') ? Number(inputs.playoff.value) : has('playoffOptional') ? Number(inputs.playoffOptional.value) : undefined,
-                nights: has('nights') ? Number(inputs.nights.value) : undefined,
-                nightPoints: has('nightPoints') ? parseNightPoints() : undefined,
-                swissRounds: has('swissRounds') ? Number(inputs.swissRounds.value) : undefined,
-                grandFinal: has('grandFinal') ? inputs.grandFinal.value : undefined,
-              }, '大会を作成しました。');
-            },
-          }, [
-            field('大会名', name),
-            field('開催日（表示用の文字列）', date),
-            field('主催者名（任意。管理者だけが見ます）', organizer),
-            field('大会の形式（作成後に「形式」タブで段階の追加・変更ができます）', template),
-            formatInfo,
-            rule.node,
-            fields.groups,
-            fields.advance,
-            fields.groups2,
-            fields.advance2,
-            fields.cycles,
-            fields.divisions,
-            fields.points,
-            fields.playoff,
-            fields.playoffOptional,
-            fields.nights,
-            fields.nightPoints,
-            fields.swissRounds,
-            fields.grandFinal,
-            fields.thirdPlace,
-            el('div', { className: 'estimate-panel' }, [field('想定の参加人数（予定試合数の見積もり用。保存しません）', expected), estimateBox]),
-            el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '大会を作成' }),
-          ]),
-        ])
-      );
-      wrap.appendChild(seasonCreatePanel());
-      wrap.appendChild(restorePanel());
+      var aside = el('aside', { className: 'panel create-summary', 'aria-labelledby': 'new-h-summary' }, [
+        el('h3', { id: 'new-h-summary', text: '作成内容' }),
+        summary,
+        estimateBox,
+        el('p', { className: 'muted small', text: '人数は見積もり用で、保存しません。段階の追加・変更は作成後に「形式」でできます。' }),
+        sec.footer(),
+      ]);
+      return el('form', { className: 'create-layout', id: 'create-form', onSubmit: sec.submit }, [sec.fieldset, aside]);
+    }
+
+    function samplePanel() {
       var publishSample = el('input', { type: 'checkbox', id: 'sample-publish' });
-      wrap.appendChild(
-        el('section', { className: 'panel' }, [
-          el('h2', { text: '検証用サンプル' }),
-          el('p', { className: 'muted', text: '16 名（サンプル選手01〜16）・4 人 × 4 グループのロビン、Best of 5 Legs（暫定）。確定・進行中・未開始の試合を含みます。' }),
-          el('label', { className: 'check' }, [publishSample, ' 作成後すぐ閲覧画面に公開する']),
+      return el('section', { className: 'panel' }, [
+        el('h3', { text: '検証用サンプル' }),
+        el('p', { className: 'muted', text: '動作の確認用の大会です。16 名（サンプル選手01〜16）・4 人 × 4 グループのロビン、Best of 5 Legs（暫定）。確定・進行中・未開始の試合を含みます。' }),
+        el('label', { className: 'check' }, [publishSample, ' 作成後すぐ閲覧画面に公開する']),
+        el('div', { className: 'btn-row' }, [
           el('button', {
             className: 'btn',
             type: 'button',
@@ -1455,9 +2363,8 @@
               mutate('createSampleEvent', { publish: publishSample.checked }, 'サンプル大会を作成しました。');
             },
           }),
-        ])
-      );
-      return wrap;
+        ]),
+      ]);
     }
 
     function formatById(id) {
@@ -1538,8 +2445,8 @@
           return '復元しました（選手 ' + r.restored.players + '・試合 ' + r.restored.matches + '）。';
         });
       });
-      return el('section', { className: 'panel' }, [
-        el('h2', { text: '保存したファイルから復元' }),
+      return el('section', { className: 'panel', id: 'restore-panel' }, [
+        el('h3', { text: '保存したファイルから復元' }),
         el('p', { className: 'muted small', text: '「出力・印刷」タブ（または大会の削除の前）に保存した JSON ファイルから、新しい大会を作ります。管理パスワード・共同主催者・変更履歴は復元しません。ファイルの内容に不正があるときは何も登録しません。' }),
         field('ファイル', file),
         info,
@@ -1548,6 +2455,26 @@
         field('新しい大会の名前', nameInput),
         el('div', { className: 'btn-row' }, [button]),
       ]);
+    }
+
+    /* ---------- ホーム（大会の一覧）と作成の入口 ---------- */
+
+    var HOME_VIEWS = { new: { hash: '#new', title: '大会を作成' }, season: { hash: '#new-season', title: '期制リーグを作成' }, restore: { hash: '#restore', title: 'ファイルから復元' }, sample: { hash: '#sample', title: '検証用サンプル' } };
+
+    /** ホームで開いている画面: 一覧（list）・作成（new）・期制リーグの作成（season）・復元（restore）・検証用サンプル（sample） */
+    function homeView() {
+      var view = state.route.mode === 'admin' ? state.ui.adminView : state.route.view;
+      return HOME_VIEWS[view] ? view : 'list';
+    }
+
+    /** 管理者は URL を変えずに切り替える（#admin のまま）。主催者は URL を変える（ブラウザの「戻る」で一覧へ戻れる） */
+    function openHomeView(view) {
+      if (state.route.mode === 'admin') {
+        state.ui.adminView = view;
+        render();
+        return;
+      }
+      goTo(HOME_VIEWS[view] ? HOME_VIEWS[view].hash : '');
     }
 
     /** event-card の一覧（主催者のホーム・管理者の一覧で共通） */
@@ -1567,42 +2494,115 @@
               admin && ev.ownerEmail && ev.ownerLinked === false ? el('span', { className: 'badge', text: ev.ownerClaims ? '主催者の承認待ち ' + ev.ownerClaims : '主催者の紐付け待ち' }) : null,
             ]),
           ]),
-          el('button', { className: 'btn', type: 'button', text: '開く', onClick: function () { openEvent(ev.id); } }),
+          el('button', { className: 'btn', type: 'button', text: '開く', 'aria-label': ev.name + ' を開く', onClick: function () { openEvent(ev.id); } }),
         ]);
       });
     }
 
-    /** Google でログインした主催者のホーム: 自分の大会の一覧と新しい大会の作成 */
-    function renderHome() {
+    /** 一覧の絞り込み（名前・状態）と並び（更新が新しい順）。通信はしない */
+    function filterEvents(events, query, status) {
+      var q = String(query || '').normalize('NFKC').toLowerCase().trim();
+      return events
+        .map(function (ev, i) {
+          return { ev: ev, i: i };
+        })
+        .filter(function (x) {
+          if (status && status !== 'all' && x.ev.status !== status) return false;
+          return !q || String(x.ev.name || '').normalize('NFKC').toLowerCase().indexOf(q) !== -1;
+        })
+        .sort(function (a, b) {
+          var ua = String(a.ev.updatedAt || '');
+          var ub = String(b.ev.updatedAt || '');
+          return ua === ub ? a.i - b.i : ua < ub ? 1 : -1;
+        })
+        .map(function (x) {
+          return x.ev;
+        });
+    }
+
+    /** 大会の一覧: 上に作成ボタン・検索・状態の絞り込み。作成欄は一覧に載せない（大会が増えても作成までの距離が変わらない） */
+    function eventListPanel(title, admin) {
       var boot = state.boot;
-      var wrap = el('div', { className: 'stack' });
-      var list = el('section', { className: 'panel' }, [el('h2', { text: 'あなたの大会' })]);
+      var ui = state.ui.home || (state.ui.home = { query: '', status: 'all' });
+      var panel = el('section', { className: 'panel', id: 'event-list' });
+      var more = el('details', { className: 'menu', id: 'create-more' }, [
+        el('summary', { className: 'btn', text: 'その他の作成' }),
+        el('div', { className: 'menu__items' }, [
+          el('button', { className: 'btn btn--ghost', type: 'button', text: '期制リーグを作成', onClick: function () { openHomeView('season'); } }),
+          el('button', { className: 'btn btn--ghost', type: 'button', text: 'ファイルから復元', onClick: function () { openHomeView('restore'); } }),
+          el('button', { className: 'btn btn--ghost', type: 'button', text: '検証用サンプル', onClick: function () { openHomeView('sample'); } }),
+        ]),
+      ]);
+      panel.appendChild(
+        el('div', { className: 'list-head' }, [
+          el('h2', { text: title }),
+          el('div', { className: 'btn-row' }, [el('button', { className: 'btn btn--primary', type: 'button', id: 'open-create', text: '大会を作成', onClick: function () { openHomeView('new'); } }), more]),
+        ])
+      );
+      if (draftCount('new')) panel.appendChild(el('p', { className: 'save-state save-state--dirty', text: '作成途中の入力が残っています（「大会を作成」から続けられます）。' }));
       var link = boot.role.link;
       // v0.9: Google が持ち主を保証しないアドレスの大会・招待は、主催者（招待）・管理者（大会）の承認を待つ
-      if (link && link.pending) list.appendChild(el('p', { className: 'notice', text: 'このアカウントの確認待ちが ' + link.pending + ' 件あります（大会の主催者・共同主催者としての紐付け）。承認されるとここに表示されます。招待した人（大会の主催者）または管理者に、ログインしたことを伝えてください。' }));
-      if (!boot.events.length) list.appendChild(el('p', { className: 'muted', text: 'まだ大会がありません。下のフォームから作成してください。' }));
-      eventCards(boot.events, false).forEach(function (n) {
-        list.appendChild(n);
+      if (!admin && link && link.pending) panel.appendChild(el('p', { className: 'notice', text: 'このアカウントの確認待ちが ' + link.pending + ' 件あります（大会の主催者・共同主催者としての紐付け）。承認されるとここに表示されます。招待した人（大会の主催者）または管理者に、ログインしたことを伝えてください。' }));
+      if (state.bootStale) panel.appendChild(el('p', { className: 'muted small', id: 'list-refreshing', role: 'status', text: '前回取得した一覧を表示しています。最新の状態を確認中…' }));
+      if (!boot.events.length) {
+        panel.appendChild(el('p', { className: 'muted', text: 'まだ大会がありません。「大会を作成」から作成してください。' }));
+        return panel;
+      }
+      var search = el('input', { className: 'input', id: 'home-search', type: 'search', value: ui.query, placeholder: '大会名で探す', autocomplete: 'off' });
+      var statusChips = el('div', { className: 'chips', role: 'group', 'aria-label': '状態で絞り込む' });
+      var count = el('p', { className: 'muted small', id: 'home-count', role: 'status' });
+      var listBox = el('div', { className: 'event-cards' });
+      var draw = function () {
+        var shown = filterEvents(boot.events, ui.query, ui.status);
+        listBox.textContent = '';
+        eventCards(shown, admin).forEach(function (n) {
+          listBox.appendChild(n);
+        });
+        count.textContent = shown.length === boot.events.length ? boot.events.length + ' 件（更新が新しい順）' : boot.events.length + ' 件中 ' + shown.length + ' 件を表示';
+        if (!shown.length) listBox.appendChild(el('p', { className: 'muted', text: '条件に合う大会がありません。' }));
+        Array.prototype.forEach.call(statusChips.childNodes, function (c) {
+          c.setAttribute('aria-pressed', String(c.getAttribute('data-status') === ui.status));
+        });
+      };
+      [['all', 'すべて']].concat(Object.keys(EVENT_STATUS_LABEL).map(function (k) { return [k, EVENT_STATUS_LABEL[k]]; })).forEach(function (o) {
+        statusChips.appendChild(el('button', { type: 'button', className: 'chip', 'data-status': o[0], text: o[1], onClick: function () { ui.status = o[0]; draw(); } }));
       });
-      wrap.appendChild(list);
-      Array.prototype.slice.call(createForms().childNodes).forEach(function (n) {
-        wrap.appendChild(n);
+      search.addEventListener('input', function () {
+        ui.query = search.value;
+        draw();
       });
-      return wrap;
+      panel.appendChild(el('div', { className: 'list-tools' }, [el('label', { className: 'visually-hidden', for: 'home-search', text: '大会名で探す' }), search, statusChips]));
+      panel.appendChild(count);
+      panel.appendChild(listBox);
+      draw();
+      return panel;
+    }
+
+    /** 作成・期制リーグ・復元・検証用サンプルの各画面（一覧とは別の画面） */
+    function renderHomeSub(view) {
+      var admin = state.route.mode === 'admin';
+      var body = view === 'new' ? createForms() : view === 'season' ? seasonCreatePanel() : view === 'restore' ? restorePanel() : samplePanel();
+      return el('div', { className: 'stack' }, [
+        el('div', { className: 'event-head' }, [
+          el('button', { className: 'btn btn--ghost', type: 'button', id: 'back-to-list', text: admin ? '← 大会一覧' : '← あなたの大会', onClick: function () { openHomeView('list'); } }),
+          el('h2', { className: 'event-head__title', text: HOME_VIEWS[view].title }),
+        ]),
+        body,
+      ]);
+    }
+
+    /** Google でログインした主催者のホーム: 自分の大会の一覧と、作成の入口 */
+    function renderHome() {
+      var view = homeView();
+      if (view !== 'list') return renderHomeSub(view);
+      return el('div', { className: 'stack' }, [eventListPanel('あなたの大会', false)]);
     }
 
     function renderAdminHome() {
       var boot = state.boot;
-      var wrap = el('div', { className: 'stack' });
-      var list = el('section', { className: 'panel' }, [el('h2', { text: 'すべての大会（管理者）' })]);
-      if (!boot.events.length) list.appendChild(el('p', { className: 'muted', text: 'まだ大会がありません。' }));
-      eventCards(boot.events, true).forEach(function (n) {
-        list.appendChild(n);
-      });
-      wrap.appendChild(list);
-      Array.prototype.slice.call(createForms().childNodes).forEach(function (n) {
-        wrap.appendChild(n);
-      });
+      var view = homeView();
+      if (view !== 'list') return renderHomeSub(view);
+      var wrap = el('div', { className: 'stack' }, [eventListPanel('すべての大会（管理者）', true)]);
       var viewerUrl = el('input', { className: 'input', id: 'viewer-url', value: boot.viewerUrl, placeholder: 'https://<ユーザー名>.github.io/<リポジトリ名>/' });
       wrap.appendChild(
         el('section', { className: 'panel' }, [
@@ -1677,31 +2677,66 @@
     function renderEvent() {
       var wrap = el('div', { className: 'stack' });
       var d = state.detail;
+      var drafts = d ? draftCount(d.event.id) : 0;
       wrap.appendChild(
         el('div', { className: 'event-head' }, [
-          state.route.mode === 'admin' || (state.google && !staffLogin(state.eventId)) ? el('button', { className: 'btn btn--ghost', type: 'button', text: state.route.mode === 'admin' ? '← 大会一覧' : '← あなたの大会', onClick: goHome }) : null,
+          state.route.mode === 'admin' || (state.google && !staffLogin(state.eventId)) ? el('button', { className: 'btn btn--ghost', type: 'button', id: 'back-to-list', text: state.route.mode === 'admin' ? '← 大会一覧' : '← あなたの大会', onClick: goHome }) : null,
           el('h2', { className: 'event-head__title', text: d ? d.event.name : '読み込み中…' }),
+          d ? el('span', { className: 'badge', text: EVENT_STATUS_LABEL[d.event.status] || d.event.status }) : null,
           d ? el('span', { className: 'badge ' + (d.event.isPublic ? 'badge--on' : ''), text: d.event.isPublic ? '公開中' : '非公開' }) : null,
+          d ? el('span', { className: 'badge badge--draft', id: 'draft-count', hidden: !drafts, text: drafts ? '未保存 ' + drafts : '' }) : null,
+          d
+            ? el('span', { className: 'event-head__fetch muted small' }, [
+                el('span', { id: 'detail-at', role: 'status', text: state.detailRefreshing ? '更新中…' : '取得 ' + formatDateTime(new Date(state.detailAt || Date.now()).toISOString()) }),
+                el('button', { className: 'btn btn--ghost btn--small', type: 'button', id: 'detail-refresh', text: '最新に更新', onClick: function () { loadDetail(d.event.id); render(); } }),
+              ])
+            : null,
         ])
       );
       if (!d) return wrap;
-      var tabs = el('nav', { className: 'tabs', 'aria-label': '大会メニュー' });
-      TABS.forEach(function (t) {
-        if (t.when && !t.when(d)) return;
-        tabs.appendChild(
-          el('button', {
-            type: 'button',
-            className: 'tab',
-            'aria-current': state.tab === t.id ? 'page' : null,
-            text: t.label,
-            onClick: function () {
-              state.tab = t.id;
-              render();
-            },
-          })
-        );
+      var visible = TABS.filter(function (t) {
+        return !t.when || t.when(d);
       });
-      wrap.appendChild(tabs);
+      if (!visible.some(function (t) { return t.id === state.tab; })) state.tab = 'progress';
+      var current = visible.filter(function (t) { return t.id === state.tab; })[0];
+      var tabButton = function (t) {
+        return el('button', {
+          type: 'button',
+          id: 'tab-' + t.id,
+          className: 'tab ' + (t.primary ? 'tab--primary' : 'tab--secondary'),
+          'aria-current': state.tab === t.id ? 'page' : null,
+          text: t.label,
+          onClick: function () {
+            state.tab = t.id;
+            state.ui.moreOpen = false;
+            render();
+          },
+        });
+      };
+      var orderOf = function (node, id) {
+        // PC の左メニューでは、主なメニューとその他を元の順に並べる（CSP のため style 属性ではなく CSSOM で指定）
+        node.style.order = String(TABS.map(function (t) { return t.id; }).indexOf(id));
+        return node;
+      };
+      // スマートフォン: 進行状況・試合結果・選手・その他。「その他」から残りの全メニューへ（大会設定まで 2 操作）。PC: 左に全部を並べる
+      var more = el('button', {
+        type: 'button',
+        id: 'tab-more',
+        className: 'tab tab--more',
+        'aria-expanded': String(!!state.ui.moreOpen),
+        'aria-controls': 'tabs-more',
+        'aria-current': current && !current.primary ? 'true' : null,
+        text: 'その他',
+        'aria-label': current && !current.primary ? 'その他（' + current.label + ' を表示中）' : 'その他',
+        onClick: function () {
+          state.ui.moreOpen = !state.ui.moreOpen;
+          render();
+        },
+      });
+      var moreBox = el('div', { className: 'tabs__more' + (state.ui.moreOpen ? ' is-open' : ''), id: 'tabs-more' }, visible.filter(function (t) { return !t.primary; }).map(function (t) { return orderOf(tabButton(t), t.id); }));
+      more.style.order = '99';
+      moreBox.style.order = '100'; // スマートフォンでは、開いた一覧をメニューの行の下に出す
+      var tabs = el('nav', { className: 'tabs', 'aria-label': '大会メニュー' }, visible.filter(function (t) { return t.primary; }).map(function (t) { return orderOf(tabButton(t), t.id); }).concat([more, moreBox]));
       var body = {
         progress: renderProgress,
         matches: renderMatches,
@@ -1714,7 +2749,8 @@
         history: renderHistory,
         season: d.season ? renderSeason : renderProgress,
       }[state.tab]();
-      wrap.appendChild(body);
+      wrap.appendChild(el('div', { className: 'event-layout' }, [tabs, el('div', { className: 'event-body' }, [current && !current.primary ? el('p', { className: 'event-body__title', text: current.label }) : null, body])]));
+      wrap.setAttribute('data-tab', state.tab);
       return wrap;
     }
 
@@ -1817,6 +2853,20 @@
       var d = state.detail;
       var p = d.progress;
       var panel = el('section', { className: 'panel' }, [el('h3', { text: '進行状況' })]);
+      // 作成した直後: 次にすること（選手の登録 → 組み合わせ）へ進むボタンを出す。判定は読み込んだ大会の内容だけで行う
+      var next = null;
+      if (!d.players.length) {
+        next = el('div', { className: 'next-step', id: 'next-step' }, [
+          el('p', { text: 'まだ選手がいません。まず選手を登録してください。' }),
+          el('button', { className: 'btn btn--primary', type: 'button', text: '選手を登録', onClick: function () { state.tab = 'players'; render(); } }),
+        ]);
+      } else if (!p.total) {
+        next = el('div', { className: 'next-step', id: 'next-step' }, [
+          el('p', { text: '選手 ' + d.players.length + ' 名を登録済みです。次は組み合わせを作成します。' }),
+          el('button', { className: 'btn btn--primary', type: 'button', text: '組み合わせへ', onClick: function () { state.tab = 'pairing'; render(); } }),
+        ]);
+      }
+      if (next) panel.appendChild(next);
       var pct = p.total ? Math.round((p.final / p.total) * 100) : 0;
       // CSP（style-src 'self'）では style 属性の文字列が無効になるため、幅は CSSOM で設定する
       var bar = el('div', { className: 'meter__bar' });
@@ -2900,218 +3950,283 @@
       return wrap;
     }
 
+    /** 段階の入力値（stageRaw の形）を、updateStage へ送る形にする。進出確定後に変えられない項目は送らない */
+    function stagePayload(st, v, rev) {
+      var cfg = st.config;
+      var type = st.type;
+      var group = type === 'round_robin' || type === 'league' || type === 'swiss';
+      var numbers = function (text) {
+        return String(text || '').split(/[,、\s]+/).filter(Boolean).map(Number);
+      };
+      var p = { stageId: st.id, rev: rev, name: v.name, rule: ruleValue(v.rule) };
+      if (type === 'round_robin' || type === 'league') {
+        p.cycles = Number(v.cycles);
+        if (st.feeds.length) p.distribution = v.distribution;
+      }
+      if (group) {
+        if (!cfg.advanced) {
+          p.tiebreakers = v.tiebreakers.slice();
+          p.points = v.usePoints ? { win: Number(v.pWin), draw: Number(v.pDraw), loss: Number(v.pLoss) } : null;
+          p.walkoverLegs = v.walkoverLegs;
+        }
+        p.roundLabels = parseLabels(v.labelsText);
+      }
+      if (type === 'swiss') {
+        p.firstRound = v.firstRound;
+        p.byePoints = Number(v.byePoints);
+        if (!cfg.advanced) p.rounds = Number(v.rounds);
+      }
+      if ((group || type === 'series') && !cfg.advanced) p.advancement = cloneValue(v.advancement);
+      if (type === 'series') {
+        p.nightDraw = v.nightDraw;
+        if (!cfg.advanced) {
+          p.nights = Number(v.nights);
+          p.nightPoints = numbers(v.nightPointsText);
+          p.tiebreakers = v.tiebreakers.slice();
+        }
+      }
+      if (type === 'single_elimination') {
+        p.thirdPlace = !!v.thirdPlace;
+        p.drawMode = v.drawMode;
+        p.fixedRounds = Number(v.fixedRounds) || 0;
+        p.avoidSameGroup = !!v.avoidSameGroup;
+        p.maxEntrants = Number(v.maxEntrants) || 0;
+        var map = {};
+        Object.keys(v.roundBestOf || {}).forEach(function (r) {
+          if (v.roundBestOf[r]) map[r] = Number(v.roundBestOf[r]);
+        });
+        p.roundBestOf = map;
+      }
+      if (type === 'double_elimination') p.grandFinal = v.grandFinal;
+      return p;
+    }
+
     function renderStageEditor(st, index) {
       var d = state.detail;
       var type = st.type;
       var group = type === 'round_robin' || type === 'league' || type === 'swiss';
       var bracket = type === 'single_elimination' || type === 'double_elimination' || type === 'series' || type === 'promotion';
       var cfg = st.config;
-      var name = el('input', { className: 'input', value: st.name, maxlength: 40, 'aria-label': '段階の名前' });
-      var rule = ruleInputs('stage-' + st.id, { format: st.rule.format, bestOf: st.rule.bestOf, setBestOf: st.rule.setBestOf || 5, provisional: st.ruleProvisional }, { noFixed: bracket });
-      var parts = [
-        el('div', { className: 'stage-head' }, [
-          el('span', { className: 'badge badge--on', text: index + 1 + '. ' + (STAGE_TYPE_LABEL[type] || type) }),
-          st.hasResults ? el('span', { className: 'badge', text: '結果あり' }) : null,
-          cfg.advanced ? el('span', { className: 'badge', text: '進出確定済み' }) : null,
-        ]),
-        field('段階の名前', name),
-        rule.node,
-      ];
-      var collectors = [];
-      var add = function (node, collect) {
-        parts.push(node);
-        if (collect) collectors.push(collect);
+      var sec = openSection({
+        eventId: d.event.id,
+        section: 'stage',
+        entityId: st.id,
+        base: stageRaw(st),
+        baseRev: st.rev,
+        saveLabel: 'この段階を保存',
+        labels: { name: '段階の名前', rule: '対戦形式', cycles: '総当たりの回数', distribution: '進出者の配り方', tiebreakers: '順位の決め方', usePoints: '勝ち点を使う', pWin: '勝ちの点', pDraw: '引き分けの点', pLoss: '負けの点', walkoverLegs: '不戦勝の Leg 数', labelsText: 'ラウンドの表示名', rounds: '回戦数', firstRound: '1 回戦の組み方', byePoints: '不戦（Bye）の点', advancement: '進出ルール', nights: '節の数', nightPointsText: '順位ポイント', nightDraw: '節の組み合わせ', thirdPlace: '3 位決定戦', drawMode: '表の作り方', fixedRounds: '固定の表で行う回戦数', avoidSameGroup: '同じ予選グループを避ける', maxEntrants: '枠数', roundBestOf: 'ラウンドごとの Best of', grandFinal: 'グランドファイナルの方式' },
+      });
+      var v = sec.values;
+      var sid = function (k) {
+        return 'stage-' + st.id + '-' + k;
       };
-      var numIn = function (value, min, max, label) {
-        return el('input', { className: 'input input--short', type: 'number', min: min, max: max, value: value === null || value === undefined ? '' : String(value), 'aria-label': label });
+      var name = el('input', { className: 'input', id: sid('name'), value: v.name, maxlength: 40, 'aria-label': '段階の名前' });
+      var rule = ruleInputs('stage-' + st.id, { format: v.rule.format, bestOf: v.rule.bestOf, setBestOf: v.rule.setBestOf || 5, provisional: v.rule.provisional }, { noFixed: bracket });
+      var parts = [field('段階の名前', name), rule.node];
+      var readers = {
+        name: function () {
+          return name.value;
+        },
+        rule: rule.raw,
+      };
+      var add = function (node) {
+        parts.push(node);
+      };
+      var numIn = function (key, value, min, max, label) {
+        return el('input', { className: 'input input--short', id: sid(key), type: 'number', min: min, max: max, value: value === null || value === undefined ? '' : String(value), 'aria-label': label });
+      };
+      var valueOf = function (node) {
+        return function () {
+          return node.value;
+        };
+      };
+      var checkedOf = function (node) {
+        return function () {
+          return node.checked;
+        };
       };
       if (type === 'round_robin' || type === 'league') {
-        var cycles = el('select', { className: 'input input--short', 'aria-label': '総当たりの回数' }, [1, 2].map(function (n) {
-          return el('option', { value: String(n), text: n + ' 回', selected: cfg.cycles === n ? true : null });
+        var cycles = el('select', { className: 'input input--short', id: sid('cycles'), 'aria-label': '総当たりの回数' }, [1, 2].map(function (n) {
+          return el('option', { value: String(n), text: n + ' 回', selected: String(v.cycles) === String(n) ? true : null });
         }));
-        add(field('総当たりの回数（対戦カード作成後は変更不可）', cycles), function () {
-          return { cycles: Number(cycles.value) };
-        });
+        add(field('総当たりの回数（対戦カード作成後は変更不可）', cycles));
+        readers.cycles = valueOf(cycles);
         if (st.feeds.length) {
-          var dist = el('select', { className: 'input input--auto', 'aria-label': '進出者の配り方' }, [
-            el('option', { value: 'snake', text: '順位の帯ごとに蛇行（同じ進出元の組を分ける）', selected: cfg.distribution !== 'rank' ? true : null }),
-            el('option', { value: 'rank', text: '順位順に A, B, C … と配る', selected: cfg.distribution === 'rank' ? true : null }),
+          var dist = el('select', { className: 'input input--auto', id: sid('distribution'), 'aria-label': '進出者の配り方' }, [
+            el('option', { value: 'snake', text: '順位の帯ごとに蛇行（同じ進出元の組を分ける）', selected: v.distribution !== 'rank' ? true : null }),
+            el('option', { value: 'rank', text: '順位順に A, B, C … と配る', selected: v.distribution === 'rank' ? true : null }),
           ]);
-          add(field('前の段階からの進出者の配り方（前の成績は持ち越しません）', dist), function () {
-            return { distribution: dist.value };
-          });
+          add(field('前の段階からの進出者の配り方（前の成績は持ち越しません）', dist));
+          readers.distribution = valueOf(dist);
         }
       }
       if (group) {
-        var tb = tiebreakEditor(cfg.tiebreakers, cfg.advanced, (d.tiebreakersFor || {})[type]);
-        add(tb.node, function () {
-          return cfg.advanced ? {} : { tiebreakers: tb.value() };
-        });
+        var tb = tiebreakEditor(v.tiebreakers, cfg.advanced, (d.tiebreakersFor || {})[type], function () { sec.touch(); });
+        add(tb.node);
+        readers.tiebreakers = tb.value;
         // 勝ち点（F14）。v0.7 までの段階は勝ち点なし（従来の順位）のまま。使うときだけ設定する
-        var usePts = el('input', { type: 'checkbox', checked: !!cfg.points, disabled: type === 'swiss' || cfg.advanced });
-        var pw = numIn(cfg.points ? cfg.points.win : 2, -99, 99, '勝ちの点');
-        var pd = numIn(cfg.points ? cfg.points.draw : 1, -99, 99, '引き分けの点');
-        var pl = numIn(cfg.points ? cfg.points.loss : 0, -99, 99, '負けの点');
+        var usePts = el('input', { type: 'checkbox', id: sid('use-points'), checked: !!v.usePoints, disabled: type === 'swiss' || cfg.advanced });
+        var pw = numIn('p-win', v.pWin, -99, 99, '勝ちの点');
+        var pd = numIn('p-draw', v.pDraw, -99, 99, '引き分けの点');
+        var pl = numIn('p-loss', v.pLoss, -99, 99, '負けの点');
         add(
           el('div', { className: 'field' }, [
             el('label', { className: 'check' }, [usePts, ' 勝ち点を使う（順位の決め方に「勝ち点」を入れて使います）']),
             el('div', { className: 'row row--tight' }, [el('span', { text: '勝ち' }), pw, el('span', { text: '引き分け' }), pd, el('span', { text: '負け' }), pl]),
-          ]),
-          function () {
-            if (cfg.advanced) return {};
-            return { points: usePts.checked ? { win: Number(pw.value), draw: Number(pd.value), loss: Number(pl.value) } : null };
-          }
+          ])
         );
+        readers.usePoints = checkedOf(usePts);
+        readers.pWin = valueOf(pw);
+        readers.pDraw = valueOf(pd);
+        readers.pLoss = valueOf(pl);
         // 監査 PR-11: 進出確定後は順位を変える設定を変えられない（サーバーも拒否する）。取り消せば変えられる
-        var wl = el('select', { className: 'input input--auto', 'aria-label': '不戦勝の Leg 数', disabled: cfg.advanced }, [
-          el('option', { value: 'exclude', text: '数えない（既定。実際に投げていないため）', selected: cfg.walkoverLegs !== 'award' ? true : null }),
-          el('option', { value: 'award', text: '勝者に勝利に必要な Leg 数・敗者に 0 として数える', selected: cfg.walkoverLegs === 'award' ? true : null }),
+        var wl = el('select', { className: 'input input--auto', id: sid('walkover'), 'aria-label': '不戦勝の Leg 数', disabled: cfg.advanced }, [
+          el('option', { value: 'exclude', text: '数えない（既定。実際に投げていないため）', selected: v.walkoverLegs !== 'award' ? true : null }),
+          el('option', { value: 'award', text: '勝者に勝利に必要な Leg 数・敗者に 0 として数える', selected: v.walkoverLegs === 'award' ? true : null }),
         ]);
-        add(field('不戦勝の試合の Leg 数の扱い（途中棄権・失格はその時点の実際の Leg 数を数えます' + (cfg.advanced ? '。進出確定後は変更不可' : '') + '）', wl), function () {
-          return cfg.advanced ? {} : { walkoverLegs: wl.value };
-        });
-        if (cfg.points) parts.push(adjustmentEditor(st));
+        add(field('不戦勝の試合の Leg 数の扱い（途中棄権・失格はその時点の実際の Leg 数を数えます' + (cfg.advanced ? '。進出確定後は変更不可' : '') + '）', wl));
+        readers.walkoverLegs = valueOf(wl);
         var labels = el('textarea', {
           className: 'input',
+          id: sid('labels'),
           rows: 3,
           'aria-label': 'ラウンドの表示名',
           placeholder: type === 'league' ? '例: 1: 第1節 11/3' : '例: 1: 1 巡目',
-          value: Object.keys(cfg.roundLabels)
-            .map(function (k) {
-              return k + ': ' + cfg.roundLabels[k];
-            })
-            .join('\n'),
+          value: v.labelsText,
         });
-        add(field('ラウンドの表示名（1 行に「番号: 表示名」。空欄なら ' + (type === 'league' ? '「第n節」' : type === 'swiss' ? '「第n回戦」' : '「Rn」') + '）', labels), function () {
-          return { roundLabels: parseLabels(labels.value) };
-        });
+        add(field('ラウンドの表示名（1 行に「番号: 表示名」。空欄なら ' + (type === 'league' ? '「第n節」' : type === 'swiss' ? '「第n回戦」' : '「Rn」') + '）', labels));
+        readers.labelsText = valueOf(labels);
       }
       if (type === 'swiss') {
-        var rounds = numIn(cfg.rounds, 1, 15, '回戦数');
+        var rounds = numIn('rounds', v.rounds, 1, 15, '回戦数');
         if (cfg.advanced) rounds.disabled = true;
-        var first = el('select', { className: 'input input--auto', 'aria-label': '1 回戦の組み方' }, [
-          el('option', { value: 'seed', text: 'シード順（上半分と下半分）', selected: cfg.firstRound !== 'random' ? true : null }),
-          el('option', { value: 'random', text: '抽選', selected: cfg.firstRound === 'random' ? true : null }),
+        var first = el('select', { className: 'input input--auto', id: sid('first-round'), 'aria-label': '1 回戦の組み方' }, [
+          el('option', { value: 'seed', text: 'シード順（上半分と下半分）', selected: v.firstRound !== 'random' ? true : null }),
+          el('option', { value: 'random', text: '抽選', selected: v.firstRound === 'random' ? true : null }),
         ]);
-        var byePts = numIn(cfg.byePoints, 0, 99, '不戦（Bye）の点');
+        var byePts = numIn('bye-points', v.byePoints, 0, 99, '不戦（Bye）の点');
         add(el('div', { className: 'stack stack--tight' }, [
           field(cfg.advanced ? '回戦数（進出確定後は変更不可）' : '回戦数', rounds),
           field('1 回戦の組み方', first),
           field('不戦（Bye）の点（Buchholz では不戦を 0 として数えます）', byePts),
           el('p', { className: 'muted small', text: '2 回戦以降は、勝ち点の近い選手どうしを再戦なしで組みます（このアプリの汎用のスイス式で、特定の大会の規則の再現ではありません）。組めないときは理由を表示して条件を緩めます。' }),
-        ]), function () {
-          var v = { firstRound: first.value, byePoints: Number(byePts.value) };
-          if (!cfg.advanced) v.rounds = Number(rounds.value);
-          return v;
-        });
+        ]));
+        readers.rounds = valueOf(rounds);
+        readers.firstRound = valueOf(first);
+        readers.byePoints = valueOf(byePts);
       }
       if (group || type === 'series') {
-        var adv = advancementEditor(st, cfg.advancement, cfg.advanced);
-        add(adv.node, function () {
-          return cfg.advanced ? {} : { advancement: adv.value() };
-        });
+        var adv = advancementEditor(st, v.advancement, cfg.advanced, function () { sec.touch(); });
+        add(adv.node);
+        readers.advancement = adv.value;
       }
       if (type === 'series') {
-        var nights = numIn(cfg.nights, 1, 30, '節の数');
-        var np = el('input', { className: 'input', value: cfg.nightPoints.join(', '), 'aria-label': '節の順位ポイント', disabled: cfg.advanced });
+        var nights = numIn('nights', v.nights, 1, 30, '節の数');
+        var np = el('input', { className: 'input', id: sid('night-points'), value: v.nightPointsText, 'aria-label': '節の順位ポイント', disabled: cfg.advanced });
         if (cfg.advanced) nights.disabled = true;
-        var nd = el('select', { className: 'input input--auto', 'aria-label': '節の組み合わせの決め方' }, [
-          el('option', { value: 'random', text: '節ごとに抽選（既定）', selected: cfg.nightDraw === 'random' ? true : null }),
-          el('option', { value: 'standing', text: 'その時点の累計順位でシード', selected: cfg.nightDraw === 'standing' ? true : null }),
-          el('option', { value: 'seed', text: '参加者名簿の順', selected: cfg.nightDraw === 'seed' ? true : null }),
+        var nd = el('select', { className: 'input input--auto', id: sid('night-draw'), 'aria-label': '節の組み合わせの決め方' }, [
+          el('option', { value: 'random', text: '節ごとに抽選（既定）', selected: v.nightDraw === 'random' ? true : null }),
+          el('option', { value: 'standing', text: 'その時点の累計順位でシード', selected: v.nightDraw === 'standing' ? true : null }),
+          el('option', { value: 'seed', text: '参加者名簿の順', selected: v.nightDraw === 'seed' ? true : null }),
         ]);
-        var tbS = tiebreakEditor(cfg.tiebreakers, cfg.advanced, (d.tiebreakersFor || {}).series);
+        var tbS = tiebreakEditor(v.tiebreakers, cfg.advanced, (d.tiebreakersFor || {}).series, function () { sec.touch(); });
         add(el('div', { className: 'stack stack--tight' }, [
           field('節の数（中止の節は数に含めたまま、完了の条件から外します' + (cfg.advanced ? '。進出確定後は変更不可' : '') + '）', nights),
           field('順位ポイント（優勝, 準優勝, 準決勝敗退, 準々決勝敗退 …。到達した順位の総点' + (cfg.advanced ? '。進出確定後は変更不可' : '') + '）', np),
           field('節の組み合わせ', nd),
           tbS.node,
-        ]), function () {
-          return {
-            nights: cfg.advanced ? undefined : Number(nights.value),
-            nightPoints: cfg.advanced ? undefined : np.value.split(/[,、\s]+/).filter(Boolean).map(Number),
-            nightDraw: nd.value,
-            tiebreakers: cfg.advanced ? undefined : tbS.value(),
-          };
-        });
+        ]));
+        readers.nights = valueOf(nights);
+        readers.nightPointsText = valueOf(np);
+        readers.nightDraw = valueOf(nd);
+        readers.tiebreakers = tbS.value;
       }
       if (type === 'single_elimination') {
-        var third = el('input', { type: 'checkbox', checked: cfg.thirdPlace });
-        add(el('label', { className: 'check' }, [third, ' 3 位決定戦を行う（トーナメント表の作成後は変更不可）']), function () {
-          return { thirdPlace: third.checked };
-        });
-        var mode = el('select', { className: 'input input--auto', 'aria-label': '表の作り方' }, [
-          el('option', { value: 'fixed', text: '最初に表を作る（固定の表）', selected: cfg.drawMode !== 'redraw' ? true : null }),
-          el('option', { value: 'redraw', text: '回戦ごとに抽選する（指定した回戦から）', selected: cfg.drawMode === 'redraw' ? true : null }),
+        var third = el('input', { type: 'checkbox', id: sid('third'), checked: v.thirdPlace });
+        add(el('label', { className: 'check' }, [third, ' 3 位決定戦を行う（トーナメント表の作成後は変更不可）']));
+        readers.thirdPlace = checkedOf(third);
+        var mode = el('select', { className: 'input input--auto', id: sid('draw-mode'), 'aria-label': '表の作り方' }, [
+          el('option', { value: 'fixed', text: '最初に表を作る（固定の表）', selected: v.drawMode !== 'redraw' ? true : null }),
+          el('option', { value: 'redraw', text: '回戦ごとに抽選する（指定した回戦から）', selected: v.drawMode === 'redraw' ? true : null }),
         ]);
-        var fixedRounds = numIn(cfg.fixedRounds, 0, 6, '固定の表で行う回戦数');
-        var avoid = el('input', { type: 'checkbox', checked: cfg.avoidSameGroup });
-        var max = numIn(cfg.maxEntrants || '', 0, 128, '決勝の枠数');
+        var fixedRounds = numIn('fixed-rounds', v.fixedRounds, 0, 6, '固定の表で行う回戦数');
+        var avoid = el('input', { type: 'checkbox', id: sid('avoid'), checked: v.avoidSameGroup });
+        var max = numIn('max-entrants', v.maxEntrants, 0, 128, '決勝の枠数');
         add(el('div', { className: 'stack stack--tight' }, [
           field('表の作り方（トーナメント表の作成後は変更不可）', mode),
           field('回戦ごとに抽選する場合: 固定の表で行う回戦数（0 = 1 回戦から抽選）', fixedRounds),
           el('label', { className: 'check' }, [avoid, ' 同じ予選グループの選手が 1 回戦で当たらないようにする（同じ順位どうしのシードを入れ替えます。両立できないときは理由を表示）']),
           field('枠数（0 = 制限なし。直接出場と進出者の合計がこれを超えたら進出を止めます）', max),
-        ]), function () {
-          return { drawMode: mode.value, fixedRounds: Number(fixedRounds.value) || 0, avoidSameGroup: avoid.checked, maxEntrants: Number(max.value) || 0 };
-        });
+        ]));
+        readers.drawMode = valueOf(mode);
+        readers.fixedRounds = valueOf(fixedRounds);
+        readers.avoidSameGroup = checkedOf(avoid);
+        readers.maxEntrants = valueOf(max);
         var rounds2 = eliminationRounds(st);
         var roundSelects = rounds2.map(function (r) {
-          var sel = el('select', { className: 'input input--short', 'aria-label': r.label + ' の Best of' }, [el('option', { value: '', text: '段階の既定' })].concat(
+          var chosen = (v.roundBestOf || {})[String(r.round)] || '';
+          var rs = el('select', { className: 'input input--short', id: sid('round-' + r.round), 'aria-label': r.label + ' の Best of' }, [el('option', { value: '', text: '段階の既定' })].concat(
             BEST_OF_CHOICES.map(function (n) {
-              return el('option', { value: String(n), text: 'Best of ' + n, selected: cfg.roundBestOf[String(r.round)] === n ? true : null });
+              return el('option', { value: String(n), text: 'Best of ' + n, selected: String(chosen) === String(n) ? true : null });
             })
           ));
-          return { round: r.round, node: el('label', { className: 'field field--inline' }, [el('span', { className: 'field__label', text: r.label }), sel]), sel: sel };
+          return { round: r.round, node: el('label', { className: 'field field--inline' }, [el('span', { className: 'field__label', text: r.label }), rs]), sel: rs };
         });
         if (roundSelects.length) {
           parts.push(el('div', { className: 'stack stack--tight' }, [el('span', { className: 'field__label', text: 'ラウンドごとの Best of（例: 決勝だけ長くする）' })].concat(roundSelects.map(function (x) { return x.node; }))));
         } else {
           parts.push(el('p', { className: 'muted small', text: '出場者が決まると、ラウンドごとの Best of を設定できます。' }));
         }
-        collectors.push(function () {
+        readers.roundBestOf = function () {
           var map = {};
           roundSelects.forEach(function (x) {
-            if (x.sel.value) map[x.round] = Number(x.sel.value);
+            map[String(x.round)] = x.sel.value;
           });
-          return { roundBestOf: map };
-        });
+          return map;
+        };
       }
       if (type === 'double_elimination') {
-        var gf = el('select', { className: 'input', 'aria-label': 'グランドファイナルの方式' }, [
-          el('option', { value: 'reset', text: '敗者側の選手が勝ったら、もう 1 試合（リセット）', selected: cfg.grandFinal !== 'single' ? true : null }),
-          el('option', { value: 'single', text: '1 試合のみ（勝者側の選手もここで負けると 1 敗で敗退）', selected: cfg.grandFinal === 'single' ? true : null }),
+        var gf = el('select', { className: 'input', id: sid('gf'), 'aria-label': 'グランドファイナルの方式' }, [
+          el('option', { value: 'reset', text: '敗者側の選手が勝ったら、もう 1 試合（リセット）', selected: v.grandFinal !== 'single' ? true : null }),
+          el('option', { value: 'single', text: '1 試合のみ（勝者側の選手もここで負けると 1 敗で敗退）', selected: v.grandFinal === 'single' ? true : null }),
         ]);
-        add(field('グランドファイナルの方式（表の作成後は変更不可）', gf), function () {
-          return { grandFinal: gf.value };
-        });
+        add(field('グランドファイナルの方式（表の作成後は変更不可）', gf));
+        readers.grandFinal = valueOf(gf);
       }
-      parts.push(
-        el('div', { className: 'btn-row' }, [
-          el('button', {
-            className: 'btn btn--primary',
-            type: 'button',
-            'data-mut': true,
-            text: 'この段階を保存',
-            onClick: function () {
-              var payload = { stageId: st.id, rev: st.rev, name: name.value, rule: rule.value() };
-              collectors.forEach(function (c) {
-                var v = c();
-                Object.keys(v).forEach(function (k) {
-                  if (v[k] !== undefined) payload[k] = v[k];
-                });
-              });
-              mutate('updateStage', payload, '保存しました。');
-            },
-          }),
-          d.stages.length > 1
-            ? confirmButton('この段階を削除', '本当に削除', function () {
-                mutate('deleteStage', { stageId: st.id, rev: st.rev }, '段階を削除しました。');
-              })
-            : null,
-        ])
+      parts.forEach(function (n) {
+        sec.fieldset.appendChild(n);
+      });
+      sec.fieldset.className += ' stack';
+      sec.wire(
+        function () {
+          var out = {};
+          Object.keys(readers).forEach(function (k) {
+            out[k] = cloneValue(readers[k]());
+          });
+          return out;
+        },
+        function (x, dr) {
+          return { action: 'updateStage', payload: stagePayload(st, x, dr.baseRev), okMessage: '保存しました。' };
+        }
       );
-      return el('section', { className: 'panel stage-editor', 'data-stage-id': st.id }, [el('div', { className: 'stack' }, parts)]);
+      var head = el('div', { className: 'stage-head' }, [
+        el('span', { className: 'badge badge--on', text: index + 1 + '. ' + (STAGE_TYPE_LABEL[type] || type) }),
+        st.hasResults ? el('span', { className: 'badge', text: '結果あり' }) : null,
+        cfg.advanced ? el('span', { className: 'badge', text: '進出確定済み' }) : null,
+      ]);
+      // 加減点は別に保存する（理由が必要な記録。段階の設定の下書きには含めない）
+      var adjust = group && cfg.points ? adjustmentEditor(st) : null;
+      var footer = sec.footer();
+      if (d.stages.length > 1) {
+        footer.lastChild.appendChild(
+          confirmButton('この段階を削除', '本当に削除', function () {
+            mutate('deleteStage', { stageId: st.id, rev: st.rev }, '段階を削除しました。');
+          })
+        );
+      }
+      return el('section', { className: 'panel stage-editor', 'data-stage-id': st.id }, [
+        el('div', { className: 'stack' }, [el('form', { className: 'stack', onSubmit: sec.submit }, [head, sec.fieldset, footer]), adjust]),
+      ]);
     }
 
     /** 手動の加減点（F14）。理由は必須 */
@@ -3186,7 +4301,11 @@
     }
 
     /** 順位の決め方（使う項目と順番） */
-    function tiebreakEditor(initial, locked, allowed) {
+    function tiebreakEditor(initial, locked, allowed, onChange) {
+      var changed = function () {
+        draw();
+        if (onChange) onChange();
+      };
       var labels = {};
       Object.keys(state.detail.tiebreakerLabels).forEach(function (k) {
         if (!allowed || allowed.indexOf(k) !== -1) labels[k] = state.detail.tiebreakerLabels[k];
@@ -3200,9 +4319,9 @@
           box.appendChild(
             el('div', { className: 'row row--tight' }, [
               el('span', { className: 'tb-item', text: i + 1 + '. ' + labels[k] }),
-              el('button', { className: 'btn btn--small', type: 'button', text: '↑', 'aria-label': labels[k] + ' を上へ', disabled: locked || i === 0, onClick: function () { list.splice(i - 1, 0, list.splice(i, 1)[0]); draw(); } }),
-              el('button', { className: 'btn btn--small', type: 'button', text: '↓', 'aria-label': labels[k] + ' を下へ', disabled: locked || i === list.length - 1, onClick: function () { list.splice(i + 1, 0, list.splice(i, 1)[0]); draw(); } }),
-              el('button', { className: 'btn btn--small', type: 'button', text: '外す', disabled: locked, onClick: function () { list.splice(i, 1); draw(); } }),
+              el('button', { className: 'btn btn--small', type: 'button', text: '↑', 'aria-label': labels[k] + ' を上へ', disabled: locked || i === 0, onClick: function () { list.splice(i - 1, 0, list.splice(i, 1)[0]); changed(); } }),
+              el('button', { className: 'btn btn--small', type: 'button', text: '↓', 'aria-label': labels[k] + ' を下へ', disabled: locked || i === list.length - 1, onClick: function () { list.splice(i + 1, 0, list.splice(i, 1)[0]); changed(); } }),
+              el('button', { className: 'btn btn--small', type: 'button', text: '外す', disabled: locked, onClick: function () { list.splice(i, 1); changed(); } }),
             ])
           );
         });
@@ -3213,7 +4332,7 @@
           var sel = el('select', { className: 'input input--auto', 'aria-label': '順位の決め方を追加' }, rest.map(function (k) {
             return el('option', { value: k, text: labels[k] });
           }));
-          box.appendChild(el('div', { className: 'row row--tight' }, [sel, el('button', { className: 'btn btn--small', type: 'button', text: '追加', onClick: function () { list.push(sel.value); draw(); } })]));
+          box.appendChild(el('div', { className: 'row row--tight' }, [sel, el('button', { className: 'btn btn--small', type: 'button', text: '追加', onClick: function () { list.push(sel.value); changed(); } })]));
         }
       };
       draw();
@@ -3226,7 +4345,7 @@
     }
 
     /** 進出ルール（何位から何位まで → どの段階へ） */
-    function advancementEditor(st, initial, locked) {
+    function advancementEditor(st, initial, locked, onChange) {
       var d = state.detail;
       var targets = d.stages.filter(function (x) {
         return x.order > st.order;
@@ -3255,10 +4374,11 @@
           };
           [from, to, target].forEach(function (x) {
             x.addEventListener('change', sync);
+            x.addEventListener('input', sync);
           });
           sync();
           box.appendChild(
-            el('div', { className: 'row row--tight' }, [from, el('span', { text: '位 〜' }), to, el('span', { text: '位 →' }), target, el('button', { className: 'btn btn--small', type: 'button', text: '外す', disabled: locked, onClick: function () { rows.splice(i, 1); draw(); } })])
+            el('div', { className: 'row row--tight' }, [from, el('span', { text: '位 〜' }), to, el('span', { text: '位 →' }), target, el('button', { className: 'btn btn--small', type: 'button', text: '外す', disabled: locked, onClick: function () { rows.splice(i, 1); draw(); if (onChange) onChange(); } })])
           );
         });
         if (!locked) {
@@ -3272,6 +4392,7 @@
                 var start = last ? Math.min(99, (last.toRank >= 99 ? 1 : last.toRank) + 1) : 1;
                 rows.push({ fromRank: start, toRank: start, targetStageId: targets[0].id });
                 draw();
+                if (onChange) onChange();
               },
             })
           );
@@ -3830,58 +4951,73 @@
 
     /** お知らせ（F09）・ルールの表示（F10）・公開する項目・タイムゾーン・自動終了（F05） */
     function eventSettingsPanel(ev) {
-      var cfg = ev.config || {};
-      var rd = cfg.ruleDisplay || {};
-      var ann = el('textarea', { className: 'input', id: 'set-announcement', rows: 4, maxlength: 1000, value: cfg.announcement ? cfg.announcement.text : '', placeholder: '例: 受付は 18:30 まで。駐車場はありません。' });
+      var sec = openSection({
+        eventId: ev.id,
+        section: 'display',
+        base: displayValues(ev),
+        baseRev: ev.rev,
+        saveLabel: '表示の設定を保存',
+        labels: { announcement: 'お知らせ', category: '競技区分', startScore: '開始点数', inMode: 'イン', outMode: 'アウト', bull: 'ブル', roundLimit: 'ラウンド上限', ruleNote: '補足', pubAffiliation: '所属を閲覧ページに出す', pubRating: 'Rt を閲覧ページに出す', autoFinish: '自動で「終了」にする', timezone: 'タイムゾーン' },
+      });
+      var v = sec.values;
+      var ann = el('textarea', { className: 'input', id: 'set-announcement', rows: 4, maxlength: 1000, value: v.announcement, placeholder: '例: 受付は 18:30 まで。駐車場はありません。' });
       var sel = function (id, options, value) {
         return el('select', { className: 'input input--auto', id: id }, options.map(function (o) {
           return el('option', { value: o[0], text: o[1], selected: String(value === null || value === undefined ? '' : value) === o[0] ? true : null });
         }));
       };
-      var category = sel('set-category', [['', '指定しない'], ['soft', 'ソフトダーツ'], ['steel', 'スティールダーツ']], rd.category);
-      var start = sel('set-start', [['', '指定しない'], ['101', '101'], ['301', '301'], ['501', '501'], ['701', '701'], ['901', '901'], ['1101', '1101'], ['1501', '1501']], rd.startScore);
-      var inMode = sel('set-in', [['', '指定しない'], ['open', 'オープンイン（制限なし）'], ['double', 'ダブルイン'], ['master', 'マスターイン（ダブル・トリプル）']], rd.inMode);
-      var outMode = sel('set-out', [['', '指定しない'], ['open', 'オープンアウト（制限なし）'], ['double', 'ダブルアウト'], ['master', 'マスターアウト（ダブル・トリプル）']], rd.outMode);
-      var bull = sel('set-bull', [['', '指定しない'], ['fat', 'ファットブル（ブルを 50 点の 1 つにする。ソフト向け）'], ['separate', 'セパレートブル（25・50）']], rd.bull);
-      var roundLimit = el('input', { className: 'input input--short', id: 'set-round-limit', type: 'number', min: 1, max: 99, value: rd.roundLimit ? String(rd.roundLimit) : '' });
-      var ruleNote = el('input', { className: 'input', id: 'set-rule-note', maxlength: 200, value: rd.note || '', placeholder: '補足（任意）' });
-      var pubAff = el('input', { type: 'checkbox', checked: cfg.publicFields && cfg.publicFields.affiliation });
-      var pubRt = el('input', { type: 'checkbox', checked: cfg.publicFields && cfg.publicFields.rating });
-      var autoFinish = el('input', { type: 'checkbox', checked: !!cfg.autoFinish });
-      var tz = sel('set-tz', ['Asia/Tokyo', 'Asia/Seoul', 'Asia/Taipei', 'Asia/Shanghai', 'Asia/Singapore', 'Australia/Sydney', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'UTC'].map(function (z) { return [z, z]; }), cfg.timezone || 'Asia/Tokyo');
-      return el('section', { className: 'panel' }, [
-        el('h3', { text: 'お知らせ・ルールの表示・公開する項目' }),
-        el('form', {
-          className: 'form',
-          onSubmit: function (e) {
-            e.preventDefault();
-            var any = category.value || start.value || inMode.value || outMode.value || bull.value || roundLimit.value || ruleNote.value.trim();
-            mutate('updateEventSettings', {
-              eventId: ev.id,
-              rev: ev.rev,
-              announcement: ann.value,
-              ruleDisplay: any ? { category: category.value, startScore: start.value ? Number(start.value) : null, inMode: inMode.value, outMode: outMode.value, bull: bull.value, roundLimit: roundLimit.value, note: ruleNote.value } : null,
-              publicFields: { affiliation: pubAff.checked, rating: pubRt.checked },
-              autoFinish: autoFinish.checked,
-              timezone: tz.value,
-            }, '保存しました。');
-          },
-        }, [
-          field('閲覧ページのお知らせ（公開。運営メモとは別です。閲覧ページの通常の更新で反映され、通知は送りません）', ann),
-          el('fieldset', { className: 'fieldset' }, [
-            el('legend', { text: 'ルールの表示（閲覧ページに出す説明。n02 の採点には使いません）' }),
-            el('div', { className: 'row row--tight' }, [field('競技区分', category), field('開始点数（01）', start)]),
-            el('div', { className: 'row row--tight' }, [field('イン', inMode), field('アウト', outMode)]),
-            el('div', { className: 'row row--tight' }, [field('ブル', bull), field('ラウンド上限（任意）', roundLimit)]),
-            field('補足', ruleNote),
-            el('p', { className: 'muted small', text: 'Leg 制・セット制・Best of は段階ごとのルール（「形式」タブ）から表示します。スティールダーツではファットブルは選べません。' }),
-          ]),
-          el('label', { className: 'check' }, [pubAff, ' 所属を閲覧ページに出す']),
-          el('label', { className: 'check' }, [pubRt, ' Rt を閲覧ページに出す']),
-          el('label', { className: 'check' }, [autoFinish, ' すべての段階が終わったら自動で「終了」にする（訂正で終わっていない段階ができたら「開催中」に戻します）']),
-          field('予定の時刻のタイムゾーン（表示用）', tz),
-          el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '表示の設定を保存' }),
+      var category = sel('set-category', [['', '指定しない'], ['soft', 'ソフトダーツ'], ['steel', 'スティールダーツ']], v.category);
+      var start = sel('set-start', [['', '指定しない'], ['101', '101'], ['301', '301'], ['501', '501'], ['701', '701'], ['901', '901'], ['1101', '1101'], ['1501', '1501']], v.startScore);
+      var inMode = sel('set-in', [['', '指定しない'], ['open', 'オープンイン（制限なし）'], ['double', 'ダブルイン'], ['master', 'マスターイン（ダブル・トリプル）']], v.inMode);
+      var outMode = sel('set-out', [['', '指定しない'], ['open', 'オープンアウト（制限なし）'], ['double', 'ダブルアウト'], ['master', 'マスターアウト（ダブル・トリプル）']], v.outMode);
+      var bull = sel('set-bull', [['', '指定しない'], ['fat', 'ファットブル（ブルを 50 点の 1 つにする。ソフト向け）'], ['separate', 'セパレートブル（25・50）']], v.bull);
+      var roundLimit = el('input', { className: 'input input--short', id: 'set-round-limit', type: 'number', min: 1, max: 99, value: v.roundLimit });
+      var ruleNote = el('input', { className: 'input', id: 'set-rule-note', maxlength: 200, value: v.ruleNote, placeholder: '補足（任意）' });
+      var pubAff = el('input', { type: 'checkbox', id: 'set-pub-affiliation', checked: v.pubAffiliation });
+      var pubRt = el('input', { type: 'checkbox', id: 'set-pub-rating', checked: v.pubRating });
+      var autoFinish = el('input', { type: 'checkbox', id: 'set-auto-finish', checked: v.autoFinish });
+      var tz = sel('set-tz', ['Asia/Tokyo', 'Asia/Seoul', 'Asia/Taipei', 'Asia/Shanghai', 'Asia/Singapore', 'Australia/Sydney', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'UTC'].map(function (z) { return [z, z]; }), v.timezone);
+      [
+        field('閲覧ページのお知らせ（公開。運営メモとは別です。閲覧ページの通常の更新で反映され、通知は送りません）', ann),
+        el('fieldset', { className: 'fieldset' }, [
+          el('legend', { text: 'ルールの表示（閲覧ページに出す説明。n02 の採点には使いません）' }),
+          el('div', { className: 'row row--tight' }, [field('競技区分', category), field('開始点数（01）', start)]),
+          el('div', { className: 'row row--tight' }, [field('イン', inMode), field('アウト', outMode)]),
+          el('div', { className: 'row row--tight' }, [field('ブル', bull), field('ラウンド上限（任意）', roundLimit)]),
+          field('補足', ruleNote),
+          el('p', { className: 'muted small', text: 'Leg 制・セット制・Best of は段階ごとのルール（「形式」タブ）から表示します。スティールダーツではファットブルは選べません。' }),
         ]),
+        el('label', { className: 'check' }, [pubAff, ' 所属を閲覧ページに出す']),
+        el('label', { className: 'check' }, [pubRt, ' Rt を閲覧ページに出す']),
+        el('label', { className: 'check' }, [autoFinish, ' すべての段階が終わったら自動で「終了」にする（訂正で終わっていない段階ができたら「開催中」に戻します）']),
+        field('予定の時刻のタイムゾーン（表示用）', tz),
+      ].forEach(function (n) {
+        sec.fieldset.appendChild(n);
+      });
+      sec.wire(
+        function () {
+          return { announcement: ann.value, category: category.value, startScore: start.value, inMode: inMode.value, outMode: outMode.value, bull: bull.value, roundLimit: roundLimit.value, ruleNote: ruleNote.value, pubAffiliation: pubAff.checked, pubRating: pubRt.checked, autoFinish: autoFinish.checked, timezone: tz.value };
+        },
+        function (x, dr) {
+          var any = x.category || x.startScore || x.inMode || x.outMode || x.bull || x.roundLimit || String(x.ruleNote).trim();
+          return {
+            action: 'updateEventSettings',
+            payload: {
+              eventId: ev.id,
+              rev: dr.baseRev,
+              announcement: x.announcement,
+              ruleDisplay: any ? { category: x.category, startScore: x.startScore ? Number(x.startScore) : null, inMode: x.inMode, outMode: x.outMode, bull: x.bull, roundLimit: x.roundLimit, note: x.ruleNote } : null,
+              publicFields: { affiliation: x.pubAffiliation, rating: x.pubRating },
+              autoFinish: x.autoFinish,
+              timezone: x.timezone,
+            },
+            okMessage: '保存しました。',
+          };
+        }
+      );
+      return el('section', { className: 'panel', id: 'settings-display' }, [
+        el('h3', { text: 'お知らせ・ルールの表示・公開する項目' }),
+        el('form', { className: 'form', onSubmit: sec.submit }, [sec.fieldset, sec.footer()]),
       ]);
     }
 
@@ -3938,31 +5074,48 @@
     function renderSettings() {
       var d = state.detail;
       var ev = d.event;
-      var name = el('input', { className: 'input', value: ev.name, maxlength: 80 });
-      var date = el('input', { className: 'input', value: ev.dateLabel, maxlength: 40 });
-      var status = el('select', { className: 'input' }, Object.keys(EVENT_STATUS_LABEL).map(function (k) {
-        return el('option', { value: k, text: EVENT_STATUS_LABEL[k], selected: k === ev.status ? true : null });
+      var isAdmin = !!(state.boot && state.boot.role.isPlatformAdmin);
+      var sec = openSection({
+        eventId: ev.id,
+        section: 'event',
+        base: eventInfoValues(ev),
+        baseRev: ev.rev,
+        saveLabel: '大会情報を保存',
+        labels: { name: '大会名', dateLabel: '開催日', status: '状態', isPublic: '閲覧画面に公開する', isFeatured: '既定表示', notes: '運営メモ' },
+        format: function (k, x) {
+          return k === 'status' ? EVENT_STATUS_LABEL[x] || String(x) : displayDraftValue(x);
+        },
+      });
+      var v = sec.values;
+      var name = el('input', { className: 'input', id: 'set-name', value: v.name, maxlength: 80, required: true });
+      var date = el('input', { className: 'input', id: 'set-date', value: v.dateLabel, maxlength: 40 });
+      var status = el('select', { className: 'input', id: 'set-status' }, Object.keys(EVENT_STATUS_LABEL).map(function (k) {
+        return el('option', { value: k, text: EVENT_STATUS_LABEL[k], selected: k === v.status ? true : null });
       }));
-      var isPublic = el('input', { type: 'checkbox', checked: ev.isPublic });
-      var featured = el('input', { type: 'checkbox', checked: ev.isFeatured });
-      var notes = el('input', { className: 'input', value: ev.notes || '', maxlength: 200 });
-      var eventForm = el('section', { className: 'panel' }, [
+      var isPublic = el('input', { type: 'checkbox', id: 'set-public', checked: v.isPublic });
+      var featured = el('input', { type: 'checkbox', id: 'set-featured', checked: v.isFeatured });
+      var notes = el('input', { className: 'input', id: 'set-notes', value: v.notes, maxlength: 200 });
+      [
+        field('大会名', name),
+        field('開催日', date),
+        field('状態', status),
+        el('label', { className: 'check' }, [isPublic, ' 閲覧画面に公開する']),
+        isAdmin ? el('label', { className: 'check' }, [featured, ' 閲覧画面の既定表示にする（URL に大会指定がないときに表示。管理者のみ）']) : null,
+        field('運営メモ（非公開）', notes),
+      ].forEach(function (n) {
+        if (n) sec.fieldset.appendChild(n);
+      });
+      sec.wire(
+        function () {
+          return { name: name.value, dateLabel: date.value, status: status.value, isPublic: isPublic.checked, isFeatured: featured.checked, notes: notes.value };
+        },
+        function (x, dr) {
+          return { action: 'updateEvent', payload: { eventId: ev.id, rev: dr.baseRev, name: x.name, dateLabel: x.dateLabel, status: x.status, isPublic: x.isPublic, isFeatured: x.isFeatured, notes: x.notes }, okMessage: '保存しました。' };
+        }
+      );
+      var eventForm = el('section', { className: 'panel', id: 'settings-event' }, [
         el('h3', { text: '大会情報' }),
-        el('form', {
-          className: 'form',
-          onSubmit: function (e) {
-            e.preventDefault();
-            mutate('updateEvent', { eventId: ev.id, rev: ev.rev, name: name.value, dateLabel: date.value, status: status.value, isPublic: isPublic.checked, isFeatured: featured.checked, notes: notes.value }, '保存しました。');
-          },
-        }, [
-          field('大会名', name),
-          field('開催日（表示用）', date),
-          field('状態', status),
-          el('label', { className: 'check' }, [isPublic, ' 閲覧画面に公開する']),
-          state.boot && state.boot.role.isPlatformAdmin ? el('label', { className: 'check' }, [featured, ' 閲覧画面の既定表示にする（URL に大会指定がないときに表示。管理者のみ）']) : null,
-          field('運営メモ（非公開）', notes),
-          el('button', { className: 'btn btn--primary', type: 'submit', 'data-mut': true, text: '保存' }),
-        ]),
+        el('form', { className: 'form', onSubmit: sec.submit }, [sec.fieldset, sec.footer()]),
       ]);
 
       var url = eventUrl(win.location, ev.id);
@@ -4015,13 +5168,12 @@
       } else {
         accessPanel.appendChild(el('p', { className: 'muted small', text: '管理パスワードの変更は、大会を作った主催者だけが行えます。' }));
       }
-      var panels = [eventForm, eventSettingsPanel(ev), accessPanel];
-      if (ev.canManageCollaborators) panels.push(collaboratorsPanel(d));
-      if (ev.role !== 'staff') panels.push(duplicatePanel(ev));
-      if (ev.canChangePassword) panels.push(renderDeletePanel(ev));
-      if (state.boot && state.boot.role.isPlatformAdmin) {
+      // 設定を 基本情報／公開・表示／権限／その他 に分ける。保存は今までどおり欄ごと
+      var access = [accessPanel];
+      if (ev.canManageCollaborators) access.push(collaboratorsPanel(d));
+      if (isAdmin) {
         var owner = el('input', { className: 'input', id: 'owner-email', type: 'email', value: ev.ownerEmail || '', placeholder: '主催者の Google アカウントのメールアドレス' });
-        panels.push(
+        access.push(
           el('section', { className: 'panel' }, [
             el('h3', { text: '主催者（管理者のみ）' }),
             el('p', { className: 'muted small', text: 'この大会を運営できる Google アカウント。v0.4 以前に作った大会や、管理者が作った大会に主催者を付けるときに使います。空欄にすると管理者だけが運営できます。' }),
@@ -4036,7 +5188,70 @@
           ])
         );
       }
-      return el('div', { className: 'stack' }, panels);
+      var other = [];
+      if (ev.role !== 'staff') other.push(duplicatePanel(ev));
+      if (ev.canChangePassword) other.push(renderDeletePanel(ev));
+      var hasDraft = function (section) {
+        return !!draftMem[draftKey(ev.id, section, '')];
+      };
+      var groups = [
+        { id: 'basic', label: '基本情報', panels: [eventForm, settingsSummary(d)], dirty: hasDraft('event'), layout: 'settings-grid' },
+        { id: 'display', label: '公開・表示', panels: [eventSettingsPanel(ev)], dirty: hasDraft('display') },
+        { id: 'access', label: '権限', panels: access },
+        { id: 'other', label: 'その他', panels: other },
+      ].filter(function (g) {
+        return g.panels.length;
+      });
+      var cur = groups.filter(function (g) { return g.id === state.ui.settingsTab; })[0] || groups[0];
+      var sub = el('div', { className: 'chips subtabs', role: 'group', 'aria-label': '大会設定の分類' }, groups.map(function (g) {
+        return el('button', {
+          type: 'button',
+          className: 'chip',
+          id: 'settings-tab-' + g.id,
+          'aria-pressed': String(g.id === cur.id),
+          text: g.label + (g.dirty ? '（未保存）' : ''),
+          onClick: function () {
+            state.ui.settingsTab = g.id;
+            render();
+          },
+        });
+      }));
+      return el('div', { className: 'stack' }, [el('div', { className: 'panel panel--tight' }, [el('h3', { className: 'visually-hidden', text: '大会設定' }), sub]), el('div', { className: 'stack ' + (cur.layout || '') }, cur.panels)]);
+    }
+
+    /** 基本情報の横に出すまとめ（公開の状態・保存していない欄）。読み込んだ大会の内容と下書きの有無だけで作る */
+    function settingsSummary(d) {
+      var ev = d.event;
+      var rows = [
+        ['状態', EVENT_STATUS_LABEL[ev.status] || ev.status],
+        ['公開', d.publication.published ? '公開中（' + formatDateTime(d.publication.publishedAt) + ' 更新）' : '非公開'],
+        ['選手', d.players.length + ' 名'],
+        ['試合', '確定 ' + d.progress.final + ' / ' + d.progress.total],
+      ];
+      // 入力のたびに書き換える（描き直さない）
+      var pendingLine = el('p', { id: 'settings-pending' });
+      sectionPainters.push(function () {
+        var pending = [];
+        if (draftMem[draftKey(ev.id, 'event', '')]) pending.push('大会情報');
+        if (draftMem[draftKey(ev.id, 'display', '')]) pending.push('公開・表示');
+        d.stages.forEach(function (st) {
+          if (draftMem[draftKey(ev.id, 'stage', st.id)]) pending.push('形式: ' + st.name);
+        });
+        pendingLine.className = pending.length ? 'save-state save-state--dirty' : 'muted small';
+        pendingLine.textContent = pending.length ? '保存していない欄: ' + pending.join('、') : '保存していない変更はありません。';
+      });
+      sectionPainters[sectionPainters.length - 1]();
+      var dl = el('dl', { className: 'summary' });
+      rows.forEach(function (r) {
+        dl.appendChild(el('dt', { text: r[0] }));
+        dl.appendChild(el('dd', { text: r[1] }));
+      });
+      return el('aside', { className: 'panel settings-summary' }, [
+        el('h3', { text: '今の状態' }),
+        dl,
+        pendingLine,
+        el('p', { className: 'muted small', text: '設定は欄ごとに保存します。保存していない入力は、画面を移っても残ります。' }),
+      ]);
     }
 
     /**
@@ -4109,12 +5324,15 @@
       });
       deleteButton.addEventListener('click', function () {
         mutate('deleteEvent', { eventId: ev.id, rev: ev.rev, confirmName: confirmName.value }, '大会「' + ev.name + '」を削除しました。').then(function (data) {
-          if (data && data.deletedEventId) goHome();
+          if (data && data.deletedEventId) {
+            forgetEventSummary(data.deletedEventId);
+            goHome();
+          }
         });
       });
       return el('section', { className: 'panel danger-zone' }, [
         el('h3', { text: '大会の削除' }),
-        el('p', { className: 'muted small', text: 'この大会のデータ（選手・組み合わせ・試合結果・変更履歴・閲覧ページ）をスプレッドシートから消します。元に戻せません。消す前に、データをファイルに保存しておくことをおすすめします（保存したファイルからは、主催者のページの「保存したファイルから復元」で新しい大会として作り直せます）。' }),
+        el('p', { className: 'muted small', text: 'この大会のデータ（選手・組み合わせ・試合結果・変更履歴・閲覧ページ）をスプレッドシートから消します。元に戻せません。消す前に、データをファイルに保存しておくことをおすすめします（保存したファイルからは、主催者のページの「その他の作成」→「ファイルから復元」で新しい大会として作り直せます）。' }),
         el('div', { className: 'btn-row' }, [saveButton]),
         el('label', { className: 'check' }, [skipSave, ' 保存せずに削除する']),
         field('② 確認のため、大会名「' + ev.name + '」を入力', confirmName),
@@ -4292,7 +5510,7 @@
         ev.role !== 'staff'
           ? el('section', { className: 'panel' }, [
               el('h3', { text: 'データの保存' }),
-              el('p', { className: 'muted small', text: '大会の全データを JSON ファイルに保存します（管理パスワード・共同主催者は含めません）。主催者のページの「保存したファイルから復元」で、新しい大会として作り直せます。' }),
+              el('p', { className: 'muted small', text: '大会の全データを JSON ファイルに保存します（管理パスワード・共同主催者は含めません）。主催者のページの「その他の作成」→「ファイルから復元」で、新しい大会として作り直せます。' }),
               el('div', { className: 'btn-row' }, [exportButton]),
             ])
           : null,
@@ -4346,13 +5564,6 @@
     /** 主催者のホーム: 期制リーグ（1 期目）の作成 */
     function seasonCreatePanel() {
       var intro = el('p', { className: 'muted small', text: '期ごとに 1 つの大会を作ってたどる運営方式です。1 期目は全員が 1 つのリーグで総当たりを行い、その順位から 2 期目のディビジョンの配置案を作ります。2 期目以降は各期の終わりに、下位の部の 1 位が自動昇格・上位の部の最下位が自動降格し、上位の部の下から 2 位と下位の部の 2 位が入替戦を行います。次期の所属は、主催者がプレビューを確認・修正して確定するまで決まりません。「リーグ → プレーオフ」（リーグ上位の決勝トーナメント）とは別の機能です。' });
-      if (!state.ui.seasonCreateOpen) {
-        return el('section', { className: 'panel', id: 'season-create' }, [
-          el('h2', { text: '期制リーグ（昇降格・入替戦）を作成' }),
-          intro,
-          el('button', { className: 'btn', type: 'button', 'aria-expanded': 'false', text: '期制リーグの作成欄を開く', onClick: function () { state.ui.seasonCreateOpen = true; render(); } }),
-        ]);
-      }
       var name = el('input', { className: 'input', id: 'season-name', required: true, maxlength: 60, placeholder: '例: 水曜リーグ' });
       var date = el('input', { className: 'input', id: 'season-date', maxlength: 40, placeholder: '例: 2026年11月〜' });
       var organizer = el('input', { className: 'input', id: 'season-organizer', maxlength: 40, placeholder: '（任意・非公開）' });
@@ -4363,7 +5574,7 @@
       var pl = el('input', { className: 'input input--short', id: 'season-p-loss', type: 'number', value: '0', min: -99, max: 99 });
       var rules = seasonRuleFields('season', {});
       return el('section', { className: 'panel', id: 'season-create' }, [
-        el('h2', { text: '期制リーグ（昇降格・入替戦）を作成' }),
+        el('h3', { text: '期制リーグ（昇降格・入替戦）' }),
         intro,
         el('form', {
           className: 'form',
