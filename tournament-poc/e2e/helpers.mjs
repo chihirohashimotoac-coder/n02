@@ -62,8 +62,14 @@ export async function routeAppsScript(page, request, seen = []) {
   await page.route(ADMIN_ENDPOINT, async (route) => {
     const headers = await route.request().allHeaders();
     seen.push({ url: route.request().url(), cookie: headers.cookie || '', method: route.request().method() });
-    const r = await request.post('/admin-post', { headers: { 'content-type': 'text/plain;charset=utf-8' }, data: route.request().postData() || '' });
-    await route.fulfill({ status: r.status(), contentType: 'application/json', body: await r.text(), headers: { 'access-control-allow-origin': '*' } });
+    try {
+      const r = await request.post('/admin-post', { headers: { 'content-type': 'text/plain;charset=utf-8' }, data: route.request().postData() || '' });
+      await route.fulfill({ status: r.status(), contentType: 'application/json', body: await r.text(), headers: { 'access-control-allow-origin': '*' } });
+    } catch (e) {
+      // 試験が終わった後に届いた通信（一覧の裏の読み直しなど）: 試験の後始末で通信が閉じられているので、結果は捨てる。
+      // 試験の途中で起きた失敗は、画面が応答を受け取れないので、その試験の確認で失敗として現れる
+      await route.abort().catch(() => {});
+    }
   });
   return seen;
 }
