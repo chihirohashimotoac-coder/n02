@@ -241,7 +241,7 @@ test('スイス式 5 名: 回戦ごとに組む（不戦は 1 人ずつ）→ �
   await page.getByLabel('大会名').fill('E2E スイス');
   await chooseFormat(page, 'swiss');
   await page.locator('#new-swiss-rounds').fill('3');
-  await page.getByLabel(/決勝トーナメントに進む人数/).fill('0');
+  await page.locator('#new-playoff-opt').fill('0');
   await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
   await addPlayers(page, ['S1', 'S2', 'S3', 'S4', 'S5']);
   await openTab(page, '組み合わせ');
