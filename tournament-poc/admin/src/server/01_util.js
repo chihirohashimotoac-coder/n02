@@ -45,6 +45,8 @@ function coerceCell_(value, type) {
     if (typeof value === 'string') return value.trim().toUpperCase() === 'TRUE';
     return false;
   }
+  // 文字列はそのまま（String(value) と同じ結果。読み込みのたびに全セルを通るので先に返す）
+  if (typeof value === 'string') return value;
   if (value === null || value === undefined) return '';
   if (Object.prototype.toString.call(value) === '[object Date]') {
     return isNaN(value.getTime()) ? '' : value.toISOString();

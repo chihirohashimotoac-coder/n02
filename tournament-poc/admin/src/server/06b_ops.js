@@ -1386,7 +1386,8 @@ function afterEventChange_(ctx, eventId) {
   if (!event || !ctx.touchedResults) return;
   var cfg = eventConfig_(event);
   if (!cfg.autoFinish) return;
-  var view = buildEventView_(collectEvent_(ctx, eventId), true);
+  var bundle = collectEvent_(ctx, eventId);
+  var view = buildEventView_(bundle, true);
   var raw = safeJson_(event.config_json, {});
   if (view.complete && event.status !== EVENT_STATUS.FINISHED) {
     raw.autoFinishedAt = ctx.now;
@@ -1397,7 +1398,8 @@ function afterEventChange_(ctx, eventId) {
     event.status = EVENT_STATUS.RUNNING;
     recordHistory_(ctx, 'event.autoReopen', 'Event', eventId, eventId, null, { reasons: view.completion.reasons.slice(0, 5) });
   } else {
-    return;
+    // 大会を変えなかったときは、作った構成要素と表示を返す（runMutation_ が応答の詳細で使い回す。変えたときは作り直す）
+    return { bundle: bundle, view: view };
   }
   event.config_json = JSON.stringify(raw);
   event.rev = (event.rev || 0) + 1;

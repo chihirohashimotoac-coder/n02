@@ -522,10 +522,14 @@ function roundLabelForElimination_(round, rounds) {
 
 /* ---------- 大会の組み立て ---------- */
 
-/** 大会の構成要素を event_id で取り出す */
-function collectEvent_(ctx, eventId) {
+/**
+ * 大会の構成要素を event_id で取り出す。
+ * rowsOf（任意）: eventRowIndex_ の索引。読み取りだけの操作で多くの大会を続けて取り出すときに、表の全行の走査を 1 回にする
+ */
+function collectEvent_(ctx, eventId, rowsOf) {
   var event = findRecord_(ctx.table('Events'), eventId, '大会');
   var filter = function (name) {
+    if (rowsOf) return rowsOf(name, eventId);
     return ctx.table(name).rows.filter(function (r) {
       return r.event_id === eventId;
     });
@@ -561,6 +565,24 @@ function collectEvent_(ctx, eventId) {
     matches: matches,
     // v1.0: 期制リーグの期なら、その系列と前後の期（06c_season.js）。期制リーグでなければ null
     season: seasonContext_(ctx, eventId),
+  };
+}
+
+/**
+ * 表の行を event_id ごとにまとめた索引（読み取りだけの操作用。表を変更する操作では使わない）。
+ * 表は最初に使うときに 1 回だけ走査する。返す配列は毎回コピー（collectEvent_ が並べ替えるため）で、順番は表の行の順（filter と同じ）
+ */
+function eventRowIndex_(ctx) {
+  var built = {};
+  return function (name, eventId) {
+    if (!built[name]) {
+      var by = Object.create(null);
+      ctx.table(name).rows.forEach(function (r) {
+        (by[r.event_id] = by[r.event_id] || []).push(r);
+      });
+      built[name] = by;
+    }
+    return (built[name][eventId] || []).slice();
   };
 }
 

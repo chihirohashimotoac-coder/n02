@@ -157,7 +157,7 @@ function upsertSnapshotRow_(ctx, table, key, json, version, isDefault) {
  * 公開データが上限を超えるときは、その操作ごと保存しない（TOO_LARGE）。
  * v1.0: 上限を超える大会は本体とパート（分割行）に分ける。使わなくなったパートの行は消す。
  */
-function syncPublication_(ctx, eventId) {
+function syncPublication_(ctx, eventId, keep) {
   ctx.invalidate();
   var bundle = collectEvent_(ctx, eventId);
   var table = ctx.table('PublicSnapshots');
@@ -177,6 +177,8 @@ function syncPublication_(ctx, eventId) {
   }
 
   var pub = buildPublication_(bundle);
+  // keep（任意）: 作った公開データを呼び出し元へ渡す（runMutation_ が応答の snapshotBudget_ で使い回す）
+  if (keep) keep.publication = pub;
   var version = md5Hex_(pub.json);
   if (rows.length > 1) {
     // 手作業などで重複した行は 1 行にまとめる
@@ -235,10 +237,11 @@ function assertSnapshotSize_(json, force) {
  * 公開データの大きさの目安（運営画面の表示用。公開していない大会でも、公開したときの大きさを返す）。
  * v1.0: 分割したときは本体の大きさ（size）・分割前の大きさ（fullSize）・パートの数と合計を返す。上限を超えて公開できないときは error
  */
-function snapshotBudget_(bundle) {
+function snapshotBudget_(bundle, built) {
   var limit = snapshotLimit_();
   try {
-    var pub = buildPublication_(bundle);
+    // built: 同じ内容から作り済みの公開データ（runMutation_ の syncPublication_）。なければ作る
+    var pub = built || buildPublication_(bundle);
     var total = pub.parts.reduce(function (sum, p) {
       return sum + p.json.length;
     }, pub.json.length);
