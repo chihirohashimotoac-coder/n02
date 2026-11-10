@@ -316,7 +316,7 @@ h4 { margin: 8px 0 4px; font-size: 15px; }
 .save-state--dirty { color: var(--live); }
 .save-state--saving { color: var(--ink-2); }
 .save-state--saved { color: var(--final); }
-.save-state--failed, .save-state--unconfirmed, .save-state--conflict { padding: 8px 10px; border-radius: 8px; background: var(--check-bg); color: var(--check); }
+.save-state--failed, .save-state--unconfirmed, .save-state--conflict, .save-state--unpublished { padding: 8px 10px; border-radius: 8px; background: var(--check-bg); color: var(--check); }
 .save-extra { display: grid; gap: 8px; }
 .save-extra:empty { display: none; }
 .save-extra p { margin: 0; }

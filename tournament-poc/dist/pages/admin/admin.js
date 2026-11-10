@@ -614,7 +614,11 @@
     /** 保存済みの応答を画面に反映する。送った後に別の画面へ移っていたら、その画面は書き換えない */
     function applyMutation(action, data, okMessage, sentFrom, section) {
       // 保存できた欄（section）だけを確定する。ほかの欄の下書きは残す
-      if (section) sectionSaved(section);
+      if (section) {
+        sectionSaved(section);
+        // 保存はできたが閲覧ページへの反映だけ失敗した: 「保存済み」と区別して、その欄に出し続ける
+        if (data && data.publication && data.publication.failed) savedMarks[section.key] = 'unpublished';
+      }
       var moved = viewKey() !== sentFrom;
       var message = okMessage ? (typeof okMessage === 'function' ? okMessage(data) : okMessage) : '';
       if (data && data.recovered) message = (message || '保存しました。') + '（通信が途切れたため送り直して確かめました）';
@@ -1152,7 +1156,7 @@
       var paint = function () {
         var st = dr.saveState;
         var dirty = isDirty();
-        var kind = st === 'saving' ? 'saving' : dr.pending ? 'unconfirmed' : st === 'conflict' ? 'conflict' : st === 'failed' && dirty ? 'failed' : dirty ? 'dirty' : savedMarks[key] ? 'saved' : 'idle';
+        var kind = st === 'saving' ? 'saving' : dr.pending ? 'unconfirmed' : st === 'conflict' ? 'conflict' : st === 'failed' && dirty ? 'failed' : dirty ? 'dirty' : savedMarks[key] === 'unpublished' ? 'unpublished' : savedMarks[key] ? 'saved' : 'idle';
         fieldset.disabled = locked();
         status.className = 'save-state save-state--' + kind;
         status.textContent = {
@@ -1162,6 +1166,7 @@
           failed: '保存されませんでした（入力は残しています）: ' + dr.message,
           dirty: '未保存の変更',
           saved: '保存済み',
+          unpublished: '保存済み。ただし閲覧ページへの反映に失敗しました（「進行状況」の「公開データを再生成」でやり直せます）',
           idle: '',
         }[kind];
         var canSave = dirty && kind !== 'saving' && kind !== 'unconfirmed' && kind !== 'conflict';
@@ -1529,11 +1534,14 @@
         .then(function (data) {
           if (!done()) return;
           if (needsLink(data)) return linkAccount().then(loadBoot);
+          var refreshed = !!state.boot && state.bootActor === actor;
           state.boot = data;
           state.bootActor = actor;
           state.bootStale = false;
           state.authError = '';
           if (state.route.mode === 'event') return loadEventFirst(state.route.eventId);
+          // 手元の一覧の読み直しが、作成画面などへ移った後に届いた: 入力中の画面は描き直さない（日本語入力の変換を妨げない）
+          if (refreshed && state.route.mode === 'home' && homeView() !== 'list') return;
           render();
         })
         .catch(function (err) {

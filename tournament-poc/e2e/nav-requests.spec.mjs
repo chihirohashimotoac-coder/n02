@@ -169,6 +169,7 @@ test('権限は毎回サーバーが確かめる: 一覧を読み込み済みで
   expect(actions).toEqual(['eventDetail']);
   // 一覧へ戻ると、解除された大会は一覧からも消える
   await page.getByRole('link', { name: '自分の大会の一覧へ' }).click();
+  await expect(page.locator('#list-refreshing')).toHaveCount(0);
   await expect(page.locator('.event-card')).toHaveCount(1);
   await expect(page.locator('.event-card')).toContainText('自分の大会');
   // 存在しない大会の URL
@@ -197,6 +198,7 @@ test('ログインが無効になった: 画面用の記憶では開かず、ロ
   await expect(page.getByRole('heading', { name: 'この大会を運営する権限がありません' })).toBeVisible();
   await page.getByRole('link', { name: '自分の大会の一覧へ' }).click();
   await expect(page.locator('#event-list')).toBeVisible();
+  await expect(page.locator('#list-refreshing')).toHaveCount(0); // 裏の読み直しが終わるまで待つ
   await expect(page.locator('.event-card')).toHaveCount(0);
 });
 

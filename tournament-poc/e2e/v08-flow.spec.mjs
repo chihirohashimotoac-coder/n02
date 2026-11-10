@@ -199,6 +199,8 @@ test('予選ロビン→決勝トーナメント: CSV 取込 → 組分け → �
   await expect(async () => {
     await viewer.reload();
     await expect(viewer.locator('.champion')).toBeVisible({ timeout: 3000 });
+    // お知らせは優勝の確定より後に保存している。キャッシュが優勝だけを含む古い版のこともあるので、お知らせの反映まで待つ
+    await expect(viewer.locator('#notice')).toContainText('表彰式は 21:00 から', { timeout: 3000 });
   }).toPass({ timeout: 45000, intervals: [5000] });
   await expect(viewer.getByRole('heading', { level: 1 })).toHaveText('E2E v0.8 ロビン KO');
   await expect(viewer.locator('#notice')).toContainText('表彰式は 21:00 から');

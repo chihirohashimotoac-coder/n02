@@ -417,3 +417,25 @@ test('ログインが切れたまま別のアカウントでログインした: 
   await expect(page.locator('#new-name')).toHaveValue('');
   expect(await page.evaluate(() => sessionStorage.getItem('tpoc-drafts:v1') || '')).not.toContain('前の人の下書き');
 });
+
+test('保存はできたが閲覧ページへの反映に失敗: 「保存済み」と区別して欄に出し続け、再生成の導線へ行ける', async ({ page, request }) => {
+  const { eventId, auth } = await openOwnEvent(page, request, {
+    intercept: async (p) => {
+      await interceptAction(p, request, 'updateEvent', async ({ forward, reply }) => {
+        const res = JSON.parse(await forward()); // 保存は実際に行い、応答の公開の結果だけを失敗にする
+        res.data.publication = { published: false, failed: true, message: '公開データを書き込めませんでした' };
+        await reply(JSON.stringify(res));
+      });
+    },
+  });
+  await openSettings(page);
+  await page.locator('#set-notes').fill('反映に失敗する保存');
+  await page.getByRole('button', { name: '大会情報を保存' }).click();
+  const state = page.locator('#settings-event .save-state');
+  await expect(state).toContainText('保存済み。ただし閲覧ページへの反映に失敗しました');
+  await expect(state).not.toHaveText('保存済み');
+  await expect(page.locator('#draft-count')).toBeHidden(); // 入力は保存されている
+  expect((await detailOf(request, eventId, auth)).event.notes).toBe('反映に失敗する保存');
+  await openTab(page, '進行状況');
+  await expect(page.getByRole('button', { name: '公開データを再生成' })).toBeVisible();
+});
