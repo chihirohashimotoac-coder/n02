@@ -344,8 +344,8 @@ test('作成欄の見積もり（監査 PR-07）: リーグ → プレーオフ 
   await page.locator('#new-divisions').fill('3');
   await page.locator('#new-playoff').fill('4');
   const box = page.locator('#new-estimate');
-  await expect(box).toContainText('プレーオフ: 5 試合（6 人）');
+  await expect(box).toContainText('決勝トーナメント: 5 試合（6 人）');
   await expect(box).toContainText('各ディビジョンの上位 2 人');
   await expect(box).toContainText('3 ディビジョン × 2 人 = 6 人');
-  await expect(box).toContainText('入力したプレーオフの人数 4 人とは異なります');
+  await expect(box).toContainText('入力した決勝トーナメントの人数 4 人とは異なります');
 });

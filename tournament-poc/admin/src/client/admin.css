@@ -397,3 +397,20 @@ h4 { margin: 8px 0 4px; font-size: 15px; }
 @media print {
   body:not(.is-printing) .tabs, body:not(.is-printing) .save-footer { display: none !important; }
 }
+
+/* 作成内容の図解: 段階（箱）と、次へ進む人（矢印）。幅が足りなければ折り返す */
+.flow-diagram { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+.flow-box { flex: 1 1 84px; min-width: 0; display: grid; gap: 2px; align-content: center; justify-items: center; text-align: center; padding: 8px 6px; border: 1px solid var(--brand); border-radius: 8px; background: var(--final-bg); }
+.flow-box__name { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.flow-box__sub { font-size: 12px; overflow-wrap: anywhere; }
+.flow-box__count { font-size: 12px; color: var(--ink-2); }
+.flow-link { flex: 0 1 64px; min-width: 0; display: grid; align-content: center; justify-items: center; text-align: center; gap: 2px; }
+.flow-link__label { font-size: 11px; color: var(--ink-2); overflow-wrap: anywhere; }
+.flow-link__arrow { font-size: 18px; font-weight: 700; color: var(--brand); line-height: 1; }
+.flow-branch { flex: 1 1 96px; min-width: 0; display: grid; }
+.flow-branch__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.flow-diagram--stack { flex-direction: column; flex-wrap: nowrap; }
+.flow-diagram--stack .flow-box, .flow-diagram--stack .flow-link { flex: 0 0 auto; }
+.flow-diagram--stack .flow-link { display: flex; justify-content: center; align-items: center; gap: 6px; }
+.season-hint { display: grid; gap: 8px; justify-items: start; }
+.season-hint p { margin: 0; font-size: 14px; }

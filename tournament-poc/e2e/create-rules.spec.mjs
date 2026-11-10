@@ -172,3 +172,70 @@ test('想定人数は見積もりだけ: この人数で成り立たなくても
   expect(JSON.stringify(seen[0].payload)).not.toContain('expected');
   expect(seen[0].payload.players).toBeUndefined();
 });
+
+test('作成内容の図解: 段階を箱、進む人を矢印で示し、組数・通過順位・人数の入力に合わせて変わる（全 10 形式）', async ({ page, request }) => {
+  await setup(page, request);
+  const diagram = page.locator('#new-diagram');
+  const boxes = () => diagram.locator('.flow-box .flow-box__name').allTextContents();
+  // 既定: 予選ロビン 4 組 → 各組上位 2 名 → 決勝トーナメント 8 名
+  expect(await boxes()).toEqual(['予選ロビン', '決勝トーナメント']);
+  await expect(diagram.locator('.flow-box').nth(0)).toContainText('4 組');
+  await expect(diagram.locator('.flow-box').nth(0)).toContainText('24 試合');
+  await expect(diagram.locator('.flow-link__label')).toHaveText('各組上位 2 名');
+  await expect(diagram.locator('.flow-box').nth(1)).toContainText('8 名');
+  await expect(diagram.locator('.flow-box').nth(1)).toContainText('7 試合');
+  // 入力を変えると図も変わる（通信はしない）
+  await page.locator('#new-groups').fill('2');
+  await page.locator('#new-advance').fill('1');
+  await expect(diagram.locator('.flow-box').nth(0)).toContainText('2 組');
+  await expect(diagram.locator('.flow-link__label')).toHaveText('各組上位 1 名');
+  await expect(diagram.locator('.flow-box').nth(1)).toContainText('2 名');
+  const expected = {
+    elimination: ['トーナメント'],
+    robin_ab: ['予選ロビン', 'A トーナメント', 'B トーナメント'],
+    double_elimination: ['勝者側', '敗者側', 'グランドファイナル'],
+    robin: ['ロビン'],
+    league: ['リーグ'],
+    league_playoff: ['リーグ', '決勝トーナメント'],
+    multi_robin_ko: ['予選ロビン', '2 次ロビン', '決勝トーナメント'],
+    series_playoff: ['ポイントシリーズ', '決勝トーナメント'],
+    swiss: ['スイス式'],
+  };
+  for (const [id, names] of Object.entries(expected)) {
+    await chooseFormat(page, id);
+    expect(await boxes(), id).toEqual(names);
+    // 箱の数 − 分かれ先の重なり = 矢印の数 + 1（段階の間にだけ矢印を置く）
+    const steps = await diagram.locator(':scope > .flow-box, :scope > .flow-branch').count();
+    expect(await diagram.locator('.flow-link').count(), id).toBe(steps - 1);
+  }
+  // スイス式: 決勝ありにすると決勝トーナメントの箱が増える
+  await page.locator('#new-playoff-opt').fill('4');
+  expect(await boxes()).toEqual(['スイス式', '決勝トーナメント']);
+  await expect(diagram.locator('.flow-link__label')).toHaveText('上位 4 名');
+});
+
+test('表示名: 勝ち抜き戦へ進む形式は「リーグ → トーナメント」「ポイントシリーズ → トーナメント」。リーグを選ぶと、入替戦は期制リーグで行うことを案内する', async ({ page, request }) => {
+  await setup(page, request);
+  await page.locator('#new-format-more > summary').click();
+  await expect(page.locator('label[for="new-template-league_playoff"] .format-choice__label')).toHaveText('リーグ → トーナメント');
+  await expect(page.locator('label[for="new-template-series_playoff"] .format-choice__label')).toHaveText('ポイントシリーズ → トーナメント');
+  await expect(page.locator('#create-form')).not.toContainText('→ プレーオフ');
+  const hint = page.locator('#new-season-hint');
+  await expect(hint).toBeHidden(); // 既定の形式では出さない
+  await chooseFormat(page, 'league_playoff');
+  await expect(hint).toBeHidden();
+  await expect(page.getByLabel('決勝トーナメントに進む人数', { exact: true })).toBeVisible();
+  await expect(page.locator('#new-format-info')).toContainText('入替戦とは別です');
+  await chooseFormat(page, 'league');
+  await expect(hint).toBeVisible();
+  await expect(hint).toContainText('ディビジョンが 2 つ以上');
+  await expect(hint).toContainText('入替戦');
+  await expect(hint).toContainText('期制リーグ');
+  // 入力した内容は下書きに残したまま、期制リーグの作成画面へ移れる
+  await hint.getByRole('button', { name: '期制リーグを作成する' }).click();
+  await expect(page).toHaveURL(/#new-season$/);
+  await expect(page.locator('#season-name')).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('#new-name')).toHaveValue('組み合わせの確認');
+  await expect(page.locator('#new-template-league')).toBeChecked();
+});

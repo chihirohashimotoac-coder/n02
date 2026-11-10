@@ -2114,6 +2114,54 @@
       return p;
     }
 
+    /**
+     * 作成内容の図解: 段階を箱、進む人を矢印で示す（入力した組数・通過順位・人数を反映する）。
+     * 戻り値 { steps: [{ name, sub, matches } | { branch: [...] }], links: [段階の間の矢印に添える文字] }
+     * 試合数・人数は見積もり（estimateFormat_）の結果を使う。ここでは新しい計算をしない
+     */
+    function formatDiagram(x, est) {
+      var st = est ? est.stages : [];
+      var box = function (i, sub) {
+        var s = st[i] || { name: '', matches: 0 };
+        return { name: s.name, sub: sub, matches: s.matches };
+      };
+      var people = function (i) {
+        var m = st[i] && /^(\d+) 人/.exec(String(st[i].note || ''));
+        return m ? m[1] + ' 名' : '';
+      };
+      var id = x.template;
+      var cyc = String(x.cycles) === '2' ? '・2 回総当たり' : '';
+      if (id === 'robin_ko') return { steps: [box(0, x.groups + ' 組' + cyc), box(1, people(1))], links: ['各組上位 ' + x.advance + ' 名'] };
+      if (id === 'robin_ab') return { steps: [box(0, x.groups + ' 組' + cyc), { branch: [box(1, people(1)), box(2, people(2))] }], links: ['上位 ' + x.advance + ' 位まで → A／残り → B'] };
+      if (id === 'elimination') return { steps: [box(0, people(0))], links: [] };
+      if (id === 'double_elimination') return { steps: [{ branch: [{ name: '勝者側', sub: '全員ここから' }, { name: '敗者側', sub: '1 敗した選手' }] }, { name: 'グランドファイナル', sub: x.grandFinal === 'single' ? '1 試合' : '最大 2 試合', matches: est ? est.total : 0, total: true }], links: ['各側の優勝者'] };
+      if (id === 'robin') return { steps: [box(0, x.groups + ' 組' + cyc)], links: [] };
+      if (id === 'league') return { steps: [box(0, x.divisions + ' ディビジョン' + cyc)], links: [] };
+      if (id === 'league_playoff') return { steps: [box(0, x.divisions + ' ディビジョン' + cyc), box(1, people(1))], links: [Number(x.divisions) > 1 ? '各ディビジョンの上位' : '上位 ' + x.playoff + ' 名'] };
+      if (id === 'multi_robin_ko') return { steps: [box(0, x.groups + ' 組'), box(1, x.groups2 + ' 組'), box(2, people(2))], links: ['各組上位 ' + x.advance + ' 名', '各組上位 ' + x.advance2 + ' 名'] };
+      if (id === 'series_playoff') return { steps: [box(0, x.nights + ' 節・毎節の小トーナメント'), box(1, people(1))], links: ['累計ポイント上位'] };
+      if (id === 'swiss') return st.length > 1 ? { steps: [box(0, x.swissRounds + ' 回戦'), box(1, people(1))], links: ['上位 ' + x.playoffOptional + ' 名'] } : { steps: [box(0, x.swissRounds + ' 回戦')], links: [] };
+      return { steps: [], links: [] };
+    }
+
+    function renderFormatDiagram(model) {
+      var boxNode = function (b) {
+        return el('li', { className: 'flow-box' }, [
+          el('span', { className: 'flow-box__name', text: b.name }),
+          b.sub ? el('span', { className: 'flow-box__sub', text: b.sub }) : null,
+          b.matches || b.matches === 0 ? el('span', { className: 'flow-box__count', text: (b.total ? '全 ' : '') + b.matches + ' 試合' }) : null,
+        ]);
+      };
+      var items = [];
+      // 3 段階以上は横に収まらないので、上から下へ並べる
+      var stack = model.steps.length > 2;
+      model.steps.forEach(function (step, i) {
+        if (i > 0) items.push(el('li', { className: 'flow-link' }, [el('span', { className: 'flow-link__label', text: model.links[i - 1] || '' }), el('span', { className: 'flow-link__arrow', 'aria-hidden': 'true', text: stack ? '↓' : '→' }), el('span', { className: 'visually-hidden', text: 'が次へ進む' })]));
+        items.push(step.branch ? el('li', { className: 'flow-branch' }, [el('ul', { className: 'flow-branch__list' }, step.branch.map(boxNode))]) : boxNode(step));
+      });
+      return el('ol', { className: 'flow-diagram' + (stack ? ' flow-diagram--stack' : ''), id: 'new-diagram', 'aria-label': '大会の進み方' }, items);
+    }
+
     function ruleSummaryText(r) {
       var n = Number(r.bestOf);
       var text = r.format === 'fixed' ? '固定 ' + n + ' Legs（引き分けあり）' : r.format === 'sets' ? 'セット制・先に ' + legsToWin(n) + ' セット（各セット先に ' + legsToWin(Number(r.setBestOf)) + ' Leg）' : '先に ' + legsToWin(n) + ' Leg（Best of ' + n + '）';
@@ -2200,7 +2248,7 @@
           node: el('fieldset', { className: 'fieldset' }, [el('legend', { text: '勝ち点' }), el('div', { className: 'row row--tight' }, [pointField('勝ち', inputs.pWin), pointField('引き分け', inputs.pDraw), pointField('負け', inputs.pLoss)])]),
           controls: [inputs.pWin, inputs.pDraw, inputs.pLoss],
         },
-        playoff: { node: field('プレーオフに進む人数', inputs.playoff), controls: [inputs.playoff] },
+        playoff: { node: field('決勝トーナメントに進む人数', inputs.playoff), controls: [inputs.playoff] },
         playoffOptional: { node: field('決勝トーナメントに進む人数（0 = 行わない）', inputs.playoffOptional), controls: [inputs.playoffOptional] },
         nights: { node: field('節の数', inputs.nights), controls: [inputs.nights] },
         nightPoints: {
@@ -2243,6 +2291,11 @@
       };
       var summary = el('dl', { className: 'summary', id: 'new-summary' });
       var estimateBox = el('div', { className: 'estimate', id: 'new-estimate', 'aria-live': 'polite' });
+      var diagramBox = el('div', { className: 'flow-wrap' });
+      var seasonHint = el('div', { className: 'notice season-hint', id: 'new-season-hint', hidden: true }, [
+        el('p', { text: 'ディビジョンが 2 つ以上のリーグで、期ごとの昇格・降格と入替戦（「プレーオフ」と呼ばれることもあります）を行うには、期制リーグを使います。この形式で作った大会も、作成後に「期・昇降格」から期制リーグへ移行できます（リーグだけの大会に限ります）。' }),
+        el('button', { className: 'btn btn--small', type: 'button', id: 'new-open-season', text: '期制リーグを作成する', onClick: function () { openHomeView('season'); } }),
+      ]);
       var sync = function () {
         var x = read();
         var f = formatById(x.template);
@@ -2282,9 +2335,13 @@
         };
         row('大会名', el('span', { className: x.name.trim() ? '' : 'muted', text: x.name.trim() || '（未入力）' }));
         if (x.date.trim()) row('開催日', el('span', { text: x.date.trim() }));
-        row('大会の構成', el('span', { className: 'flow', text: f ? f.flow : '' }));
+        row('大会の形式', el('span', { className: 'flow', text: f ? f.label : '' }));
         row('1 試合のルール', el('span', { text: ruleSummaryText(x.rule) }));
         row('作成時の公開設定', el('span', { text: '非公開・準備中' }));
+        diagramBox.textContent = '';
+        if (f) diagramBox.appendChild(renderFormatDiagram(formatDiagram(x, est)));
+        // リーグ（総当たりだけ）を選んだとき: 昇格・降格・入替戦は期制リーグの機能であることを案内する
+        seasonHint.hidden = !(f && f.id === 'league');
         estimateBox.textContent = '';
         if (est) {
           estimateBox.appendChild(el('p', { className: 'estimate__total', text: '予定 ' + est.total + (est.max !== est.total ? '〜' + est.max : '') + ' 試合（' + x.expected + ' 人の場合）' }));
@@ -2310,7 +2367,7 @@
           el('div', { className: 'form-grid' }, [field('大会名', name), field('開催日', date)]),
           el('details', { className: 'details', id: 'new-basic-details', open: v.organizer ? true : null }, [el('summary', { text: '詳細' }), field('主催者名（任意・非公開）', organizer)]),
         ]),
-        section('大会の形式', 'new-h-format', [basicChoices, moreFormats, formatInfo]),
+        section('大会の形式', 'new-h-format', [basicChoices, moreFormats, formatInfo, seasonHint]),
         section('人数・進行', 'new-h-flow', [
           el('div', { className: 'form-grid form-grid--tight' }, [
             field('想定人数（見積もり用）', expected),
@@ -2348,6 +2405,7 @@
       var aside = el('aside', { className: 'panel create-summary', 'aria-labelledby': 'new-h-summary' }, [
         el('h3', { id: 'new-h-summary', text: '作成内容' }),
         summary,
+        diagramBox,
         estimateBox,
         el('p', { className: 'muted small', text: '人数は見積もり用で、保存しません。段階の追加・変更は作成後に「形式」でできます。' }),
         sec.footer(),
@@ -5571,7 +5629,7 @@
 
     /** 主催者のホーム: 期制リーグ（1 期目）の作成 */
     function seasonCreatePanel() {
-      var intro = el('p', { className: 'muted small', text: '期ごとに 1 つの大会を作ってたどる運営方式です。1 期目は全員が 1 つのリーグで総当たりを行い、その順位から 2 期目のディビジョンの配置案を作ります。2 期目以降は各期の終わりに、下位の部の 1 位が自動昇格・上位の部の最下位が自動降格し、上位の部の下から 2 位と下位の部の 2 位が入替戦を行います。次期の所属は、主催者がプレビューを確認・修正して確定するまで決まりません。「リーグ → プレーオフ」（リーグ上位の決勝トーナメント）とは別の機能です。' });
+      var intro = el('p', { className: 'muted small', text: '期ごとに 1 つの大会を作ってたどる運営方式です。1 期目は全員が 1 つのリーグで総当たりを行い、その順位から 2 期目のディビジョンの配置案を作ります。2 期目以降は各期の終わりに、下位の部の 1 位が自動昇格・上位の部の最下位が自動降格し、上位の部の下から 2 位と下位の部の 2 位が入替戦を行います。次期の所属は、主催者がプレビューを確認・修正して確定するまで決まりません。入替戦は「プレーオフ」と呼ばれることもありますが、「リーグ → トーナメント」（リーグ上位による決勝トーナメント）とは別の機能です。' });
       var name = el('input', { className: 'input', id: 'season-name', required: true, maxlength: 60, placeholder: '例: 水曜リーグ' });
       var date = el('input', { className: 'input', id: 'season-date', maxlength: 40, placeholder: '例: 2026年11月〜' });
       var organizer = el('input', { className: 'input', id: 'season-organizer', maxlength: 40, placeholder: '（任意・非公開）' });

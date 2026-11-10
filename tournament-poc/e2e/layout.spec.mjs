@@ -80,9 +80,14 @@ for (const size of SIZES) {
     } else {
       expect(summary.y).toBeGreaterThanOrEqual(main.y + main.height - 1); // 1 列: 入力の後・作成ボタンの前
     }
-    for (const id of ['league_playoff', 'multi_robin_ko', 'series_playoff', 'swiss', 'double_elimination']) {
+    for (const id of ['league', 'robin_ab', 'league_playoff', 'multi_robin_ko', 'series_playoff', 'swiss', 'double_elimination']) {
       await chooseFormat(page, id);
       await expectNoHorizontalOverflow(page);
+      // 図解は作成内容の枠からはみ出さない
+      const frame = await page.locator('.create-summary').boundingBox();
+      const diagram = await page.locator('#new-diagram').boundingBox();
+      expect(diagram.x, id).toBeGreaterThanOrEqual(frame.x);
+      expect(diagram.x + diagram.width, id).toBeLessThanOrEqual(frame.x + frame.width + 0.5);
     }
     await page.getByRole('button', { name: 'この内容で大会を作成' }).click();
     await expect(page.getByRole('heading', { name: '配置の確認' })).toBeVisible();
@@ -240,7 +245,7 @@ test('キーボードだけで作成できる: 形式は矢印キーで選べ、
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('#new-template-elimination')).toBeChecked();
   await expect(page.locator('#new-template-elimination')).toBeFocused();
-  await expect(page.locator('#new-summary')).toContainText('トーナメント（シングルエリミネーション）');
+  await expect(page.locator('#new-summary')).toContainText('トーナメントのみ');
   expect(await page.locator('label[for="new-template-elimination"]').evaluate((e) => getComputedStyle(e).borderColor)).not.toBe(await page.locator('label[for="new-template-robin"]').evaluate((e) => getComputedStyle(e).borderColor));
   await page.locator('#new-name').focus();
   await page.keyboard.press('Enter'); // フォームの送信
