@@ -519,7 +519,7 @@ function actionConvertToSeasonLeague_(ctx, payload) {
   }
   var bundle = collectEvent_(ctx, eventId);
   if (bundle.stages.length !== 1 || bundle.stages[0].type !== STAGE_TYPE.LEAGUE) {
-    throw appError_('VALIDATION', '期制リーグにできるのは、リーグの段階だけの大会です（プレーオフなど他の段階がある大会は移行できません）。');
+    throw appError_('VALIDATION', '期制リーグにできるのは、リーグの段階だけの大会です（決勝トーナメントなど他の段階がある大会は移行できません）。');
   }
   var stage = bundle.stages[0];
   var stageCfg = stageConfig_(stage);

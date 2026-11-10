@@ -468,7 +468,8 @@ function createEventRecords_(ctx, input) {
     var league = addStage('リーグ', STAGE_TYPE.LEAGUE, lc);
     addGroups(league, D);
     if (template === 'league_playoff') {
-      var po = addStage('プレーオフ', STAGE_TYPE.SINGLE_ELIMINATION, koConfig());
+      // 段階の名前は「決勝トーナメント」（2026-11 までに作った大会は「プレーオフ」のまま。名前は表示だけで、処理は段階の種類と ID で行う）
+      var po = addStage('決勝トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, koConfig());
       lc.advancement = [{ fromRank: 1, toRank: Math.max(1, Math.ceil((input.playoff || 4) / D)), targetStageId: po.stage_id }];
       setConfig(league, lc);
     }
@@ -487,7 +488,7 @@ function createEventRecords_(ctx, input) {
   } else if (template === 'series_playoff') {
     var series = addStage('ポイントシリーズ', STAGE_TYPE.SERIES, { nights: input.nights || 16, nightPoints: input.nightPoints || [5, 3, 2, 0], tiebreakers: DEFAULT_SERIES_TIEBREAKERS_.slice() });
     addGroups(series, input.nights || 16);
-    var spo = addStage('プレーオフ', STAGE_TYPE.SINGLE_ELIMINATION, { thirdPlace: !!input.thirdPlace });
+    var spo = addStage('決勝トーナメント', STAGE_TYPE.SINGLE_ELIMINATION, { thirdPlace: !!input.thirdPlace });
     setConfig(series, { nights: input.nights || 16, nightPoints: input.nightPoints || [5, 3, 2, 0], tiebreakers: DEFAULT_SERIES_TIEBREAKERS_.slice(), advancement: [{ fromRank: 1, toRank: input.playoff || 4, targetStageId: spo.stage_id }] });
   } else if (template === 'swiss') {
     var sc = { rounds: input.swissRounds || 5, points: input.points, tiebreakers: DEFAULT_SWISS_TIEBREAKERS_.slice() };
@@ -639,7 +640,7 @@ function actionCreateEvent_(ctx, payload) {
     thirdPlace: payload.thirdPlace === true,
     cycles: payload.cycles === 2 ? 2 : 1,
     divisions: template === 'league' || template === 'league_playoff' ? parseSmallInt_(payload.divisions, 'ディビジョン数', 1, ADMIN_CONFIG.MAX_GROUPS, 1) : 1,
-    playoff: hasPlayoff ? parseSmallInt_(payload.playoff, 'プレーオフの人数', 2, 64, 4) : template === 'swiss' ? parseSmallInt_(payload.playoff, '決勝トーナメントの人数', 0, 64, 0) : 0,
+    playoff: hasPlayoff ? parseSmallInt_(payload.playoff, '決勝トーナメントの人数', 2, 64, 4) : template === 'swiss' ? parseSmallInt_(payload.playoff, '決勝トーナメントの人数', 0, 64, 0) : 0,
     points: parsePoints_(payload.points, { win: 2, draw: 1, loss: 0 }),
     nights: template === 'series_playoff' ? parseSmallInt_(payload.nights, '節の数', 1, ADMIN_CONFIG.MAX_SERIES_NIGHTS, 16) : 0,
     nightPoints: template === 'series_playoff' ? parseNightPoints_(payload.nightPoints, [5, 3, 2, 0]) : null,
