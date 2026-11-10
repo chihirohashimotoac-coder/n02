@@ -760,6 +760,8 @@ function coerceCell_(value, type) {
     if (typeof value === 'string') return value.trim().toUpperCase() === 'TRUE';
     return false;
   }
+  // 文字列はそのまま（String(value) と同じ結果。読み込みのたびに全セルを通るので先に返す）
+  if (typeof value === 'string') return value;
   if (value === null || value === undefined) return '';
   if (Object.prototype.toString.call(value) === '[object Date]') {
     return isNaN(value.getTime()) ? '' : value.toISOString();
@@ -2609,10 +2611,14 @@ function roundLabelForElimination_(round, rounds) {
 
 /* ---------- 大会の組み立て ---------- */
 
-/** 大会の構成要素を event_id で取り出す */
-function collectEvent_(ctx, eventId) {
+/**
+ * 大会の構成要素を event_id で取り出す。
+ * rowsOf（任意）: eventRowIndex_ の索引。読み取りだけの操作で多くの大会を続けて取り出すときに、表の全行の走査を 1 回にする
+ */
+function collectEvent_(ctx, eventId, rowsOf) {
   var event = findRecord_(ctx.table('Events'), eventId, '大会');
   var filter = function (name) {
+    if (rowsOf) return rowsOf(name, eventId);
     return ctx.table(name).rows.filter(function (r) {
       return r.event_id === eventId;
     });
@@ -2648,6 +2654,24 @@ function collectEvent_(ctx, eventId) {
     matches: matches,
     // v1.0: 期制リーグの期なら、その系列と前後の期（06c_season.js）。期制リーグでなければ null
     season: seasonContext_(ctx, eventId),
+  };
+}
+
+/**
+ * 表の行を event_id ごとにまとめた索引（読み取りだけの操作用。表を変更する操作では使わない）。
+ * 表は最初に使うときに 1 回だけ走査する。返す配列は毎回コピー（collectEvent_ が並べ替えるため）で、順番は表の行の順（filter と同じ）
+ */
+function eventRowIndex_(ctx) {
+  var built = {};
+  return function (name, eventId) {
+    if (!built[name]) {
+      var by = Object.create(null);
+      ctx.table(name).rows.forEach(function (r) {
+        (by[r.event_id] = by[r.event_id] || []).push(r);
+      });
+      built[name] = by;
+    }
+    return (built[name][eventId] || []).slice();
   };
 }
 
@@ -5092,7 +5116,7 @@ function upsertSnapshotRow_(ctx, table, key, json, version, isDefault) {
  * 公開データが上限を超えるときは、その操作ごと保存しない（TOO_LARGE）。
  * v1.0: 上限を超える大会は本体とパート（分割行）に分ける。使わなくなったパートの行は消す。
  */
-function syncPublication_(ctx, eventId) {
+function syncPublication_(ctx, eventId, keep) {
   ctx.invalidate();
   var bundle = collectEvent_(ctx, eventId);
   var table = ctx.table('PublicSnapshots');
@@ -5112,6 +5136,8 @@ function syncPublication_(ctx, eventId) {
   }
 
   var pub = buildPublication_(bundle);
+  // keep（任意）: 作った公開データを呼び出し元へ渡す（runMutation_ が応答の snapshotBudget_ で使い回す）
+  if (keep) keep.publication = pub;
   var version = md5Hex_(pub.json);
   if (rows.length > 1) {
     // 手作業などで重複した行は 1 行にまとめる
@@ -5170,10 +5196,11 @@ function assertSnapshotSize_(json, force) {
  * 公開データの大きさの目安（運営画面の表示用。公開していない大会でも、公開したときの大きさを返す）。
  * v1.0: 分割したときは本体の大きさ（size）・分割前の大きさ（fullSize）・パートの数と合計を返す。上限を超えて公開できないときは error
  */
-function snapshotBudget_(bundle) {
+function snapshotBudget_(bundle, built) {
   var limit = snapshotLimit_();
   try {
-    var pub = buildPublication_(bundle);
+    // built: 同じ内容から作り済みの公開データ（runMutation_ の syncPublication_）。なければ作る
+    var pub = built || buildPublication_(bundle);
     var total = pub.parts.reduce(function (sum, p) {
       return sum + p.json.length;
     }, pub.json.length);
@@ -5293,8 +5320,10 @@ function actionMyEvents_(ctx) {
     .sort(function (a, b) {
       return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
     });
+  // 一覧の大会ごとに各表を全行走査しないよう、event_id の索引を 1 回だけ作る（読み取りだけなので表は変わらない）
+  var rowsOf = eventRowIndex_(ctx);
   var list = mine.slice(0, ADMIN_CONFIG.MAX_MY_EVENTS).map(function (e) {
-    var s = summarizeEventView_(buildEventView_(collectEvent_(ctx, e.event_id), false), '');
+    var s = summarizeEventView_(buildEventView_(collectEvent_(ctx, e.event_id, rowsOf), false), '');
     if (String(e.updated_at || '') > s.updatedAt) s.updatedAt = String(e.updated_at || '');
     s.isPublic = !!e.is_public;
     s.isSample = !!e.is_sample;
@@ -5309,10 +5338,16 @@ function actionEventDetail_(ctx, payload) {
   return eventDetail_(ctx, eventId);
 }
 
-/** 呼び出し元が最新の内容を読み込んだ ctx を渡す（書き込み後は syncPublication_ が読み直している） */
-function eventDetail_(ctx, eventId) {
-  var bundle = collectEvent_(ctx, eventId);
-  var view = buildEventView_(bundle, true);
+/**
+ * 呼び出し元が最新の内容を読み込んだ ctx を渡す（書き込み後は syncPublication_ が読み直している）。
+ * reuse（任意・runMutation_ だけが渡す）: 同じリクエストの中で、その後に変更のない内容から作り済みのもの
+ * - built: { bundle, view } … afterEventChange_ が作った大会の構成要素と運営用の表示（includePrivate = true）
+ * - publication: syncPublication_ が作った公開データ（snapshotBudget_ で同じものを作り直さない）
+ */
+function eventDetail_(ctx, eventId, reuse) {
+  var built = reuse && reuse.built && reuse.built.bundle.event.event_id === eventId ? reuse.built : null;
+  var bundle = built ? built.bundle : collectEvent_(ctx, eventId);
+  var view = built ? built.view : buildEventView_(bundle, true);
   var role = eventRole_(ctx.user, bundle.event, ctx);
   // 主催者の Google アカウントは、本人と管理者にだけ見せる（店舗スタッフ・共同主催者には出さない）
   if (role !== 'owner' && role !== 'admin') delete view.event.ownerEmail;
@@ -5340,7 +5375,7 @@ function eventDetail_(ctx, eventId) {
   }
   // v1.0: 期制リーグ（期の一覧・入替戦・次期・前期の訂正との照合）。期制リーグでなく移行もできない大会は null
   view.season = seasonDetail_(ctx, bundle, view, role);
-  view.snapshotBudget = snapshotBudget_(bundle);
+  view.snapshotBudget = snapshotBudget_(bundle, reuse && reuse.publication);
   view.publication = publicationStatus_(ctx, eventId);
   view.history = ctx
     .table('History')
@@ -7886,8 +7921,12 @@ function autoForfeitWithdrawn_(ctx, eventId, stageId) {
 
 var SPECIAL_RESULTS_ = [RESULT_TYPE.WALKOVER, RESULT_TYPE.RETIRED, RESULT_TYPE.DISQUALIFIED];
 
-/** 1 試合分の結果を検証する（書き込みはしない）。戻り値を applyMatchResult_ に渡して保存する */
-function prepareMatchResult_(ctx, payload) {
+/**
+ * 1 試合分の結果を検証する（書き込みはしない）。戻り値を applyMatchResult_ に渡して保存する。
+ * shared（任意）: まとめて確定で、同じ大会の試合を続けて検証するときの入れ物。検証の間は何も書き換えないので、
+ * 大会の構成要素（collectEvent_）を 1 回だけ作って使い回す
+ */
+function prepareMatchResult_(ctx, payload, shared) {
   var matchesTable = ctx.table('Matches');
   var match = findRecord_(matchesTable, requireId_(payload.matchId, '試合'), '試合');
   assertRev_(match, requireRev_(payload.rev), '試合');
@@ -7902,7 +7941,8 @@ function prepareMatchResult_(ctx, payload) {
   if (resultType !== '' && SPECIAL_RESULTS_.indexOf(resultType) === -1) throw appError_('VALIDATION', '特殊な結果の種類が不正です。');
   if (resultType && status !== MATCH_STATUS.FINAL) throw appError_('VALIDATION', '不戦勝・途中棄権・失格は「確定」として保存してください。');
 
-  var bundle = collectEvent_(ctx, match.event_id);
+  var bundle = shared && shared.bundle && shared.bundle.event.event_id === match.event_id ? shared.bundle : collectEvent_(ctx, match.event_id);
+  if (shared) shared.bundle = bundle;
   var stage = bundle.stageById[match.stage_id];
   if (isGroupStage_(stage) || stage.type === STAGE_TYPE.SERIES) assertNotAdvanced_(stage);
   if (stage.type === STAGE_TYPE.SWISS) {
@@ -8019,6 +8059,8 @@ function actionSaveMatchResults_(ctx, payload) {
   if (!Array.isArray(list) || !list.length) throw appError_('VALIDATION', '確定する試合がありません。');
   if (list.length > MAX_BATCH_RESULTS_) throw appError_('VALIDATION', '一度に確定できるのは ' + MAX_BATCH_RESULTS_ + ' 試合までです。');
   var seen = {};
+  // すべて検証してから書き換えるので、検証の間は大会の構成要素を使い回せる（prepareMatchResult_ の shared）
+  var shared = {};
   var preps = list.map(function (r) {
     if (!r || typeof r !== 'object' || Array.isArray(r)) throw appError_('BAD_REQUEST', '結果の形式が不正です。');
     var matchId = requireId_(r.matchId, '試合');
@@ -8029,7 +8071,7 @@ function actionSaveMatchResults_(ctx, payload) {
     if (match.event_id !== eventId) throw appError_('NOT_FOUND', '試合 が見つかりません。画面を再読み込みしてください。');
     if (match.status === MATCH_STATUS.FINAL) throw appError_('ALREADY_FINAL', '確定済みの試合が含まれています。画面を再読み込みしてください。');
     try {
-      return prepareMatchResult_(ctx, { matchId: matchId, rev: r.rev, status: MATCH_STATUS.FINAL, p1Legs: r.p1Legs, p2Legs: r.p2Legs, p1Sets: r.p1Sets, p2Sets: r.p2Sets });
+      return prepareMatchResult_(ctx, { matchId: matchId, rev: r.rev, status: MATCH_STATUS.FINAL, p1Legs: r.p1Legs, p2Legs: r.p2Legs, p1Sets: r.p1Sets, p2Sets: r.p2Sets }, shared);
     } catch (e) {
       if (!e.appCode) throw e;
       var p1 = ctx.table('Players').byKey[match.player1_id];
@@ -9636,7 +9678,8 @@ function afterEventChange_(ctx, eventId) {
   if (!event || !ctx.touchedResults) return;
   var cfg = eventConfig_(event);
   if (!cfg.autoFinish) return;
-  var view = buildEventView_(collectEvent_(ctx, eventId), true);
+  var bundle = collectEvent_(ctx, eventId);
+  var view = buildEventView_(bundle, true);
   var raw = safeJson_(event.config_json, {});
   if (view.complete && event.status !== EVENT_STATUS.FINISHED) {
     raw.autoFinishedAt = ctx.now;
@@ -9647,7 +9690,8 @@ function afterEventChange_(ctx, eventId) {
     event.status = EVENT_STATUS.RUNNING;
     recordHistory_(ctx, 'event.autoReopen', 'Event', eventId, eventId, null, { reasons: view.completion.reasons.slice(0, 5) });
   } else {
-    return;
+    // 大会を変えなかったときは、作った構成要素と表示を返す（runMutation_ が応答の詳細で使い回す。変えたときは作り直す）
+    return { bundle: bundle, view: view };
   }
   event.config_json = JSON.stringify(raw);
   event.rev = (event.rev || 0) + 1;
@@ -11700,17 +11744,21 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
         if (eventIds.indexOf(id) === -1) eventIds.push(id);
       });
       delete result.alsoPublish;
+      // 応答の詳細（eventDetail_）で使い回す、この後に変更のない内容から作り済みのもの。
+      // afterEventChange_ の表示は、対象の大会が 1 つで、その大会を変えなかったときだけ使う（他の大会の後処理で変わりうるため）
+      var reuse = {};
       eventIds.forEach(function (id) {
         // v1.0: 期制リーグの期の選手には会員 ID を付ける（選手の追加・CSV 取込など、どの操作で選手が増えても）
         if (ctx.table('Events').byKey[id]) ensureSeasonMembers_(ctx, id);
-        afterEventChange_(ctx, id);
+        var built = afterEventChange_(ctx, id);
+        if (built && eventIds.length === 1) reuse.built = built;
       });
       flushHistory_(ctx);
       // 公開データも書き込む前に組み立てる。大きすぎるときは何も保存せずに止める（保存してから気づくことがないように）
       var publications = {};
       eventIds.forEach(function (id) {
         try {
-          publications[id] = syncPublication_(ctx, id);
+          publications[id] = syncPublication_(ctx, id, id === result.eventId ? reuse : null);
         } catch (e) {
           if (e && e.appCode === 'TOO_LARGE') throw e;
           // 公開データを作る処理の思わぬ失敗では、操作そのものは保存する（結果の入力を止めない）。
@@ -11723,7 +11771,7 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
       commitContext_(ctx);
       if (result.eventId) {
         result.publication = publications[result.eventId];
-        result.detail = eventDetail_(ctx, result.eventId);
+        result.detail = eventDetail_(ctx, result.eventId, reuse);
       }
       delete result.forceRepublish;
     }

@@ -92,8 +92,10 @@ function actionMyEvents_(ctx) {
     .sort(function (a, b) {
       return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
     });
+  // 一覧の大会ごとに各表を全行走査しないよう、event_id の索引を 1 回だけ作る（読み取りだけなので表は変わらない）
+  var rowsOf = eventRowIndex_(ctx);
   var list = mine.slice(0, ADMIN_CONFIG.MAX_MY_EVENTS).map(function (e) {
-    var s = summarizeEventView_(buildEventView_(collectEvent_(ctx, e.event_id), false), '');
+    var s = summarizeEventView_(buildEventView_(collectEvent_(ctx, e.event_id, rowsOf), false), '');
     if (String(e.updated_at || '') > s.updatedAt) s.updatedAt = String(e.updated_at || '');
     s.isPublic = !!e.is_public;
     s.isSample = !!e.is_sample;
@@ -108,10 +110,16 @@ function actionEventDetail_(ctx, payload) {
   return eventDetail_(ctx, eventId);
 }
 
-/** 呼び出し元が最新の内容を読み込んだ ctx を渡す（書き込み後は syncPublication_ が読み直している） */
-function eventDetail_(ctx, eventId) {
-  var bundle = collectEvent_(ctx, eventId);
-  var view = buildEventView_(bundle, true);
+/**
+ * 呼び出し元が最新の内容を読み込んだ ctx を渡す（書き込み後は syncPublication_ が読み直している）。
+ * reuse（任意・runMutation_ だけが渡す）: 同じリクエストの中で、その後に変更のない内容から作り済みのもの
+ * - built: { bundle, view } … afterEventChange_ が作った大会の構成要素と運営用の表示（includePrivate = true）
+ * - publication: syncPublication_ が作った公開データ（snapshotBudget_ で同じものを作り直さない）
+ */
+function eventDetail_(ctx, eventId, reuse) {
+  var built = reuse && reuse.built && reuse.built.bundle.event.event_id === eventId ? reuse.built : null;
+  var bundle = built ? built.bundle : collectEvent_(ctx, eventId);
+  var view = built ? built.view : buildEventView_(bundle, true);
   var role = eventRole_(ctx.user, bundle.event, ctx);
   // 主催者の Google アカウントは、本人と管理者にだけ見せる（店舗スタッフ・共同主催者には出さない）
   if (role !== 'owner' && role !== 'admin') delete view.event.ownerEmail;
@@ -139,7 +147,7 @@ function eventDetail_(ctx, eventId) {
   }
   // v1.0: 期制リーグ（期の一覧・入替戦・次期・前期の訂正との照合）。期制リーグでなく移行もできない大会は null
   view.season = seasonDetail_(ctx, bundle, view, role);
-  view.snapshotBudget = snapshotBudget_(bundle);
+  view.snapshotBudget = snapshotBudget_(bundle, reuse && reuse.publication);
   view.publication = publicationStatus_(ctx, eventId);
   view.history = ctx
     .table('History')
@@ -2685,8 +2693,12 @@ function autoForfeitWithdrawn_(ctx, eventId, stageId) {
 
 var SPECIAL_RESULTS_ = [RESULT_TYPE.WALKOVER, RESULT_TYPE.RETIRED, RESULT_TYPE.DISQUALIFIED];
 
-/** 1 試合分の結果を検証する（書き込みはしない）。戻り値を applyMatchResult_ に渡して保存する */
-function prepareMatchResult_(ctx, payload) {
+/**
+ * 1 試合分の結果を検証する（書き込みはしない）。戻り値を applyMatchResult_ に渡して保存する。
+ * shared（任意）: まとめて確定で、同じ大会の試合を続けて検証するときの入れ物。検証の間は何も書き換えないので、
+ * 大会の構成要素（collectEvent_）を 1 回だけ作って使い回す
+ */
+function prepareMatchResult_(ctx, payload, shared) {
   var matchesTable = ctx.table('Matches');
   var match = findRecord_(matchesTable, requireId_(payload.matchId, '試合'), '試合');
   assertRev_(match, requireRev_(payload.rev), '試合');
@@ -2701,7 +2713,8 @@ function prepareMatchResult_(ctx, payload) {
   if (resultType !== '' && SPECIAL_RESULTS_.indexOf(resultType) === -1) throw appError_('VALIDATION', '特殊な結果の種類が不正です。');
   if (resultType && status !== MATCH_STATUS.FINAL) throw appError_('VALIDATION', '不戦勝・途中棄権・失格は「確定」として保存してください。');
 
-  var bundle = collectEvent_(ctx, match.event_id);
+  var bundle = shared && shared.bundle && shared.bundle.event.event_id === match.event_id ? shared.bundle : collectEvent_(ctx, match.event_id);
+  if (shared) shared.bundle = bundle;
   var stage = bundle.stageById[match.stage_id];
   if (isGroupStage_(stage) || stage.type === STAGE_TYPE.SERIES) assertNotAdvanced_(stage);
   if (stage.type === STAGE_TYPE.SWISS) {
@@ -2818,6 +2831,8 @@ function actionSaveMatchResults_(ctx, payload) {
   if (!Array.isArray(list) || !list.length) throw appError_('VALIDATION', '確定する試合がありません。');
   if (list.length > MAX_BATCH_RESULTS_) throw appError_('VALIDATION', '一度に確定できるのは ' + MAX_BATCH_RESULTS_ + ' 試合までです。');
   var seen = {};
+  // すべて検証してから書き換えるので、検証の間は大会の構成要素を使い回せる（prepareMatchResult_ の shared）
+  var shared = {};
   var preps = list.map(function (r) {
     if (!r || typeof r !== 'object' || Array.isArray(r)) throw appError_('BAD_REQUEST', '結果の形式が不正です。');
     var matchId = requireId_(r.matchId, '試合');
@@ -2828,7 +2843,7 @@ function actionSaveMatchResults_(ctx, payload) {
     if (match.event_id !== eventId) throw appError_('NOT_FOUND', '試合 が見つかりません。画面を再読み込みしてください。');
     if (match.status === MATCH_STATUS.FINAL) throw appError_('ALREADY_FINAL', '確定済みの試合が含まれています。画面を再読み込みしてください。');
     try {
-      return prepareMatchResult_(ctx, { matchId: matchId, rev: r.rev, status: MATCH_STATUS.FINAL, p1Legs: r.p1Legs, p2Legs: r.p2Legs, p1Sets: r.p1Sets, p2Sets: r.p2Sets });
+      return prepareMatchResult_(ctx, { matchId: matchId, rev: r.rev, status: MATCH_STATUS.FINAL, p1Legs: r.p1Legs, p2Legs: r.p2Legs, p1Sets: r.p1Sets, p2Sets: r.p2Sets }, shared);
     } catch (e) {
       if (!e.appCode) throw e;
       var p1 = ctx.table('Players').byKey[match.player1_id];

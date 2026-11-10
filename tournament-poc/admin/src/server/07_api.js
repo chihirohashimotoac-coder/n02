@@ -355,17 +355,21 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
         if (eventIds.indexOf(id) === -1) eventIds.push(id);
       });
       delete result.alsoPublish;
+      // 応答の詳細（eventDetail_）で使い回す、この後に変更のない内容から作り済みのもの。
+      // afterEventChange_ の表示は、対象の大会が 1 つで、その大会を変えなかったときだけ使う（他の大会の後処理で変わりうるため）
+      var reuse = {};
       eventIds.forEach(function (id) {
         // v1.0: 期制リーグの期の選手には会員 ID を付ける（選手の追加・CSV 取込など、どの操作で選手が増えても）
         if (ctx.table('Events').byKey[id]) ensureSeasonMembers_(ctx, id);
-        afterEventChange_(ctx, id);
+        var built = afterEventChange_(ctx, id);
+        if (built && eventIds.length === 1) reuse.built = built;
       });
       flushHistory_(ctx);
       // 公開データも書き込む前に組み立てる。大きすぎるときは何も保存せずに止める（保存してから気づくことがないように）
       var publications = {};
       eventIds.forEach(function (id) {
         try {
-          publications[id] = syncPublication_(ctx, id);
+          publications[id] = syncPublication_(ctx, id, id === result.eventId ? reuse : null);
         } catch (e) {
           if (e && e.appCode === 'TOO_LARGE') throw e;
           // 公開データを作る処理の思わぬ失敗では、操作そのものは保存する（結果の入力を止めない）。
@@ -378,7 +382,7 @@ function runMutation_(user, action, spec, payload, requestId, auth) {
       commitContext_(ctx);
       if (result.eventId) {
         result.publication = publications[result.eventId];
-        result.detail = eventDetail_(ctx, result.eventId);
+        result.detail = eventDetail_(ctx, result.eventId, reuse);
       }
       delete result.forceRepublish;
     }
